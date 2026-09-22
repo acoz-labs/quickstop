@@ -63,9 +63,9 @@ Manual refresh: `/claudit:refresh [domain|all]`. Status: `/claudit:status`.
 
 Start with [repository guidance](docs/repository.md) and the
 [shared SDLC](docs/operations/sdlc.md). Run `bin/ci` for local verification.
-The repository provides two small Claude Code shortcuts: `/smith <name>` to
-create a plugin and `/hone <name>` to review one. They follow the same issue,
-contributor PR and independent maintainer review workflow as other work.
+Plugin creation and review follow the standard issue, contributor PR and
+independent maintainer review workflow. Plugin-specific conventions and the
+review checklist live in the development guide.
 
 - [Plugin development](docs/plugin-development.md)
 - [Artifact delivery and recovery](docs/delivery.md)
