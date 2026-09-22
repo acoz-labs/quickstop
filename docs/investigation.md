@@ -56,3 +56,13 @@ Potential investigations, not approved new features or established defects:
 
 No runtime acceptance or feature roadmap is claimed by this maintenance work.
 Use these findings to shape the next bounded iteration with the owner.
+
+## Unified marketplace follow-up
+
+The owner subsequently assigned Quickstop a broader purpose: the acoz-labs
+unified marketplace for agentic plugins. Harness support is now explicit per
+plugin; cross-harness parity is optional. `catalog.json`, generated native
+indexes and adapter checks replace the earlier assumption that every package is
+a Claude Code plugin. Claudit remains Claude Code-only at its existing path and
+version. See [the current contract](marketplace.md). This establishes marketplace
+patterns, not new Claudit behavior or migration of other projects.

@@ -1,8 +1,9 @@
 # Quickstop repository
 
-Quickstop is a public Claude Code plugin marketplace maintained by acoz-labs.
-Its only shipped plugin is Claudit 3.0.0. Keep the marketplace at
-`.claude-plugin/marketplace.json` and distributable files under `plugins/<name>/`.
+Quickstop is the acoz-labs unified marketplace for agentic plugins. Claudit 3.0.0
+is currently the only plugin and supports Claude Code only. `catalog.json`
+declares supported targets; native package manifests own versions. Generated
+indexes and package layouts follow [the marketplace contract](marketplace.md).
 Plugin creation and review use the shared SDLC and development guide.
 
 `AGENTS.md` and `docs/operations/sdlc.md` define delivery authority and roles.
@@ -27,16 +28,18 @@ Without mise, install the pinned Python and run the same commands directly.
 The initial compatibility run also passed on Python 3.9.6; release evidence uses
 the pinned runtime, not the system default.
 
-`bin/ci` runs managed conformity, optional-plan validation, marketplace structure
+`bin/ci` runs managed conformity, optional-plan validation, catalog/adapter
 checks and regression tests. `--base` additionally rejects changed plugin bytes
 without a strictly higher stable version. Supply the actual pre-change commit;
 an unavailable base is an error, never a reason to skip validation. All distributed
-files, including README changes, count as bytes. Marketplace and plugin versions
-must agree; update displayed README versions when publishing.
+files, including README changes, count as bytes. Generated listings derive
+versions from the native manifests; separate target packages can release independently. Regenerate indexes with
+`bin/check-marketplace --write` after changing catalog or manifest metadata.
 
-Use the host's `claude plugin validate .` and
-`claude plugin validate ./plugins/claudit` when available. These supplement local
-checks and do not prove the audit's runtime behavior. Acceptance scenarios belong
+For a Claude target, use the host's `claude plugin validate .` and
+`claude plugin validate ./plugins/claudit` when available. Use the appropriate
+native discovery/validation for other declared harnesses. These supplement local
+checks and do not prove runtime behavior. Acceptance scenarios belong
 in [delivery](delivery.md). Inspect current host documentation for unfamiliar
 components instead of treating the lightweight local validator as a complete
 upstream schema implementation.
@@ -48,7 +51,11 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 
 ## Layout and tracking
 
-- `plugins/claudit/`: consumer skills, agents and their shared references.
+- `catalog.json`: ordered plugin catalog and explicit supported targets.
+- `plugins/`: self-contained packages; Claudit retains `plugins/claudit/`.
+- `.claude-plugin/` and `.agents/plugins/`: generated native marketplace indexes.
+- `docs/catalog.md`: generated support/version table.
+- `docs/pi-packages.md`: generated individual Pi install commands.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
