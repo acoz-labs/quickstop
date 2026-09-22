@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/writing-for-humans"
 TARGETS = ("claude-code", "codex", "pi")
-VERSIONS = {"claude-code": "0.1.1", "codex": "0.1.1", "pi": "0.1.2"}
+VERSIONS = {"claude-code": "0.1.2", "codex": "0.1.2", "pi": "0.1.2"}
 
 
 def json_file(path, value):
