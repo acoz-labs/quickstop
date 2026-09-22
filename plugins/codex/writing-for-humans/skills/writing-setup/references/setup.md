@@ -4,7 +4,7 @@
 
 After the accepted release is listed in Quickstop, add the repository marketplace with `codex plugin marketplace add https://github.com/acoz-labs/quickstop.git`, then run `codex plugin add writing-for-humans@quickstop`. Before publication, use a temporary marketplace pointing to the candidate in an isolated Codex home.
 
-Node.js 22 or later must be available as `node`. The portable plugin bundles SessionStart and SubagentStart command hooks. SessionStart covers startup, resume and compaction according to the host's lifecycle contract. Verify the installed version's actual behavior before relying on a mode.
+Node.js 22 or later must be available as `node`. The Codex compatibility package bundles SessionStart and SubagentStart command hooks. Codex CLI 0.155.1 discovers these hooks from .codex-plugin/plugin.json; in native fixtures the portable root manifest did not expose hooks, so this package uses the compatibility format. SessionStart covers startup, resume and compaction according to the host's lifecycle contract. Verify the installed version's actual behavior before relying on a mode.
 
 Installation does not trust hooks. Open `/hooks` in interactive Codex, inspect the bundled command definitions and complete native trust review. Changed definitions require renewed review. Never manufacture trust hashes or bypass review. Use `codex plugin list` and `/hooks` to distinguish installed, enabled and trusted states; then test a fictional writing task. A successful hook does not prove application.
 
