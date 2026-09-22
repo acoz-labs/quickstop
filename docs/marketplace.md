@@ -1,6 +1,6 @@
 # Unified marketplace contract
 
-Quickstop is one curated catalog with native distribution indexes. It does not
+Quickstop separates candidate authoring from accepted native distribution indexes. It does not
 translate arbitrary plugin behavior between harnesses. The `quickstop` identity
 stays stable. A plugin declares the targets it supports; omitted targets are
 unsupported, not an adoption backlog or a parity requirement.
@@ -14,7 +14,14 @@ nonempty `targets` map. Each target declares exactly `format`, `path` and
 mistakes cannot silently change support. The native manifest owns the package
 version; there is no global version forcing unrelated targets to release together.
 
-Current example:
+`releases.json` is the advertised-release lock. Each entry pins a plugin target to
+an immutable Git commit, package digest, manifest snapshot and provenance. Candidate
+packages in `catalog.json` are not advertised until an accepted entry exists.
+The historical Claudit entry preserves previously advertised bytes; its migration
+provenance does not claim a new acceptance run. New entries require independently
+authenticated SDLC acceptance and a reviewed publication change.
+
+Current candidate declaration example:
 
 ```json
 {
@@ -45,9 +52,11 @@ proof that a plugin's workflows make sense in that harness.
 | `codex` | `agent-plugin`: root `plugin.json` with Agent Plugins 1.0 schema; `codex-plugin`: `.codex-plugin/plugin.json` compatibility format | `.agents/plugins/marketplace.json` |
 | `pi` | `pi-package`: `package.json` with explicit `pi` resource paths | `docs/pi-packages.md` (individual native install commands) |
 
-`docs/catalog.md` is generated from the same input. All four outputs are checked
-byte-for-byte, including empty native indexes. Only explicitly declared targets
-appear in each native listing. The empty Codex index prevents Quickstop from
+`docs/catalog.md` and all native installation projections use the release lock.
+All four outputs are checked byte-for-byte, including empty native indexes.
+Only locked accepted targets (or the explicit historical Claudit migration)
+appear in native listings. Claude and Codex entries use commit-pinned
+`git-subdir` sources; editing candidate files does not change the advertised bytes. The empty Codex index prevents Quickstop from
 advertising Claudit through its Claude-compatible marketplace file.
 
 Use current [Claude marketplace documentation](https://code.claude.com/docs/en/plugin-marketplaces)
@@ -61,10 +70,12 @@ These adapter checks validate Quickstop's contract, not the complete evolving up
 
 Pi uses `pi install PACKAGE_SOURCE`, not either native marketplace JSON format.
 Quickstop generates a per-package command list and never writes `.pi/settings.json`
-or opts consumers into every package. From a cloned, verified revision, run the
-listed `pi install ./plugins/pi/NAME` command for the selected package. Local
-installs link the directory; preserve that checkout and use a fixed accepted
-revision for release use. The generated list currently has no entries.
+or opts consumers into every package. Follow the generated commands for the selected package: use a separate checkout
+at its accepted detached commit, verify its package digest, then install that
+local package. Local installs link the directory, so preserve the checkout and
+do not reuse it as a development worktree. Updating means installing the new
+accepted checkout; removing the package does not itself delete that checkout.
+The generated list has no entries until a Pi target is accepted.
 
 A Pi package declares `pi.extensions`, `pi.skills`, `pi.prompts` and/or `pi.themes`
 as arrays of existing `./`-relative resources in `package.json`. Quickstop
@@ -126,8 +137,9 @@ version; downgrades fail. Separate target packages may version independently.
 If targets share one root, changes to that distributed root require every affected
 target's version to advance. Moving identical bytes alone does not require a bump.
 Updating marketplace descriptions or acceptance docs outside the package does not
-change plugin bytes. Removed targets disappear from the generated native listing;
-review their consumer migration/recovery impact rather than silently claiming parity.
+change plugin bytes. Removing a candidate declaration does not silently revoke a retained advertised
+release. Retire or restore advertised pointers explicitly in the release lock,
+with independent review of consumer migration and recovery impact.
 
 ## Add a harness
 
@@ -138,7 +150,7 @@ the generated catalog columns and delivery criteria as needed. Demonstrate actua
 native discovery with an isolated host setup before advertising a real package.
 Do not add a generic pass-through format or infer compatibility from filenames.
 
-External repositories/registries are not yet catalog source types. Add pinned
-source verification and same-byte acceptance as a bounded adapter change before
-listing externally maintained plugins. This task does not import Mandalore or
+Pinned native sources currently select packages from this repository.
+Externally maintained repositories and registries still require a bounded adapter
+change with source verification and same-byte acceptance. This task does not import Mandalore or
 move any other project's source or publication authority into Quickstop.
