@@ -8,7 +8,7 @@ The extension appends the bundled core at before_agent_start, preserving the cur
 
 Use `pi list` to inspect the installed package and the native resource/settings interface to verify its extension and skills are enabled. Start a fresh session and test a fictional writing task. Installation or extension discovery alone does not prove application. Pi's native core does not define a general independent-subagent facility; third-party orchestration must be verified separately and is not implied by main-session acceptance.
 
-For an upgrade, follow the Pi guide to a new, separate detached checkout of the accepted revision and install that package path. Updating the old local path does not select the newly accepted artifact. Disable the extension through native resource settings, or remove the exact installed source with `pi remove SOURCE` using `-l` for a project installation. Start a fresh session to verify removal. No global instruction copy needs cleanup.
+For an upgrade, follow the Pi guide to a new, separate detached checkout of the accepted revision. Run `pi remove OLD_SOURCE` for the previous installed path, then `pi install NEW_SOURCE` for the verified new path; use `-l` for both commands when replacing a project installation. Keep the old verified checkout available for rollback. Use `pi list` to confirm only the intended version remains registered at that scope, then verify activation in a fresh session. Updating the old local path does not select the newly accepted artifact. Disable the extension through native resource settings, or remove the exact installed source with `pi remove SOURCE` using `-l` for a project installation. Start a fresh session to verify removal. No global instruction copy needs cleanup.
 
 ## Behavior and boundaries
 
