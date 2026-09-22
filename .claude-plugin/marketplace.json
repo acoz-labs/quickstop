@@ -10,7 +10,12 @@
       "name": "claudit",
       "version": "3.0.0",
       "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task — building a skill, configuring an MCP, authoring CLAUDE.md — can read it instead of re-fetching docs.",
-      "source": "./plugins/claudit",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/acoz-labs/quickstop.git",
+        "path": "plugins/claudit",
+        "sha": "b7370388e26ccac0ebf2c48a6b86942eb7259a9d"
+      },
       "keywords": [
         "audit",
         "configuration",

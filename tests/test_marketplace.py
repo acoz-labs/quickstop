@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 loader = importlib.machinery.SourceFileLoader('marketplace', str(Path(__file__).resolve().parents[1] / 'bin/check-marketplace'))
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -14,6 +15,10 @@ loader.exec_module(module)
 
 class MarketplaceTests(unittest.TestCase):
     def setUp(self):
+        # These cases exercise authoring package validation; publication is tested separately.
+        patcher = patch.object(module, "load_releases", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

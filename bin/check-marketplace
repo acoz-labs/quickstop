@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the Quickstop catalog, target packages and generated native indexes."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -229,14 +230,13 @@ def load_catalog(root):
     return catalog, packages
 
 
-def projections(catalog, packages):
+def projections(catalog, packages, releases=None):
     claude, codex = [], []
-    pi_lines = ['# Pi packages', '', 'Generated from `catalog.json`; do not edit by hand.', '',
-                'Clone Quickstop and run the listed command from its root to install an individual',
-                'package. Pin and verify the accepted repository revision before installation.',
-                'Pi links local packages, so keep the checkout available. These commands do not',
-                'install the whole marketplace or change settings until you run them.', '']
-    rows = ['# Plugin catalog', '', 'Generated from `catalog.json` and native package manifests. Do not edit by hand.', '',
+    pi_lines = ['# Pi packages', '', 'Generated from `catalog.json` and `releases.json`; do not edit by hand.', '',
+                'Only accepted Pi targets receive installation commands below.',
+                'Pi links local packages, so keep each verified version checkout available.',
+                'Commands change settings only when you run them; no package is auto-installed.', '']
+    rows = ['# Plugin catalog', '', 'Generated from `catalog.json`, `releases.json` and native manifests. Do not edit by hand.', '',
             'Support is explicit per plugin; an omitted harness is not supported. Versions are per package.', '',
             '| Plugin | Purpose | Claude Code | Codex | Pi |', '| --- | --- | --- | --- | --- |']
     for plugin in catalog['plugins']:
@@ -248,16 +248,27 @@ def projections(catalog, packages):
                 cells.append('—')
                 continue
             target, manifest = pair
+            released = releases.get((name, harness)) if releases is not None else None
+            if releases is not None and released is None:
+                cells.append('Not released')
+                continue
+            if released:
+                target, manifest = released['target'], released['manifest']
             cells.append(f'[{manifest["version"]}](../{target["acceptance"]})')
             if harness == 'claude-code':
                 entry = {'name': name, 'version': manifest['version'], 'description': plugin['description'], 'source': './' + target['path']}
                 if manifest.get('keywords'):
                     entry['keywords'] = manifest['keywords']
+                if released:
+                    entry['source'] = {'source': 'git-subdir', 'url': REPOSITORY_URL, 'path': target['path'], 'sha': released['commit']}
                 claude.append(entry)
             elif harness == 'codex':
-                codex.append({'name': name, 'source': {'source': 'local', 'path': './' + target['path']},
+                codex.append({'name': name, 'source': ({'source': 'git-subdir', 'url': REPOSITORY_URL, 'path': './' + target['path'], 'sha': released['commit']} if released else {'source': 'local', 'path': './' + target['path']}),
                               'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}, 'category': plugin['category']})
             else:
+                if released:
+                    pi_lines.extend([f'## {name} {manifest["version"]}', '', f'Accepted commit: `{released["commit"]}`', f'Package SHA-256: `{released["sha256"]}`', '', f'Acceptance: [procedure](../{target["acceptance"]})', '', 'Use a dedicated checkout for this version; keep it available while installed.', 'The verification command refuses a changed package. Do not pull or edit this checkout.', '', '```sh', f'git clone --no-checkout {REPOSITORY_URL} {name}-{released["commit"][:12]}', f'cd {name}-{released["commit"][:12]}', f'git checkout --detach {released["commit"]}', f'python3 bin/marketplace-release verify-package --path {shlex.quote(target["path"])} --sha256 {released["sha256"]}', f'pi install {shlex.quote("./" + target["path"])}', '```', '', 'For an update, remove the old local source using `pi remove` and install the new', 'accepted version from its separate verified checkout. To recover, reinstall the', 'previous verified checkout. Existing local installs do not move automatically.', ''])
+                    continue
                 pi_lines.extend([f'## {name} {manifest["version"]}', '',
                                  f'Acceptance: [procedure](../{target["acceptance"]})', '',
                                  '```sh', f'pi install {shlex.quote("./" + target["path"])}', '```', ''])
@@ -267,6 +278,66 @@ def projections(catalog, packages):
     json_text = lambda value: json.dumps(value, indent=2, ensure_ascii=False) + '\n'
     return dict(zip(OUTPUTS, [json_text({'name': catalog['name'], 'owner': {'name': 'acoz-labs', 'url': 'https://github.com/acoz-labs'}, 'description': catalog['description'], 'plugins': claude}),
                               json_text({'name': catalog['name'], 'interface': {'displayName': catalog['display_name']}, 'plugins': codex}), '\n'.join(rows) + '\n', '\n'.join(pi_lines) + '\n']))
+
+
+REPOSITORY_URL = 'https://github.com/acoz-labs/quickstop.git'
+
+
+def package_digest(root, path, commit=None):
+    """Hash sorted relative names, executable modes and file SHA-256s, not tar metadata."""
+    records = []
+    if commit:
+        entries = git(root, 'ls-tree', '-r', '-z', commit, '--', path).split('\0')
+        for entry in filter(None, entries):
+            metadata, name = entry.split('\t', 1)
+            mode, kind, oid = metadata.split()
+            require(kind == 'blob' and mode in ('100644', '100755'), 'artifact contains unsupported file type')
+            content = subprocess.run(['git', '-C', str(root), 'cat-file', 'blob', oid], check=True, capture_output=True).stdout
+            records.append([name[len(path) + 1:], mode, hashlib.sha256(content).hexdigest()])
+    else:
+        package = safe_path(root, path)
+        for item in package.rglob('*'):
+            require(not item.is_symlink(), 'artifact contains symlink')
+            if item.is_file():
+                records.append([item.relative_to(package).as_posix(), '100755' if item.stat().st_mode & 0o111 else '100644', hashlib.sha256(item.read_bytes()).hexdigest()])
+    require(records, 'empty artifact')
+    return hashlib.sha256(json.dumps(sorted(records), separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
+
+
+def load_releases(root, packages):
+    lock = read_json(root / 'releases.json')
+    fields(lock, ('schema', 'releases'), 'release lock')
+    require(lock['schema'] == 1 and isinstance(lock['releases'], list), 'unsupported release lock')
+    releases = {}
+    for record in lock['releases']:
+        fields(record, ('name', 'harness', 'commit', 'sha256', 'target', 'manifest', 'provenance'), 'release')
+        key = record['name'], record['harness']
+        require(key in packages and key not in releases, 'release must identify one registered target')
+        require(re.fullmatch('[0-9a-f]{40}', record['commit']) is not None, 'release requires full commit')
+        require(re.fullmatch('[0-9a-f]{64}', record['sha256']) is not None, 'release requires SHA-256')
+        target = record['target']
+        fields(target, ('format', 'path', 'acceptance'), 'released target')
+        require(target['format'] in FORMATS[key[1]], 'invalid released format')
+        safe_path(root, target['path'])
+        require(target['path'].startswith('plugins/'), 'released package must be under plugins/')
+        require(package_digest(root, target['path'], record['commit']) == record['sha256'], 'released package digest mismatch')
+        snapshot = decode(git(root, 'show', f'{record["commit"]}:catalog.json'))
+        declared = {(p['name'], h): t for p in snapshot['plugins'] for h, t in p['targets'].items()}
+        require(declared.get(key) == target, 'released target differs from candidate catalog')
+        actual = decode(git(root, 'show', f'{record["commit"]}:{target["path"]}/{FORMATS[key[1]][target["format"]]}'))
+        version(actual.get('version'))
+        require(actual == record['manifest'] and actual['name'] == key[0], 'released manifest mismatch')
+        provenance = record['provenance']
+        require(isinstance(provenance, dict), 'release provenance required')
+        if provenance.get('kind') == 'legacy-preserved':
+            require(key == ('claudit', 'claude-code') and record['commit'] == 'b7370388e26ccac0ebf2c48a6b86942eb7259a9d' and actual['version'] == '3.0.0', 'legacy exception only preserves existing Claudit')
+        else:
+            fields(provenance, ('kind', 'issue', 'artifact', 'acceptance'), 'acceptance provenance')
+            require(provenance['kind'] == 'sdlc-accepted' and type(provenance['issue']) is int and provenance['issue'] > 0, 'independent acceptance required')
+            require(re.fullmatch('sha256:[0-9a-f]{64}', provenance['artifact']) is not None, 'immutable accepted archive required')
+            require(isinstance(provenance['acceptance'], str) and re.fullmatch(r'https://github.com/acoz-labs/quickstop/issues/' + str(provenance['issue']) + r'#issuecomment-[0-9]+', provenance['acceptance']), 'authenticated acceptance receipt link required')
+        releases[key] = record
+    return releases
 
 
 def fingerprint(root, path, base=None):
@@ -303,7 +374,8 @@ def validate(root, base=None, write=False):
     catalog, packages = load_catalog(root)
     if base:
         check_versions(root, packages, base)
-    outputs = projections(catalog, packages)
+    releases = load_releases(root, packages)
+    outputs = projections(catalog, packages, releases)
     paths = {name: safe_path(root, name) for name in outputs}
     if write:
         for name, path in paths.items():

@@ -1,6 +1,6 @@
 # Plugin catalog
 
-Generated from `catalog.json` and native package manifests. Do not edit by hand.
+Generated from `catalog.json`, `releases.json` and native manifests. Do not edit by hand.
 
 Support is explicit per plugin; an omitted harness is not supported. Versions are per package.
 

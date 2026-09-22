@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Prepare an accepted marketplace pointer after the existing SDLC release gate."""
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+loader = importlib.machinery.SourceFileLoader('marketplace', str(Path(__file__).with_name('check-marketplace')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+m = importlib.util.module_from_spec(spec)
+loader.exec_module(m)
+
+
+def promote(root, name, harness, commit, issue, artifact, actor):
+    # This is the existing independently authenticated acceptance gate, not an
+    # assertion supplied in a local JSON file. Publication still uses code review.
+    result = subprocess.run([str(root / 'bin/sdlc-release'), 'gate', '--repo', 'acoz-labs/quickstop', '--issue', str(issue), '--sha', commit, '--artifact', artifact, '--expected-actor', actor], capture_output=True, text=True)
+    m.require(result.returncode == 0, 'independent release gate rejected promotion: ' + result.stderr.strip())
+    evidence = json.loads(result.stdout)
+    m.require(evidence['candidate']['sha'] == commit and evidence['candidate']['artifact'] == artifact, 'gate candidate mismatch')
+    snapshot = m.decode(m.git(root, 'show', f'{commit}:catalog.json'))
+    plugin = next(p for p in snapshot['plugins'] if p['name'] == name)
+    target = plugin['targets'][harness]
+    manifest = m.decode(m.git(root, 'show', f'{commit}:{target["path"]}/{m.FORMATS[harness][target["format"]]}'))
+    record = {'name': name, 'harness': harness, 'commit': commit, 'sha256': m.package_digest(root, target['path'], commit), 'target': target, 'manifest': manifest,
+              'provenance': {'kind': 'sdlc-accepted', 'issue': issue, 'artifact': artifact, 'acceptance': evidence['acceptance']}}
+    lock = m.read_json(root / 'releases.json')
+    before = json.loads(json.dumps(lock))
+    lock['releases'] = [r for r in lock['releases'] if (r['name'], r['harness']) != (name, harness)] + [record]
+    lock['releases'].sort(key=lambda r: (r['name'], r['harness']))
+    if lock == before:
+        m.validate(root, write=True)
+        print('Already points at this accepted artifact; no publication repeated.')
+        return
+    # Validate the proposed lock and projections before replacing the live file.
+    import tempfile
+    import shutil
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp) / 'repo'
+        shutil.copytree(root, staging, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+        (staging / '.git').write_text('gitdir: ' + m.git(root, 'rev-parse', '--absolute-git-dir').strip() + '\n')
+        (staging / 'releases.json').write_text(json.dumps(lock, indent=2) + '\n')
+        m.validate(staging, write=True)
+        for path in ['releases.json', *m.OUTPUTS]:
+            destination = root / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((staging / path).read_bytes())
+    print('Prepared accepted pointer and native indexes. Publish through an independently reviewed PR.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
+    sub = parser.add_subparsers(dest='action', required=True)
+    verify = sub.add_parser('verify-package')
+    verify.add_argument('--path', required=True)
+    verify.add_argument('--sha256', required=True)
+    p = sub.add_parser('promote')
+    for flag in ('name', 'harness', 'commit', 'artifact', 'expected-actor'):
+        p.add_argument('--' + flag, required=True)
+    p.add_argument('--issue', required=True, type=int)
+    args = parser.parse_args()
+    try:
+        if args.action == 'verify-package':
+            m.require(m.package_digest(args.root, args.path) == args.sha256, 'package checksum mismatch')
+            print('Package checksum verified.')
+        else:
+            promote(args.root, args.name, args.harness, args.commit, args.issue, args.artifact, args.expected_actor)
+    except (m.Invalid, OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as exc:
+        print(f'Marketplace release failed: {exc}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
