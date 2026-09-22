@@ -5,5 +5,4 @@ python3 -c 'import pathlib, platform; expected = pathlib.Path(".python-version")
 bin/sdlc check
 bin/validate-solution-plans
 bin/check-marketplace
-bin/generate-writing
 python3 -m unittest discover -s tests -p 'test_*.py'
