@@ -21,17 +21,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/hook.mjs\" UserPromptSubmit",
-            "timeout": 5
-          }
-        ]
-      }
     ]
   }
 }
