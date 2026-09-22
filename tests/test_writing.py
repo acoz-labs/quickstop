@@ -68,6 +68,10 @@ class WritingAdapters(unittest.TestCase):
                 package = Path(tmp)
                 build.generate(target, package)
                 hooks = json.loads((package / 'hooks/hooks.json').read_text())['hooks']
+                if target == 'codex':
+                    portable = json.loads((package / 'plugin.json').read_text())
+                    declared = portable['extensions']['com.openai']['hooks']
+                    self.assertTrue((package / declared).is_file())
                 self.assertEqual(set(hooks), {'SessionStart', 'SubagentStart'} |
                                  ({'UserPromptSubmit'} if target == 'claude-code' else set()))
                 for event, groups in hooks.items():
