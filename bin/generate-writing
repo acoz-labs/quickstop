@@ -46,7 +46,7 @@ def generate(target, destination):
         else:
             json_file(destination / "plugin.json", {
                 "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-                **manifest})
+                **manifest, "extensions": {"com.openai": {"hooks": "./hooks/hooks.json"}}})
         variable = "CLAUDE_PLUGIN_ROOT" if target == "claude-code" else "PLUGIN_ROOT"
         hooks = {}
         for event in events:
