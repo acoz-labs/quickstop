@@ -1,115 +1,317 @@
 #!/usr/bin/env python3
-"""Validate Quickstop's local marketplace contract; no network or host writes."""
+"""Check the Quickstop catalog, target packages and generated native indexes."""
 import argparse
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
+
+FORMATS = {'claude-code': {'claude-plugin': '.claude-plugin/plugin.json'},
+           'codex': {'codex-plugin': '.codex-plugin/plugin.json',
+                     'agent-plugin': 'plugin.json'},
+           'pi': {'pi-package': 'package.json'}}
+OUTPUTS = ('.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'docs/catalog.md', 'docs/pi-packages.md')
 
 
 class Invalid(ValueError):
     pass
 
 
-def read_json(path):
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, ValueError) as exc:
-        raise Invalid(f'{path.name}: invalid or missing JSON') from exc
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise Invalid(f'duplicate JSON key: {key}')
+        result[key] = value
+    return result
+
+
+def decode(text):
+    value = json.loads(text, object_pairs_hook=unique_object)
     if not isinstance(value, dict):
-        raise Invalid(f'{path.name}: expected an object')
+        raise Invalid('expected a JSON object')
     return value
 
 
+def read_json(path):
+    try:
+        return decode(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise Invalid(f'{path.name}: invalid or missing JSON: {exc}') from exc
+
+
+def require(value, message):
+    if not value:
+        raise Invalid(message)
+
+
+def fields(value, expected, label):
+    require(isinstance(value, dict) and set(value) == set(expected), f'{label}: expected fields {expected}')
+
+
+def line(value):
+    return isinstance(value, str) and bool(value.strip()) and '\n' not in value and '\r' not in value
+
+
 def version(value):
-    # Quickstop currently publishes stable releases only.
-    if not isinstance(value, str) or not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', value):
-        raise Invalid(f'invalid stable version: {value!r}')
+    # Released Quickstop packages currently use stable SemVer.
+    require(isinstance(value, str) and re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', value), f'invalid stable version: {value!r}')
     return tuple(map(int, value.split('.')))
+
+
+def safe_path(root, value):
+    require(isinstance(value, str) and value and not value.startswith('/'), 'expected relative path')
+    parts = value.split('/')
+    require(all(part not in ('', '.', '..') for part in parts) and '\\' not in value, f'unsafe path: {value}')
+    path = root
+    for part in parts:
+        path = path / part
+        require(not path.is_symlink(), f'symlink refused: {value}')
+    require(path.resolve().is_relative_to(root.resolve()), f'path escapes root: {value}')
+    return path
+
+
+def component_path(package, value):
+    require(isinstance(value, str) and value.startswith('./'), 'component paths must start with ./')
+    path = safe_path(package, value[2:].rstrip('/'))
+    require(path.exists(), f'missing component: {value}')
+    return path
 
 
 def git(root, *args):
     result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True)
-    if result.returncode:
-        raise Invalid('Git comparison failed; supply an existing commit with --base')
+    require(result.returncode == 0, 'Git comparison failed; supply an existing commit with --base')
     return result.stdout
 
 
-def validate(root, base=None):
-    root = root.resolve()
-    market = read_json(root / '.claude-plugin/marketplace.json')
-    if market.get('name') != 'quickstop' or not market.get('owner', {}).get('name'):
-        raise Invalid('marketplace name and owner are required')
-    entries = market.get('plugins')
-    if not isinstance(entries, list) or not entries:
-        raise Invalid('marketplace must register at least one plugin')
-    names = set()
-    manifests = {}
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise Invalid('plugin entry must be an object')
-        name = entry.get('name', '')
-        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9]*(-[a-z0-9]+)*', name) or name in names:
-            raise Invalid('plugin names must be unique lowercase kebab-case')
+def validate_resources(package, manifest):
+    for key in ('skills', 'agents', 'hooks', 'mcpServers', 'apps'):
+        value = manifest.get(key)
+        if isinstance(value, str):
+            component_path(package, value)
+        elif isinstance(value, list):
+            for item in value:
+                component_path(package, item)
+    interface = manifest.get('interface', {})
+    require(isinstance(interface, dict), 'interface must be an object')
+    for key in ('composerIcon', 'logo', 'logoDark'):
+        if key in interface:
+            component_path(package, interface[key])
+    if 'screenshots' in interface:
+        require(isinstance(interface['screenshots'], list), 'screenshots must be a list')
+        for value in interface['screenshots']:
+            component_path(package, value)
+
+
+def package_manifest(root, plugin, harness, target):
+    fields(target, ('format', 'path', 'acceptance'), 'target')
+    require(harness in FORMATS and target['format'] in FORMATS[harness], f'unsupported harness/format: {harness}/{target["format"]}')
+    require(isinstance(target['path'], str) and target['path'].startswith('plugins/'), 'packages must live under plugins/')
+    package = safe_path(root, target['path'])
+    require(package.is_dir(), f'missing package: {target["path"]}')
+    for path in package.rglob('*'):
+        require(not path.is_symlink(), f'package symlink refused: {path.name}')
+    acceptance = safe_path(root, target['acceptance'])
+    require(acceptance.is_file() and acceptance.suffix == '.md' and acceptance.read_text().strip(), 'target needs a nonempty Markdown acceptance procedure')
+    manifest = read_json(package / FORMATS[harness][target['format']])
+    require(manifest.get('name') == plugin['name'], f'{plugin["name"]}: manifest name mismatch')
+    version(manifest.get('version'))
+    require(line(manifest.get('description')), 'manifest needs a description')
+    require((package / 'README.md').is_file(), 'package needs README.md')
+    if manifest.get('license'):
+        require((package / 'LICENSE').is_file(), 'declared license needs LICENSE')
+    if target['format'] == 'agent-plugin':
+        require(manifest.get('$schema') == 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'portable package needs Agent Plugins 1.0 schema')
+    if target['format'] == 'pi-package':
+        resources = manifest.get('pi')
+        require(isinstance(resources, dict), 'Pi package needs an explicit pi resource manifest')
+        supported = ('extensions', 'skills', 'prompts', 'themes')
+        require(any(resources.get(key) for key in supported), 'Pi package must declare resources')
+        for key in supported:
+            if key not in resources:
+                continue
+            require(isinstance(resources[key], list), f'Pi {key} must be a list')
+            for value in resources[key]:
+                require(isinstance(value, str) and not any(c in value for c in '*?[]!{}'), 'Quickstop Pi resources require explicit paths, not globs')
+                component_path(package, value)
+    # Validate declared file resources without claiming the complete host schema.
+    validate_resources(package, manifest)
+    extension = manifest.get('extensions', {}).get('com.openai', {})
+    require(isinstance(extension, dict), 'OpenAI extension must be an object')
+    validate_resources(package, extension)
+    overlay = package / '.codex-plugin/plugin.json'
+    if target['format'] == 'agent-plugin' and overlay.is_file():
+        compatibility = read_json(overlay)
+        for key in ('name', 'version'):
+            if key in compatibility:
+                require(compatibility[key] == manifest[key], f'portable/compatibility {key} mismatch')
+        validate_resources(package, compatibility)
+    skill_roots = {package / 'skills'}
+    if isinstance(manifest.get('skills'), str):
+        skill_roots.add(component_path(package, manifest['skills']))
+    if target['format'] == 'pi-package':
+        for value in manifest['pi'].get('skills', []):
+            skill_roots.add(component_path(package, value))
+    documents = list((package / 'agents').rglob('*.md'))
+    for directory in skill_roots:
+        if harness == 'pi':
+            if directory.is_file():
+                documents.append(directory)
+            elif directory.is_dir():
+                documents.extend(directory.rglob('SKILL.md'))
+                documents.extend(directory.glob('*.md'))
+        elif directory.is_dir():
+            for skill in directory.iterdir():
+                if skill.is_dir():
+                    require((skill / 'SKILL.md').is_file(), f'{skill.name}: missing SKILL.md')
+            documents.extend(directory.glob('*/SKILL.md'))
+    for document in documents:
+        content = document.read_text()
+        require(content.startswith('---\n') and '\n---\n' in content[4:], f'{document.name}: missing frontmatter')
+        header = content.split('\n---\n', 1)[0]
+        for key in ('name', 'description'):
+            require(re.search(rf'^{key}:\s*\S', header, re.M), f'{document.name}: missing {key}')
+    return manifest
+
+
+def load_catalog(root):
+    catalog = read_json(root / 'catalog.json')
+    fields(catalog, ('schema', 'name', 'display_name', 'description', 'plugins'), 'catalog')
+    require(catalog['schema'] == 1 and type(catalog['schema']) is int, 'unsupported catalog schema')
+    require(catalog['name'] == 'quickstop', 'marketplace identity must stay quickstop')
+    require(line(catalog['display_name']) and line(catalog['description']), 'catalog presentation required')
+    require(isinstance(catalog['plugins'], list), 'plugins must be a list')
+    names, packages = set(), {}
+    for plugin in catalog['plugins']:
+        fields(plugin, ('name', 'description', 'category', 'targets'), 'plugin')
+        name = plugin['name']
+        require(isinstance(name, str) and re.fullmatch(r'[a-z][a-z0-9]*(-[a-z0-9]+)*', name) and name not in names, 'plugin names must be unique lowercase kebab-case')
         names.add(name)
-        if entry.get('source') != f'./plugins/{name}':
-            raise Invalid(f'{name}: source must be ./plugins/{name}')
-        directory = root / 'plugins' / name
-        if directory.is_symlink() or not directory.resolve().is_relative_to(root):
-            raise Invalid(f'{name}: plugin directory must remain inside this checkout')
-        if any(p.is_symlink() for p in directory.rglob('*')):
-            raise Invalid(f'{name}: symlinks require an explicit packaging design')
-        manifest = read_json(directory / '.claude-plugin/plugin.json')
-        manifests[name] = manifest
-        if manifest.get('name') != name or manifest.get('version') != entry.get('version'):
-            raise Invalid(f'{name}: manifest and marketplace name/version differ')
-        version(manifest.get('version'))
-        if not manifest.get('description') or not (directory / 'README.md').is_file():
-            raise Invalid(f'{name}: description and README are required')
-        if manifest.get('license') and not (directory / 'LICENSE').is_file():
-            raise Invalid(f'{name}: declared license needs its LICENSE file')
-        for skill in (directory / 'skills').glob('*'):
-            if skill.is_dir() and not (skill / 'SKILL.md').is_file():
-                raise Invalid(f'{name}: skill {skill.name} has no SKILL.md')
-        for document in list((directory / 'skills').glob('*/SKILL.md')) + list((directory / 'agents').rglob('*.md')):
-            content = document.read_text()
-            if not content.startswith('---\n') or '\n---\n' not in content[4:]:
-                raise Invalid(f'{document.name}: missing frontmatter')
-            header = content.split('\n---\n', 1)[0]
-            for field in ('name', 'description'):
-                if not re.search(rf'^{field}:\s*\S', header, re.M):
-                    raise Invalid(f'{document.name}: missing {field}')
-    directories = {p.name for p in (root / 'plugins').iterdir() if p.is_dir()}
-    if directories != names:
-        raise Invalid('plugin directories and marketplace registrations differ')
+        require(line(plugin['description']) and line(plugin['category']), 'plugin description/category required')
+        require(isinstance(plugin['targets'], dict) and plugin['targets'], 'declare at least one supported target')
+        for harness, target in plugin['targets'].items():
+            manifest = package_manifest(root, plugin, harness, target)
+            packages[name, harness] = (target, manifest)
+    roots = {target['path'] for target, _ in packages.values()}
+    for left in roots:
+        for right in roots:
+            require(left == right or not right.startswith(left + '/'), 'package roots must not overlap')
+    # Every native manifest in the distribution tree must belong to a declared target.
+    expected = {target['path'] + '/' + FORMATS[harness][target['format']]
+                for (_, harness), (target, _) in packages.items()}
+    for target, _ in packages.values():
+        if target['format'] == 'agent-plugin':
+            expected.add(target['path'] + '/.codex-plugin/plugin.json')
+    for path in (root / 'plugins').rglob('*'):
+        require(not path.is_symlink(), 'symlink in distribution tree')
+        if path.is_file():
+            rel = path.relative_to(root).as_posix()
+            require(any(rel.startswith(p + '/') for p in roots), f'unregistered distribution file: {rel}')
+            if (path.name == 'plugin.json' and (path.parent.name in ('.claude-plugin', '.codex-plugin') or '$schema' in read_json(path))) or (path.name == 'package.json' and 'pi' in read_json(path)):
+                require(rel in expected, f'undeclared native manifest: {rel}')
+    return catalog, packages
+
+
+def projections(catalog, packages):
+    claude, codex = [], []
+    pi_lines = ['# Pi packages', '', 'Generated from `catalog.json`; do not edit by hand.', '',
+                'Clone Quickstop and run the listed command from its root to install an individual',
+                'package. Pin and verify the accepted repository revision before installation.',
+                'Pi links local packages, so keep the checkout available. These commands do not',
+                'install the whole marketplace or change settings until you run them.', '']
+    rows = ['# Plugin catalog', '', 'Generated from `catalog.json` and native package manifests. Do not edit by hand.', '',
+            'Support is explicit per plugin; an omitted harness is not supported. Versions are per package.', '',
+            '| Plugin | Purpose | Claude Code | Codex | Pi |', '| --- | --- | --- | --- | --- |']
+    for plugin in catalog['plugins']:
+        name = plugin['name']
+        cells = []
+        for harness in FORMATS:
+            pair = packages.get((name, harness))
+            if not pair:
+                cells.append('—')
+                continue
+            target, manifest = pair
+            cells.append(f'[{manifest["version"]}](../{target["acceptance"]})')
+            if harness == 'claude-code':
+                entry = {'name': name, 'version': manifest['version'], 'description': plugin['description'], 'source': './' + target['path']}
+                if manifest.get('keywords'):
+                    entry['keywords'] = manifest['keywords']
+                claude.append(entry)
+            elif harness == 'codex':
+                codex.append({'name': name, 'source': {'source': 'local', 'path': './' + target['path']},
+                              'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}, 'category': plugin['category']})
+            else:
+                pi_lines.extend([f'## {name} {manifest["version"]}', '',
+                                 f'Acceptance: [procedure](../{target["acceptance"]})', '',
+                                 '```sh', f'pi install {shlex.quote("./" + target["path"])}', '```', ''])
+        rows.append('| ' + ' | '.join([name, plugin['description'].replace('|', '\\|'), *cells]) + ' |')
+    if not any(harness == 'pi' for _, harness in packages):
+        pi_lines.append('No plugins currently declare Pi support. Claudit is Claude Code-only.')
+    json_text = lambda value: json.dumps(value, indent=2, ensure_ascii=False) + '\n'
+    return dict(zip(OUTPUTS, [json_text({'name': catalog['name'], 'owner': {'name': 'acoz-labs', 'url': 'https://github.com/acoz-labs'}, 'description': catalog['description'], 'plugins': claude}),
+                              json_text({'name': catalog['name'], 'interface': {'displayName': catalog['display_name']}, 'plugins': codex}), '\n'.join(rows) + '\n', '\n'.join(pi_lines) + '\n']))
+
+
+def fingerprint(root, path, base=None):
     if base:
-        base = git(root, 'rev-parse', '--verify', f'{base}^{{commit}}').strip()
-        previous = json.loads(git(root, 'show', f'{base}:.claude-plugin/marketplace.json'))
-        old_names = {p['name'] for p in previous['plugins']}
-        changed = git(root, 'diff', '--no-renames', '--name-only', '-z', base, '--', 'plugins/').split('\0')
-        changed_names = {p.split('/')[1] for p in changed if p and len(p.split('/')) > 2}
-        # Include newly created, untracked payloads in developer checks.
-        untracked = git(root, 'ls-files', '--others', '--exclude-standard', '-z', '--', 'plugins/').split('\0')
-        changed_names.update(p.split('/')[1] for p in untracked if p and len(p.split('/')) > 2)
-        for name in changed_names & names & old_names:
-            old = json.loads(git(root, 'show', f'{base}:plugins/{name}/.claude-plugin/plugin.json'))
-            if version(manifests[name]['version']) <= version(old['version']):
-                raise Invalid(f'{name}: changed distributed files require a higher version')
-    return len(names)
+        names = git(root, 'ls-tree', '-r', '--name-only', '-z', base, '--', path).split('\0')
+        return {name[len(path)+1:]: git(root, 'rev-parse', f'{base}:{name}').strip() for name in names if name}
+    package = safe_path(root, path)
+    return {p.relative_to(package).as_posix(): git(root, 'hash-object', str(p)).strip()
+            for p in package.rglob('*') if p.is_file()}
+
+
+def check_versions(root, packages, base):
+    base = git(root, 'rev-parse', '--verify', f'{base}^{{commit}}').strip()
+    if git(root, 'ls-tree', '--name-only', base, '--', 'catalog.json').strip():
+        previous = decode(git(root, 'show', f'{base}:catalog.json'))
+        old_targets = {(p['name'], h): t for p in previous['plugins'] for h, t in p['targets'].items()}
+    else:
+        # Explicit migration from the former Claude-only marketplace, never a Git-error fallback.
+        previous = decode(git(root, 'show', f'{base}:.claude-plugin/marketplace.json'))
+        old_targets = {(p['name'], 'claude-code'): {'format': 'claude-plugin', 'path': p['source'].removeprefix('./')} for p in previous['plugins']}
+    for key, (target, manifest) in packages.items():
+        if key not in old_targets:
+            continue
+        old = old_targets[key]
+        old_manifest = decode(git(root, 'show', f'{base}:{old["path"]}/{FORMATS[key[1]][old["format"]]}'))
+        before, after = version(old_manifest['version']), version(manifest['version'])
+        require(after >= before, f'{key}: version downgrade')
+        if fingerprint(root, old['path'], base) != fingerprint(root, target['path']):
+            require(after > before, f'{key}: changed distributed files require a higher version')
+
+
+def validate(root, base=None, write=False):
+    root = root.resolve()
+    catalog, packages = load_catalog(root)
+    if base:
+        check_versions(root, packages, base)
+    outputs = projections(catalog, packages)
+    paths = {name: safe_path(root, name) for name in outputs}
+    if write:
+        for name, path in paths.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(outputs[name])
+    else:
+        for name, path in paths.items():
+            require(path.is_file() and path.read_text() == outputs[name], f'generated index drift: {name}; run bin/check-marketplace --write')
+    return len(catalog['plugins'])
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent.parent)
-    parser.add_argument('--base', help='known pre-change commit; checks all distributed bytes, including README')
+    parser.add_argument('--base', help='known pre-change commit; compare each declared package independently')
+    parser.add_argument('--write', action='store_true', help='regenerate native indexes and catalog table after validation')
     args = parser.parse_args()
     try:
-        count = validate(args.root, args.base)
+        count = validate(args.root, args.base, args.write)
     except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         print(f'Marketplace validation failed: {exc}', file=sys.stderr)
         return 1
-    print(f'Marketplace valid: {count} plugin(s)' + ('; version changes checked' if args.base else ''))
+    print(f'Marketplace valid: {count} plugin(s)' + ('; package versions checked' if args.base else ''))
     return 0
 
 
