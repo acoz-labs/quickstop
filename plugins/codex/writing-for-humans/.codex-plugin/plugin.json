@@ -1,7 +1,0 @@
-{
-  "name": "writing-for-humans",
-  "version": "0.1.2",
-  "description": "Make all prose understandable while preserving facts and exact formats.",
-  "license": "MIT",
-  "hooks": "./hooks/hooks.json"
-}

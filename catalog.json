@@ -18,22 +18,12 @@
     },
     {
       "name": "writing-for-humans",
-      "description": "Make all prose understandable while preserving facts and exact formats.",
+      "description": "The original Writing for Humans kit, packaged as a selectable Claude Code output style and two skills.",
       "category": "Productivity",
       "targets": {
         "claude-code": {
           "format": "claude-plugin",
           "path": "plugins/claude-code/writing-for-humans",
-          "acceptance": "docs/acceptance/writing-for-humans.md"
-        },
-        "codex": {
-          "format": "codex-plugin",
-          "path": "plugins/codex/writing-for-humans",
-          "acceptance": "docs/acceptance/writing-for-humans.md"
-        },
-        "pi": {
-          "format": "pi-package",
-          "path": "plugins/pi/writing-for-humans",
           "acceptance": "docs/acceptance/writing-for-humans.md"
         }
       }
