@@ -279,3 +279,30 @@ class MarketplaceTests(unittest.TestCase):
         with self.assertRaises(module.Invalid): self.generate()
         self.write(overlay, {'interface': {'screenshots': ['./assets/missing.png']}})
         with self.assertRaises(module.Invalid): self.generate()
+
+    def test_malformed_resource_types_fail_before_writes(self):
+        path = 'plugins/claude-code/sample/.claude-plugin/plugin.json'
+        original = json.loads((self.root / path).read_text())
+        before = {name: (self.root / name).read_bytes() for name in module.OUTPUTS}
+        for key, value in [('skills', 42), ('skills', {'path': './../outside'}), ('skills', None),
+                           ('agents', True), ('hooks', 42), ('hooks', {'path': './../outside'}),
+                           ('mcpServers', True), ('mcpServers', {'server': 'wrong'}), ('apps', [])]:
+            self.write(path, dict(original, **{key: value}))
+            with self.assertRaises(module.Invalid): self.generate()
+            self.assertEqual({name: (self.root / name).read_bytes() for name in module.OUTPUTS}, before)
+
+    def test_legitimate_inline_claude_hooks_and_mcp_are_retained(self):
+        path = 'plugins/claude-code/sample/.claude-plugin/plugin.json'
+        data = json.loads((self.root / path).read_text())
+        data.update(hooks={'hooks': {'SessionStart': []}}, mcpServers={'fixture': {'command': 'fixture-server'}})
+        self.write(path, data)
+        self.generate()
+        self.assertEqual(module.validate(self.root), 1)
+
+    def test_codex_resource_types_differ_from_claude(self):
+        self.add_plugin('codex-only', {'codex': 'codex-plugin'})
+        path = 'plugins/codex/codex-only/.codex-plugin/plugin.json'
+        original = json.loads((self.root / path).read_text())
+        for key, value in [('skills', []), ('hooks', {'hooks': {}}), ('agents', []), ('mcpServers', [])]:
+            self.write(path, dict(original, **{key: value}))
+            with self.assertRaises(module.Invalid): self.generate()
