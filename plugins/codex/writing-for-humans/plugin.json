@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "writing-for-humans",
+  "version": "0.1.0",
+  "description": "Make all prose understandable while preserving facts and exact formats.",
+  "license": "MIT"
+}
