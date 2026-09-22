@@ -49,6 +49,28 @@ class WritingAdapters(unittest.TestCase):
             self.assertNotIn('SYNTHETIC_PRIVATE_SENTINEL', result.stdout)
         self.assertEqual(before, build.files(self.root))
 
+    def test_claude_emits_at_context_boundaries_not_every_prompt(self):
+        self.generate('claude-code')
+        hooks = json.loads((self.package / 'hooks/hooks.json').read_text())['hooks']
+        # Model the native event sequence verified independently, including
+        # compaction within a turn before the next model continuation.
+        sequence = [('SessionStart', 'startup'), ('UserPromptSubmit', None),
+                    ('UserPromptSubmit', None), ('SubagentStart', None),
+                    ('SessionStart', 'compact'), ('SessionStart', 'resume')]
+        deliveries = []
+        for event, source in sequence:
+            count = 0
+            for group in hooks.get(event, []):
+                self.assertNotIn('matcher', group)  # all native start sources
+                for _handler in group['hooks']:
+                    result = self.run_hook(event, json.dumps({'source': source}))
+                    self.assertEqual(result.returncode, 0)
+                    context = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+                    self.assertEqual(context.count('# Writing for Humans'), 1)
+                    count += 1
+            deliveries.append(count)
+        self.assertEqual(deliveries, [1, 0, 0, 1, 1, 1])
+
     def test_unknown_event_fails_without_injecting(self):
         self.generate('claude-code')
         result = self.run_hook('Stop')
@@ -72,8 +94,7 @@ class WritingAdapters(unittest.TestCase):
                     manifest = json.loads((package / '.codex-plugin/plugin.json').read_text())
                     declared = manifest['hooks']
                     self.assertTrue((package / declared).is_file())
-                self.assertEqual(set(hooks), {'SessionStart', 'SubagentStart'} |
-                                 ({'UserPromptSubmit'} if target == 'claude-code' else set()))
+                self.assertEqual(set(hooks), {'SessionStart', 'SubagentStart'})
                 for event, groups in hooks.items():
                     handler = groups[0]['hooks'][0]
                     self.assertLessEqual(handler['timeout'], 5)
@@ -108,6 +129,27 @@ console.log(JSON.stringify({base,first,duplicate,later}));
                 resolved = (markdown.parent / link.split('#')[0]).resolve()
                 self.assertTrue(resolved.is_relative_to(self.package.resolve()), link)
                 self.assertTrue(resolved.is_file(), str(resolved))
+
+    def test_target_version_change_does_not_change_other_packages(self):
+        original = build.VERSIONS['claude-code']
+        try:
+            before = {}
+            for target in build.TARGETS:
+                with tempfile.TemporaryDirectory() as tmp:
+                    build.generate(target, Path(tmp))
+                    before[target] = build.files(Path(tmp))
+            build.VERSIONS['claude-code'] = '9.8.7'
+            for target in build.TARGETS:
+                with tempfile.TemporaryDirectory() as tmp:
+                    build.generate(target, Path(tmp))
+                    after = build.files(Path(tmp))
+                if target == 'claude-code':
+                    changed = {name for name in after if after[name] != before[target][name]}
+                    self.assertEqual(changed, {'.claude-plugin/plugin.json'})
+                else:
+                    self.assertEqual(before[target], after)
+        finally:
+            build.VERSIONS['claude-code'] = original
 
     def test_each_package_is_self_contained_and_reproducible(self):
         for target in build.TARGETS:

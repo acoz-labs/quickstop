@@ -4,7 +4,7 @@
 
 After the accepted release is listed in Quickstop, add the marketplace with `claude plugin marketplace add acoz-labs/quickstop`, then run `claude plugin install writing-for-humans@quickstop`. The native default scope is user; use `--scope project` or `--scope local` deliberately when appropriate. Before publication, developers can load the package with `claude --plugin-dir /absolute/path/to/package` in an isolated configuration.
 
-Node.js 22 or later must be available as `node` to hook commands. SessionStart and SubagentStart deliver the core; UserPromptSubmit reinforces it for Claude sessions. The package does not select or override an output style. Preserve existing styles and coding instructions.
+Node.js 22 or later must be available as `node` to hook commands. SessionStart delivers the core at startup, resume, clear, fork and compaction; SubagentStart delivers it directly to subagents. Ordinary prompts do not inject another full copy. The package does not select or override an output style. Preserve existing styles and coding instructions.
 
 Use `claude plugin list` to verify installation and enablement, and `/hooks` to inspect hooks. Start a new session after changing installation. Ask a fictional writing question and assess understanding and factual preservation; hook discovery alone is insufficient. Invoke writing-setup for diagnosis if needed.
 
