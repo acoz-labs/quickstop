@@ -1,7 +1,8 @@
 # Quickstop repository
 
 Quickstop is the acoz-labs unified marketplace for agentic plugins. Claudit 3.0.0
-is currently the only plugin and supports Claude Code only. `catalog.json`
+is advertised for Claude Code. Writing for Humans is a Claude Code-only kit conversion
+whose publication state is recorded in the generated catalog. `catalog.json`
 declares supported targets; native package manifests own versions. Generated
 indexes and package layouts follow [the marketplace contract](marketplace.md).
 Plugin creation and review use the shared SDLC and development guide.
