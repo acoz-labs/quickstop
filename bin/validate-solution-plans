@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Plans are optional. Validate authored artifacts, not an obsolete six-file gate.
+set -euo pipefail
+python3 - <<'PY'
+from pathlib import Path
+for plan in Path('docs/plans').glob('[0-9]*'):
+    if not plan.is_dir():
+        continue
+    readme = plan / 'README.md'
+    if not readme.is_file() or not readme.read_text().strip():
+        raise SystemExit(f'Existing plan needs a nonempty README: {plan}')
+print('Optional solution plans valid')
+PY

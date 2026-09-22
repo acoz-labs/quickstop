@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
+LABEL="${DEPENDENCY_STEWARD_LABEL:-dependency:auto-merge-candidate}"
+MERGE_METHOD="${DEPENDENCY_STEWARD_MERGE_METHOD:-squash}"
+WAIT_SECONDS="${DEPENDENCY_STEWARD_WAIT_SECONDS:-0}"
+SELF_WORKFLOW="${DEPENDENCY_STEWARD_WORKFLOW:-Dependency merge steward}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  bin/dependency-merge-steward classify-pr <pr> <update-type> <dependency-type> <package-ecosystem>
+  bin/dependency-merge-steward merge-pr <pr>
+  bin/dependency-merge-steward merge-for-sha <sha>
+  bin/dependency-merge-steward merge-candidates
+
+Requires GH_TOKEN and REPO/GITHUB_REPOSITORY in GitHub Actions.
+USAGE
+}
+
+require_repo() {
+  if [[ -z "$REPO" ]]; then
+    echo "::error::REPO or GITHUB_REPOSITORY is required"
+    exit 2
+  fi
+}
+
+set_output() {
+  local key="$1"
+  local value="$2"
+
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+ensure_label() {
+  gh label create "$LABEL" \
+    --repo "$REPO" \
+    --color "0E8A16" \
+    --description "Eligible Dependabot patch update after checks pass" \
+    --force >/dev/null 2>&1 || true
+}
+
+classify_pr() {
+  local pr="$1"
+  local update_type="$2"
+  local dependency_type="$3"
+  local package_ecosystem="$4"
+  local eligible="false"
+  local reason=""
+
+  require_repo
+  ensure_label
+
+  if [[ "$update_type" != "version-update:semver-patch" ]]; then
+    reason="not a semver patch update"
+  else
+    case "$package_ecosystem" in
+      docker)
+        reason="Docker/base image updates remain manual"
+        ;;
+      github-actions|github_actions)
+        eligible="true"
+        reason="GitHub Actions patch update"
+        ;;
+      *)
+        if [[ "$dependency_type" == "direct:production" || -z "$dependency_type" ]]; then
+          reason="runtime or unknown dependency type remains manual"
+        else
+          eligible="true"
+          reason="non-runtime patch update"
+        fi
+        ;;
+    esac
+  fi
+
+  if [[ "$eligible" == "true" ]]; then
+    gh pr edit "$pr" --repo "$REPO" --add-label "$LABEL" >/dev/null
+    echo "PR #$pr marked as a dependency auto-merge candidate: $reason"
+  else
+    gh pr edit "$pr" --repo "$REPO" --remove-label "$LABEL" >/dev/null 2>&1 || true
+    echo "PR #$pr is manual-review only: $reason"
+  fi
+
+  set_output "eligible" "$eligible"
+  set_output "reason" "$reason"
+}
+
+pr_json() {
+  local pr="$1"
+
+  gh pr view "$pr" --repo "$REPO" \
+    --json author,isDraft,labels,mergeStateStatus,headRefOid,title,url,number
+}
+
+has_candidate_label() {
+  jq -e --arg label "$LABEL" '[.labels[].name] | index($label)' >/dev/null
+}
+
+checks_state() {
+  local pr="$1"
+  local checks_json
+
+  checks_json="$(gh pr checks "$pr" --repo "$REPO" --json name,bucket,workflow 2>/dev/null || true)"
+
+  if [[ -z "$checks_json" ]]; then
+    echo "none"
+    return
+  fi
+
+  jq -r --arg self "$SELF_WORKFLOW" '
+    [
+      .[]
+      | select(.workflow != $self)
+      | select(.bucket != "skipping")
+    ] as $checks
+    | if ($checks | length) == 0 then "none"
+      elif any($checks[]; .bucket == "fail" or .bucket == "cancel") then "fail"
+      elif any($checks[]; .bucket == "pending") then "pending"
+      else "pass"
+      end
+  ' <<< "$checks_json"
+}
+
+wait_for_checks() {
+  local pr="$1"
+  local deadline=$((SECONDS + WAIT_SECONDS))
+  local state
+
+  while true; do
+    state="$(checks_state "$pr")"
+    case "$state" in
+      pass)
+        echo "PR #$pr checks passed."
+        return 0
+        ;;
+      fail)
+        echo "::notice::PR #$pr has failing or cancelled checks; leaving it for review."
+        return 1
+        ;;
+      none|pending)
+        if (( WAIT_SECONDS == 0 || SECONDS >= deadline )); then
+          echo "::notice::PR #$pr checks are $state; leaving it for the next steward sweep."
+          return 1
+        fi
+        sleep 20
+        ;;
+      *)
+        echo "::notice::PR #$pr check state is '$state'; leaving it for review."
+        return 1
+        ;;
+    esac
+  done
+}
+
+wait_for_clean_merge_state() {
+  local pr="$1"
+  local state
+
+  for _ in 1 2 3 4 5 6; do
+    state="$(pr_json "$pr" | jq -r '.mergeStateStatus')"
+    if [[ "$state" == "CLEAN" ]]; then
+      return 0
+    fi
+    sleep 10
+  done
+
+  echo "::notice::PR #$pr merge state is $state; leaving it for review."
+  return 1
+}
+
+merge_pr() {
+  local pr="$1"
+  local json
+  local author
+  local draft
+
+  require_repo
+  json="$(pr_json "$pr")"
+  author="$(jq -r '.author.login' <<< "$json")"
+  draft="$(jq -r '.isDraft' <<< "$json")"
+
+  if [[ "$author" != "app/dependabot" ]]; then
+    echo "::notice::PR #$pr is authored by $author, not Dependabot."
+    return 0
+  fi
+
+  if ! has_candidate_label <<< "$json"; then
+    echo "::notice::PR #$pr is not labeled $LABEL."
+    return 0
+  fi
+
+  if [[ "$draft" == "true" ]]; then
+    echo "::notice::PR #$pr is a draft."
+    return 0
+  fi
+
+  # Local evidence is the default authority. Optional Actions results cannot
+  # replace it, and an unavailable runner must not stall verified local work.
+  if [[ "$(python3 -c 'import json; print(json.load(open(".sdlc/config.json")).get("verification_mode", "actions"))')" != "local" ]]; then
+    wait_for_checks "$pr" || return 0
+  fi
+  wait_for_clean_merge_state "$pr" || return 0
+
+  # Passing tests do not replace independent maintainer review. Bind the merge
+  # to its exact reviewed head so a concurrent dependency refresh cannot race it.
+  local reviewed_head
+  reviewed_head="$(bin/sdlc verify-approval --repo "$REPO" --pr "$pr")" || return 0
+  if [[ "$reviewed_head" != "$(jq -r '.headRefOid' <<< "$json")" ]]; then
+    echo "::notice::PR head changed during check/review verification; retry on the new head."
+    return 0
+  fi
+
+  case "$MERGE_METHOD" in
+    squash)
+      gh pr merge "$pr" --repo "$REPO" --squash --delete-branch --match-head-commit "$reviewed_head"
+      ;;
+    rebase)
+      gh pr merge "$pr" --repo "$REPO" --rebase --delete-branch --match-head-commit "$reviewed_head"
+      ;;
+    merge)
+      gh pr merge "$pr" --repo "$REPO" --merge --delete-branch --match-head-commit "$reviewed_head"
+      ;;
+    *)
+      echo "::error::Unsupported DEPENDENCY_STEWARD_MERGE_METHOD: $MERGE_METHOD"
+      return 2
+      ;;
+  esac
+}
+
+merge_for_sha() {
+  local sha="$1"
+  local pr
+
+  require_repo
+
+  while IFS= read -r pr; do
+    [[ -n "$pr" ]] || continue
+    merge_pr "$pr" || true
+  done < <(
+    gh api -H "Accept: application/vnd.github+json" \
+      "repos/$REPO/commits/$sha/pulls" \
+      --jq '.[] | select(.state == "open") | .number'
+  )
+}
+
+merge_candidates() {
+  local pr
+
+  require_repo
+
+  while IFS= read -r pr; do
+    [[ -n "$pr" ]] || continue
+    merge_pr "$pr" || true
+  done < <(
+    gh pr list --repo "$REPO" --state open --limit 100 \
+      --json number,author,labels \
+      --jq ".[] | select(.author.login == \"app/dependabot\") | select([.labels[].name] | index(\"$LABEL\")) | .number"
+  )
+}
+
+command="${1:-}"
+shift || true
+
+case "$command" in
+  classify-pr)
+    if (( $# != 4 )); then usage; exit 2; fi
+    classify_pr "$@"
+    ;;
+  merge-pr)
+    if (( $# != 1 )); then usage; exit 2; fi
+    merge_pr "$1"
+    ;;
+  merge-for-sha)
+    if (( $# != 1 )); then usage; exit 2; fi
+    merge_for_sha "$1"
+    ;;
+  merge-candidates)
+    if (( $# != 0 )); then usage; exit 2; fi
+    merge_candidates
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

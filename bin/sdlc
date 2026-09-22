@@ -1,0 +1,473 @@
+#!/usr/bin/env python3
+"""Repository-native standards checks. Credentials are supplied by the caller."""
+import argparse
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path, PurePosixPath
+import subprocess
+import sys
+
+VERSION = "2026.09.21.3"
+MANIFEST = ".sdlc/managed.json"
+CONFIG = ".sdlc/config.json"
+MANAGED = [
+    "AGENTS.md", "CONTRIBUTING.md", "SDLC_VERSION",
+    ".github/ISSUE_TEMPLATE/feature.yml",
+    "bin/sdlc", "bin/sdlc-evidence", "bin/sdlc-release", "bin/validate-solution-plans", "bin/dependency-merge-steward", "tests/test_sdlc.py", "tests/test_sdlc_evidence.py", "tests/test_sdlc_release.py",
+    "docs/operations/sdlc.md", "docs/operations/repo-standard.md", "docs/operations/local-verification.md",
+    "docs/plans/README.md", "docs/plans/_template/README.md",
+    "docs/discovery/README.md", "docs/discovery/_template/README.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/PULL_REQUEST_TEMPLATE/product-discovery.md",
+    ".github/PULL_REQUEST_TEMPLATE/solution-design.md",
+    ".github/workflows/sdlc.yml", ".github/workflows/main-branch-audit.yml",
+]
+
+class Failure(Exception):
+    pass
+
+def evidence_module():
+    loader = importlib.machinery.SourceFileLoader("sdlc_evidence", str(Path(__file__).resolve().with_name("sdlc-evidence")))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+def validate_config(config):
+    if config.get("delivery_profile") not in ("service", "artifact", "non-deployable"):
+        raise Failure("Declare a real delivery_profile")
+    commands = config.get("validation")
+    if not isinstance(commands, list) or not commands or any(not isinstance(c, str) or not c.strip() for c in commands):
+        raise Failure("Declare meaningful validation commands")
+    mode = config.get("verification_mode", "actions")
+    if mode not in {"local", "actions"}:
+        raise Failure("Unknown verification_mode")
+    if mode == "actions" and not config.get("required_checks"):
+        raise Failure("Declare required_checks for Actions verification")
+    if mode == "local" and config["delivery_profile"] in {"service", "artifact"}:
+        for key in ("acceptance_criteria", "release_criteria"):
+            values = config.get(key)
+            if not isinstance(values, list) or not values or any(not isinstance(v, str) or not v.strip() for v in values):
+                raise Failure(f"Declare concrete {key}; missing delivery capability is not success")
+        if not config.get("delivery_runbook"):
+            raise Failure("Declare the repository's actual delivery_runbook")
+
+def run(*args, cwd=None):
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    if result.returncode:
+        # Do not reproduce command output: credential helpers may include secrets.
+        raise Failure(f"{args[0]} operation failed (exit {result.returncode})")
+    return result.stdout
+
+def gh(endpoint):
+    return json.loads(run("gh", "api", endpoint))
+
+def pages(endpoint):
+    result = []
+    for page in range(1, 10001):
+        data = gh(f"{endpoint}{'&' if '?' in endpoint else '?'}per_page=100&page={page}")
+        if not isinstance(data, list):
+            raise Failure("Expected a paginated collection")
+        result.extend(data)
+        if len(data) < 100:
+            return result
+    raise Failure("Pagination limit exceeded")
+
+def path(root, name):
+    p = PurePosixPath(name)
+    if p.is_absolute() or ".." in p.parts or not p.parts or str(p) != name:
+        raise Failure(f"Unsafe managed path: {name}")
+    result = root / name
+    for part in [result, *result.parents]:
+        if part == root.parent:
+            break
+        if part.is_symlink():
+            raise Failure(f"Symlink in managed path: {name}")
+    return result
+
+def digest(p):
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+def load_manifest(root):
+    m = json.loads(path(root, MANIFEST).read_text())
+    if m.get("schema") != 1 or not isinstance(m.get("files"), dict) or not m.get("version"):
+        raise Failure("Invalid managed manifest")
+    for name, spec in m["files"].items():
+        path(root, name)
+        if name in (MANIFEST, CONFIG) or not isinstance(spec, dict):
+            raise Failure("Invalid managed entry")
+        if len(spec.get("sha256", "")) != 64 or spec.get("mode") not in ("644", "755"):
+            raise Failure("Invalid managed hash or mode")
+    return m
+
+def differences(root, manifest):
+    bad = []
+    for name, spec in manifest["files"].items():
+        p = path(root, name)
+        if not p.is_file() or digest(p) != spec["sha256"]:
+            bad.append(name)
+        elif (p.stat().st_mode & 0o777) != int(spec["mode"], 8):
+            bad.append(name + " (mode)")
+    return bad
+
+def stamp(root):
+    files = {}
+    for name in MANAGED:
+        p = path(root, name)
+        files[name] = {"sha256": digest(p), "mode": "755" if os.access(p, os.X_OK) else "644"}
+    p = path(root, MANIFEST)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"schema": 1, "version": VERSION, "files": files}, indent=2) + "\n")
+
+def check(root):
+    manifest = load_manifest(root)
+    bad = differences(root, manifest)
+    if bad:
+        raise Failure("Managed drift: " + ", ".join(bad))
+    config = json.loads(path(root, CONFIG).read_text())
+    validate_config(config)
+    print(json.dumps({"version": manifest["version"], "conforms": True}))
+
+def apply(source, target, adopt=False):
+    source, target = source.resolve(), target.resolve()
+    if source == target:
+        raise Failure("Source and target must differ")
+    m = load_manifest(source)
+    if differences(source, m):
+        raise Failure("Source does not match its manifest; validate and stamp first")
+    prior = None
+    if path(target, MANIFEST).exists():
+        prior = load_manifest(target)
+        bad = differences(target, prior)
+        if bad:
+            raise Failure("Target managed drift requires reconciliation: " + ", ".join(bad))
+    elif not adopt:
+        raise Failure("Initial adoption requires --adopt after reviewing target content")
+    if prior and "SDLC_VERSION" in m["files"] and "SDLC_VERSION" not in prior["files"]:
+        marker = path(target, "SDLC_VERSION")
+        if marker.exists() and (not marker.is_file() or marker.read_bytes() != (prior["version"] + "\n").encode()):
+            raise Failure("Existing version marker requires explicit reconciliation before managed ownership")
+    entries = set(m["files"]) | set(prior["files"] if prior else ()) | {MANIFEST}
+    # Validate every destination before any mutation, including ancestor redirects.
+    for name in entries:
+        p = path(target, name)
+        if p.exists() and not p.is_file():
+            raise Failure(f"Destination is not a regular file: {name}")
+    lock = Path(run("git", "rev-parse", "--git-path", "sdlc-apply.lock", cwd=target).strip())
+    if not lock.is_absolute():
+        lock = target / lock
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        raise Failure("Another apply or an interrupted receipt requires inspection")
+    os.close(fd)
+    backup = {n: ((target / n).read_bytes(), (target / n).stat().st_mode & 0o777)
+              if (target / n).is_file() else None for n in entries}
+    try:
+        # An exception rolls back this application. Abrupt termination retains the
+        # lock and partial state for inspection rather than claiming conformity.
+        for name, spec in m["files"].items():
+            p = path(target, name)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(path(source, name).read_bytes())
+            p.chmod(int(spec["mode"], 8))
+        for name in set(prior["files"] if prior else ()) - set(m["files"]):
+            path(target, name).unlink()
+        p = path(target, MANIFEST)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(path(source, MANIFEST).read_bytes())
+    except BaseException:
+        for name, old in backup.items():
+            p = target / name
+            if old is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(old[0]); p.chmod(old[1])
+        raise
+    finally:
+        lock.unlink()
+    print(json.dumps({"version": m["version"], "target": str(target), "applied": True}))
+
+def classify(names):
+    if not names:
+        raise Failure("No changed paths")
+    # Only a deliberately narrow prose allowlist avoids treating executable
+    # Markdown/MDX, agent policies or configuration as ordinary documentation.
+    def prose(name):
+        p = PurePosixPath(name)
+        if name in {"README.md", "CHANGELOG.md", "LICENSE", "LICENSE.md"}:
+            return True
+        return (name.startswith("docs/") and p.suffix in {".md", ".txt"}
+                and not any(x in p.parts for x in {"operations", "_template"})
+                and p.name not in {"AGENTS.md", "CLAUDE.md", "SKILL.md"})
+    return "documentation" if all(prose(n) for n in names) else "code"
+
+def approval(pr, reviews, permissions):
+    latest = {}
+    for r in sorted(reviews, key=lambda x: (x.get("submitted_at") or "", x["id"])):
+        if r["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[r["user"]["login"].lower()] = r
+    author = pr["user"]["login"].lower()
+    eligible = {u:r for u,r in latest.items() if u != author and
+                permissions.get(u) in {"write", "maintain", "admin"}}
+    if any(r["state"] == "CHANGES_REQUESTED" for r in eligible.values()):
+        raise Failure("Unresolved maintainer changes requested")
+    if not any(r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
+               for r in eligible.values()):
+        raise Failure("No independent authorized approval on current head")
+    return [u for u, r in eligible.items() if r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]]
+
+def published_local_evidence(repo, pr, reviewers):
+    import base64
+    remote = gh(f"repos/{repo}/contents/{CONFIG}?ref={pr['head']['sha']}")
+    config = json.loads(base64.b64decode(remote["content"]))
+    if config.get("verification_mode") == "local":
+        evidence = evidence_module()
+        try:
+            evidence.trusted_receipt(repo, pr["number"], pr["head"]["sha"], config,
+                                     "validation", [pr["user"]["login"]], eligible=reviewers)
+        except evidence.Failure as error:
+            raise Failure(str(error))
+
+def checks_pass(required, checks, statuses):
+    # GitHub lists newest first, but select explicitly by timestamp/id.
+    latest = {}
+    for c in sorted(checks, key=lambda c: (c.get("started_at") or "", c["id"])):
+        latest[c["name"]] = c["conclusion"] if c["status"] == "completed" else "pending"
+    recent_status = {}
+    for s in sorted(statuses, key=lambda s: (s.get("created_at") or "", s["id"])):
+        recent_status[s["context"]] = s["state"]
+    for name in required:
+        outcomes = [x[name] for x in (latest, recent_status) if name in x]
+        if not outcomes or any(x != "success" for x in outcomes):
+            raise Failure(f"Required check is missing or not successful: {name}")
+
+def review(repo, number, required, expected_actor=None, merged=False, config=None):
+    actor = gh("user")["login"]
+    if expected_actor and actor.lower() != expected_actor.lower():
+        raise Failure("Authenticated actor mismatch")
+    pr = gh(f"repos/{repo}/pulls/{number}")
+    if (not pr.get("merged") if merged else pr["state"] != "open") or pr["draft"]:
+        raise Failure("Review gate requires an open ready PR")
+    files = pages(f"repos/{repo}/pulls/{number}/files")
+    names = [f["filename"] for f in files] + [f["previous_filename"] for f in files if "previous_filename" in f]
+    lane = classify(names)
+    if lane == "code":
+        if actor.lower() == pr["user"]["login"].lower():
+            raise Failure("Code author cannot act as merge reviewer")
+        reviews = pages(f"repos/{repo}/pulls/{number}/reviews")
+        permissions = {}
+        for r in reviews:
+            user = r["user"]["login"]
+            permissions[user.lower()] = gh(f"repos/{repo}/collaborators/{user}/permission")["permission"]
+        approval(pr, reviews, permissions)
+    own_permission = gh(f"repos/{repo}/collaborators/{actor}/permission")["permission"]
+    if own_permission not in {"write", "maintain", "admin"}:
+        raise Failure("Actor cannot maintain this repository")
+    sha = pr["head"]["sha"]
+    if config and config.get("verification_mode") == "local":
+        import base64
+        remote = gh(f"repos/{repo}/contents/{CONFIG}?ref={sha}")
+        if json.loads(base64.b64decode(remote["content"])) != config:
+            raise Failure("Local configuration differs from PR head")
+        evidence = evidence_module()
+        try:
+            evidence.trusted_receipt(repo, number, sha, config, "validation",
+                                     [pr["user"]["login"]] if lane == "code" else [], eligible=[actor])
+        except evidence.Failure as e:
+            raise Failure(str(e))
+    else:
+        check_runs = []
+        for page in range(1, 10001):
+            data = gh(f"repos/{repo}/commits/{sha}/check-runs?per_page=100&page={page}")
+            check_runs.extend(data["check_runs"])
+            if len(check_runs) >= data["total_count"]:
+                break
+        else:
+            raise Failure("Check pagination limit exceeded")
+        checks_pass(required, check_runs, pages(f"repos/{repo}/commits/{sha}/statuses"))
+    current = gh(f"repos/{repo}/pulls/{number}")
+    if current["head"]["sha"] != sha or (not current.get("merged") if merged else current["state"] != "open") or current["draft"]:
+        raise Failure("PR changed during verification")
+    print(json.dumps({"ready": True, "head": sha, "lane": lane, "actor": actor,
+                      "merge_instruction": "Merge with --match-head-commit using this head"}))
+
+def changed_files(repo, sha):
+    files = []
+    for page in range(1, 31):
+        data = gh(f"repos/{repo}/commits/{sha}?per_page=100&page={page}")
+        chunk = data.get("files", [])
+        files.extend(chunk)
+        if len(chunk) < 100:
+            return [f["filename"] for f in files] + [f["previous_filename"] for f in files if "previous_filename" in f]
+    raise Failure("Commit file pagination bound exceeded")
+
+def pushed_commits(repo, before, after):
+    if not before or before == "0" * 40:
+        raise Failure("Initial push requires explicit repository-adoption review")
+    result = []
+    for page in range(1, 10001):
+        data = gh(f"repos/{repo}/compare/{before}...{after}?per_page=100&page={page}")
+        if data.get("status") not in {"ahead", "identical"}:
+            raise Failure("Non-fast-forward push requires explicit recovery review")
+        result.extend(c["sha"] for c in data["commits"])
+        if len(result) >= data["total_commits"]:
+            return result
+    raise Failure("Push range exceeds audit limit")
+
+def audit(repo, before, after):
+    actor = os.environ.get("GITHUB_ACTOR") or gh("user")["login"]
+    if not actor or gh(f"repos/{repo}/collaborators/{actor}/permission")["permission"] not in {"write", "maintain", "admin"}:
+        raise Failure("Push requires an authorized repository maintainer")
+    for sha in pushed_commits(repo, before, after):
+        names = changed_files(repo, sha)
+        if not names or classify(names) == "documentation":
+            continue
+        prs = pages(f"repos/{repo}/commits/{sha}/pulls")
+        # A normal merge can associate its interior commits; each must belong to
+        # a merged PR. The final review is bound to that PR's complete head.
+        matching = [p for p in prs if p.get("merged_at") and p["base"]["repo"]["full_name"].lower() == repo.lower()]
+        if not matching:
+            raise Failure("Code commit has no merged PR association (retry if indexing is pending)")
+        accepted = False
+        for pr in matching:
+            try:
+                reviews = pages(f"repos/{repo}/pulls/{pr['number']}/reviews")
+                permissions = {r["user"]["login"].lower(): gh(f"repos/{repo}/collaborators/{r['user']['login']}/permission")["permission"] for r in reviews}
+                reviewers = approval(pr, reviews, permissions)
+                published_local_evidence(repo, pr, reviewers)
+                accepted = True
+                break
+            except Failure:
+                continue
+        if not accepted:
+            raise Failure("Code commit lacks independent current-head maintainer review")
+    print("Entire pushed range has documentation authority or independent code review")
+
+def inventory(org):
+    return sorted(r["full_name"] for r in pages(f"orgs/{org}/repos?type=all") if not r["archived"])
+
+def cascade(source, workspace, org, adopt=False, verify=False):
+    source, workspace = source.resolve(), workspace.resolve()
+    expected = load_manifest(source)
+    if differences(source, expected):
+        raise Failure("Template has unstamped changes")
+    source_sha = run("git", "rev-parse", "HEAD", cwd=source).strip()
+    if run("git", "status", "--porcelain", cwd=source).strip():
+        raise Failure("Cascade source must be a clean reviewed commit")
+    targets = inventory(org)
+    workspace.mkdir(parents=True, exist_ok=True)
+    receipt_path = workspace / "cascade-receipt.json"
+    receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
+    if receipt and (receipt.get("source_sha") != source_sha or receipt.get("org") != org):
+        raise Failure("Workspace receipt belongs to another source; use a new workspace")
+    receipt.update(schema=1, source_sha=source_sha, version=expected["version"], org=org, targets=targets)
+    results = receipt.setdefault("repositories", {})
+    def save():
+        temporary = receipt_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(receipt, indent=2) + "\n")
+        temporary.replace(receipt_path)
+    save()
+    failures = []
+    for repo in targets:
+        try:
+            info = gh(f"repos/{repo}")
+            target = workspace / repo.split("/")[1]
+            if not target.exists():
+                run("git", "clone", "--quiet", "https://github.com/" + repo + ".git", str(target))
+            remote = run("git", "remote", "get-url", "origin", cwd=target).strip()
+            if remote not in {"https://github.com/"+repo+".git", "git@github.com:"+repo+".git"}:
+                raise Failure("Checkout origin differs from target repository")
+            branch = info["default_branch"]
+            run("git", "fetch", "origin", branch, cwd=target)
+            remote_ref = "refs/remotes/origin/" + branch
+            if verify:
+                actual = json.loads(run("git", "show", remote_ref+":"+MANIFEST, cwd=target))
+                if actual != expected:
+                    raise Failure("Published manifest differs from current template")
+                for name, entry in expected["files"].items():
+                    data = subprocess.run(["git","show",remote_ref+":"+name],cwd=target,capture_output=True)
+                    if data.returncode or hashlib.sha256(data.stdout).hexdigest()!=entry["sha256"]:
+                        raise Failure("Published managed file differs: "+name)
+                    mode=run("git","ls-tree",remote_ref,"--",name,cwd=target).split()[0]
+                    if mode != "100"+entry["mode"]:
+                        raise Failure("Published managed mode differs: "+name)
+                config=json.loads(run("git","show",remote_ref+":"+CONFIG,cwd=target))
+                validate_config(config)
+                results[repo]={"state":"verified", "head":run("git","rev-parse",remote_ref,cwd=target).strip()}
+            else:
+                previous=results.get(repo,{})
+                if previous.get("state")=="prepared":
+                    if load_manifest(target)!=expected or differences(target,expected):
+                        raise Failure("Prepared managed content changed; reconcile before retry")
+                else:
+                    if run("git","status","--porcelain",cwd=target).strip():
+                        raise Failure("Existing checkout has changes; preserve and reconcile")
+                    local_branch="sdlc/standard-"+expected["version"]
+                    if run("git","branch","--list",local_branch,cwd=target).strip():
+                        run("git","switch",local_branch,cwd=target)
+                        if run("git","rev-parse","HEAD",cwd=target).strip()!=run("git","rev-parse",remote_ref,cwd=target).strip():
+                            raise Failure("Existing branch has work; inspect before continuing")
+                    else:
+                        run("git","switch","-c",local_branch,remote_ref,cwd=target)
+                    apply(source,target,adopt)
+                    results[repo]={"state":"prepared","base":run("git","rev-parse","HEAD",cwd=target).strip(),"branch":local_branch}
+            save()
+        except (Failure, OSError, ValueError, KeyError) as e:
+            results[repo]={"state":"unresolved","reason":str(e)}
+            failures.append(repo);save()
+    current=inventory(org)
+    receipt["inventory_stable"]=current==targets
+    receipt["complete"]=bool(verify and not failures and current==targets)
+    save()
+    print(json.dumps(receipt))
+    if failures or current!=targets:
+        raise Failure("Cascade incomplete; resolve all targets/inventory changes in this operation")
+
+def verify_approval(repo, number):
+    pr=gh(f"repos/{repo}/pulls/{number}")
+    if pr["state"]!="open" or pr["draft"]:
+        raise Failure("Requires open ready PR")
+    reviews=pages(f"repos/{repo}/pulls/{number}/reviews")
+    permissions={r["user"]["login"].lower():gh(f"repos/{repo}/collaborators/{r['user']['login']}/permission")["permission"] for r in reviews}
+    reviewers = approval(pr,reviews,permissions)
+    published_local_evidence(repo,pr,reviewers)
+    # Return the exact reviewed SHA for compare-and-swap merge by the caller.
+    print(pr["head"]["sha"])
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    s = p.add_subparsers(dest="command", required=True)
+    for name in ("stamp", "check"):
+        a=s.add_parser(name); a.add_argument("--root", type=Path, default=Path.cwd())
+    a=s.add_parser("apply");a.add_argument("--source",type=Path,required=True);a.add_argument("--target",type=Path,required=True);a.add_argument("--adopt",action="store_true")
+    a=s.add_parser("classify");a.add_argument("paths",nargs="+")
+    a=s.add_parser("inventory");a.add_argument("--org",required=True)
+    a=s.add_parser("cascade");a.add_argument("--source",type=Path,required=True);a.add_argument("--workspace",type=Path,required=True);a.add_argument("--org",required=True);a.add_argument("--adopt",action="store_true");a.add_argument("--verify",action="store_true")
+    a=s.add_parser("audit");a.add_argument("--repo",required=True);a.add_argument("--before",required=True);a.add_argument("--sha",required=True)
+    a=s.add_parser("verify-approval");a.add_argument("--repo",required=True);a.add_argument("--pr",required=True,type=int)
+    a=s.add_parser("review");a.add_argument("--repo",required=True);a.add_argument("--pr",required=True,type=int);a.add_argument("--expected-actor");a.add_argument("--root",type=Path,default=Path.cwd())
+    args=p.parse_args()
+    try:
+        if args.command=="stamp":stamp(args.root)
+        elif args.command=="check":check(args.root)
+        elif args.command=="apply":apply(args.source,args.target,args.adopt)
+        elif args.command=="classify":print(classify(args.paths))
+        elif args.command=="inventory":
+            print(json.dumps(inventory(args.org)))
+        elif args.command=="cascade":cascade(args.source,args.workspace,args.org,args.adopt,args.verify)
+        elif args.command=="audit":audit(args.repo,args.before,args.sha)
+        elif args.command=="verify-approval":verify_approval(args.repo,args.pr)
+        elif args.command=="review":
+            config=json.loads(path(args.root,CONFIG).read_text())
+            validate_config(config)
+            review(args.repo,args.pr,config.get("required_checks",[]),args.expected_actor,config=config)
+    except (Failure, OSError, ValueError, KeyError) as e:
+        print(f"sdlc: {e}",file=sys.stderr);return 1
+    return 0
+if __name__=="__main__":
+    sys.exit(main())

@@ -1,15 +1,15 @@
 {
   "name": "quickstop",
   "owner": {
-    "name": "Anthony Costanzo",
-    "email": "mail@acostanzo.com"
+    "name": "acoz-labs",
+    "url": "https://github.com/acoz-labs"
   },
   "description": "A Claude Code plugin marketplace",
   "plugins": [
     {
       "name": "claudit",
       "version": "3.0.0",
-      "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task — building a skill, configuring an MCP, authoring CLAUDE.md — can read it instead of re-fetching docs.",
+      "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
       "source": "./plugins/claudit",
       "keywords": [
         "audit",

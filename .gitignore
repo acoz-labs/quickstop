@@ -1,50 +1,10 @@
-# Python
+# Local runtime, build and verification state
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-!**/skills/build/
-develop-eggs/
+.venv/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-venv/
-env/
-ENV/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Testing
-.pytest_cache/
 .coverage
-htmlcov/
-
-# Database files
-*.db
-*.db-journal
-
-# OS
+.pytest_cache/
 .DS_Store
-Thumbs.db
-
-# Claude Code plugin tool state
-.pronto/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

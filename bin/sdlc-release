@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""Nominate, gate and promote an immutable candidate without a workflow runner."""
+import argparse
+import base64
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+loader = importlib.machinery.SourceFileLoader("delivery_evidence", str(Path(__file__).resolve().with_name("sdlc-evidence")))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+e = importlib.util.module_from_spec(spec)
+loader.exec_module(e)
+review_loader = importlib.machinery.SourceFileLoader("delivery_review", str(Path(__file__).resolve().with_name("sdlc")))
+review_spec = importlib.util.spec_from_loader(review_loader.name, review_loader)
+review = importlib.util.module_from_spec(review_spec)
+review_loader.exec_module(review)
+MARKER = "<!-- sdlc-candidate-v1 -->"
+
+
+def remote_config(repo, sha):
+    content = e.api(f"repos/{repo}/contents/.sdlc/config.json?ref={sha}")
+    return json.loads(base64.b64decode(content["content"]))
+
+
+def source_has_config(repo, sha):
+    # Inspect successful tree responses; auth/network errors must not mean absent.
+    tree = e.api(f"repos/{repo}/git/trees/{sha}")
+    if tree.get("truncated"):
+        raise e.Failure("Cannot establish complete source tree")
+    matches = [entry for entry in tree["tree"] if entry["path"] == ".sdlc"]
+    if not matches:
+        return False
+    if len(matches) != 1 or matches[0]["type"] != "tree":
+        raise e.Failure("Unexpected source policy path")
+    subtree = e.api(f"repos/{repo}/git/trees/{matches[0]['sha']}")
+    if subtree.get("truncated"):
+        raise e.Failure("Cannot establish complete source policy tree")
+    return any(entry["path"] == "config.json" for entry in subtree["tree"])
+
+
+def candidate_config(repo, sha, artifact, policy_sha=None):
+    if policy_sha is None:
+        return remote_config(repo, sha)
+    if not isinstance(policy_sha, str) or len(policy_sha) != 40 or any(c not in "0123456789abcdef" for c in policy_sha) or policy_sha == sha:
+        raise e.Failure("Transition policy must identify a distinct immutable revision")
+    on_default_branch(repo, policy_sha)
+    if e.api(f"repos/{repo}/compare/{sha}...{policy_sha}")["status"] != "ahead":
+        raise e.Failure("Transition policy must descend from product source")
+    if source_has_config(repo, sha):
+        raise e.Failure("Source already has delivery policy; transition is pre-adoption only")
+    reviewed_policy(repo, policy_sha)
+    return e.retained_config(remote_config(repo, policy_sha), sha, artifact)
+
+
+def reviewed_policy(repo, sha):
+    policy_tree = e.api(f"repos/{repo}/commits/{sha}")["commit"]["tree"]["sha"]
+    for linked in e.pages(f"repos/{repo}/commits/{sha}/pulls"):
+        pr = e.api(f"repos/{repo}/pulls/{linked['number']}")
+        if not pr.get("merged") or pr.get("draft") or pr["base"]["repo"]["full_name"].lower() != repo.lower() or pr["merge_commit_sha"] != sha:
+            continue
+        head = pr["head"]["sha"]
+        if e.api(f"repos/{repo}/commits/{head}")["commit"]["tree"]["sha"] != policy_tree:
+            continue
+        reviews = e.pages(f"repos/{repo}/pulls/{pr['number']}/reviews")
+        permissions = {item["user"]["login"].lower(): e.api(f"repos/{repo}/collaborators/{item['user']['login']}/permission")["permission"] for item in reviews}
+        try:
+            reviewers = review.approval(pr, reviews, permissions)
+            config = remote_config(repo, head)
+            e.trusted_receipt(repo, pr["number"], head, config, "validation",
+                              [pr["user"]["login"]], eligible=reviewers)
+        except (review.Failure, e.Failure):
+            continue
+        return {"number": pr["number"], "head": head, "merge": sha, "author": pr["user"]["login"]}
+    raise e.Failure("Transition policy requires a merged independently reviewed and verified PR with the exact policy tree")
+
+
+def maintainer(repo, login):
+    return e.api(f"repos/{repo}/collaborators/{login}/permission")["permission"] in {"write", "maintain", "admin"}
+
+
+def on_default_branch(repo, sha):
+    branch = e.api(f"repos/{repo}")["default_branch"]
+    if e.api(f"repos/{repo}/compare/{sha}...{branch}")["status"] not in {"ahead", "identical"}:
+        raise e.Failure("Release candidate must be on the default branch")
+
+
+def implementation(repo, sha, prs):
+    if not prs:
+        raise e.Failure("Declare the complete implementation PR set")
+    result = []
+    for number in sorted(set(prs)):
+        pr = e.api(f"repos/{repo}/pulls/{number}")
+        if not pr.get("merged") or pr["base"]["repo"]["full_name"].lower() != repo.lower():
+            raise e.Failure("Implementation PR must be merged into this repository")
+        merge = pr["merge_commit_sha"]
+        compare = e.api(f"repos/{repo}/compare/{merge}...{sha}")
+        if compare["status"] not in {"ahead", "identical"}:
+            raise e.Failure("Candidate does not contain the implementation PR")
+        reviews = e.pages(f"repos/{repo}/pulls/{number}/reviews")
+        permissions = {item["user"]["login"].lower(): e.api(f"repos/{repo}/collaborators/{item['user']['login']}/permission")["permission"] for item in reviews}
+        try:
+            review.approval(pr, reviews, permissions)
+        except review.Failure as error:
+            raise e.Failure(str(error))
+        result.append({"number": number, "head": pr["head"]["sha"], "merge": merge,
+                       "author": pr["user"]["login"]})
+    return result
+
+
+def nominate(repo, issue, sha, artifact, prs, actor, output, policy_sha=None):
+    e.identity(repo, actor)
+    if not e.immutable(artifact) or len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+        raise e.Failure("Full commit and immutable artifact digest required")
+    on_default_branch(repo, sha)
+    subject = e.api(f"repos/{repo}/issues/{issue}")
+    if subject["state"] != "open" or "pull_request" in subject:
+        raise e.Failure("Nomination requires an open delivery issue")
+    config = candidate_config(repo, sha, artifact, policy_sha)
+    authority = config.get("release_authority_repository", repo)
+    if authority != repo:
+        raise e.Failure(f"Release authority belongs to {authority}; use its issue and candidate procedure")
+    if config.get("delivery_profile") not in {"service", "artifact"}:
+        raise e.Failure("Repository has no release target")
+    e.commands_for(config, "acceptance")
+    impl = implementation(repo, sha, prs)
+    if actor.lower() in {p["author"].lower() for p in impl}:
+        raise e.Failure("Implementation author cannot nominate on behalf of the maintainer")
+    # The issue's current specification is part of the nomination. A changed
+    # specification must be reconciled and nominated again before promotion.
+    candidate = {"schema": 1, "repo": repo, "issue": issue, "sha": sha, "artifact": artifact,
+                 "implementation": impl, "spec_sha256": e.sha256((subject.get("body") or "").encode()),
+                 "config_sha256": e.sha256(e.encoded(config))}
+    if policy_sha is not None:
+        candidate["policy_sha"] = policy_sha
+        candidate["policy_review"] = reviewed_policy(repo, policy_sha)
+    if output.exists():
+        raise e.Failure("Refusing to overwrite a retained nomination")
+    result = e.api(f"repos/{repo}/issues/{issue}/comments", {"body": MARKER + "\n```json\n" + json.dumps(candidate, indent=2) + "\n```"})
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(candidate, indent=2) + "\n")
+    print(result["html_url"])
+    return candidate
+
+
+def latest_candidate(repo, issue):
+    candidates = []
+    for comment in e.pages(f"repos/{repo}/issues/{issue}/comments"):
+        body = comment.get("body", "")
+        if not body.startswith(MARKER + "\n```json\n") or not maintainer(repo, comment["user"]["login"]):
+            continue
+        try:
+            candidate = json.loads(body.split("\n```json\n", 1)[1].split("\n```", 1)[0])
+        except (ValueError, IndexError):
+            raise e.Failure("Malformed maintainer nomination requires reconciliation")
+        if candidate.get("repo") != repo or candidate.get("issue") != issue:
+            raise e.Failure("Nomination scope mismatch")
+        candidates.append((comment["id"], candidate))
+    if not candidates:
+        raise e.Failure("No maintainer nomination")
+    return max(candidates, key=lambda pair: pair[0])[1]
+
+
+def gate(repo, issue, sha, artifact, actor):
+    e.identity(repo, actor)
+    on_default_branch(repo, sha)
+    candidate = latest_candidate(repo, issue)
+    if candidate["sha"] != sha or candidate["artifact"] != artifact:
+        raise e.Failure("Requested release differs from latest nomination")
+    subject = e.api(f"repos/{repo}/issues/{issue}")
+    if subject["state"] != "open" or candidate["spec_sha256"] != e.sha256((subject.get("body") or "").encode()):
+        raise e.Failure("Delivery issue closed or specification changed since nomination")
+    config = candidate_config(repo, sha, artifact, candidate.get("policy_sha"))
+    if candidate.get("policy_sha") and reviewed_policy(repo, candidate["policy_sha"]) != candidate.get("policy_review"):
+        raise e.Failure("Policy review provenance changed or is missing; nominate again")
+    if e.sha256(e.encoded(config)) != candidate["config_sha256"]:
+        raise e.Failure("Candidate configuration changed")
+    actual = implementation(repo, sha, [p["number"] for p in candidate["implementation"]])
+    if actual != candidate["implementation"]:
+        raise e.Failure("Implementation set changed")
+    authors = [p["author"] for p in actual]
+    if actor.lower() in {a.lower() for a in authors}:
+        raise e.Failure("Implementation author cannot promote their own release")
+    evidence = e.trusted_receipt(repo, issue, sha, config, "acceptance", authors,
+                                 artifact=artifact, candidate_sha256=e.sha256(e.encoded(candidate)))
+    return {"candidate": candidate, "acceptance": evidence, "config": config}
+
+
+def release(root, repo, issue, sha, artifact, actor, output, resume=False):
+    checked = gate(repo, issue, sha, artifact, actor)
+    if checked["candidate"].get("policy_sha"):
+        raise e.Failure("Retained transition requires the reviewed same-byte runbook and record path; generic promotion cannot run newer scripts in old source")
+    root, output = root.resolve(), output.resolve()
+    if root == output or root in output.parents:
+        raise e.Failure("Release receipts must be outside checkout")
+    if e.clean_head(root) != sha or e.config_at(root) != checked["config"]:
+        raise e.Failure("Release checkout differs from accepted candidate")
+    config = checked["config"]
+    for key in ("promotion", "release_verification", "rollback"):
+        if not isinstance(config.get(key), list) or not config[key] or any(not isinstance(c, str) or not c.strip() for c in config[key]):
+            raise e.Failure(f"Configure repository-specific {key}; missing capability is not success")
+    receipt_file = output / "release.json"
+    if output.exists():
+        if not resume or not receipt_file.is_file():
+            raise e.Failure("Inspect retained release state and use --resume; never blindly redeploy")
+        receipt = json.loads(receipt_file.read_text())
+        if receipt.get("candidate") != checked["candidate"]:
+            raise e.Failure("Receipt belongs to another candidate")
+        if receipt.get("state") == "verified":
+            print(str(receipt_file))
+            return receipt
+        # A crashed/failed promotion may already have changed production. Resume
+        # verifies only; it never repeats side effects automatically.
+        phases = ["release_verification"]
+    else:
+        output.mkdir(mode=0o700, parents=True)
+        receipt = {"schema": 1, "candidate": checked["candidate"], "acceptance": checked["acceptance"],
+                   "actor": actor, "state": "prepared", "commands": []}
+        phases = ["promotion", "release_verification"]
+    env = os.environ.copy()
+    env.update(RELEASE_SHA=sha, RELEASE_ARTIFACT=artifact, RELEASE_ISSUE=str(issue))
+
+    def save():
+        tmp = receipt_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(receipt, indent=2) + "\n")
+        tmp.chmod(0o600)
+        tmp.replace(receipt_file)
+
+    for phase in phases:
+        receipt["state"] = phase
+        save()
+        for command in config[phase]:
+            name = f"command-{len(receipt['commands']) + 1}.log"
+            with (output / name).open("wb") as stream:
+                p = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root, env=env,
+                                   stdout=stream, stderr=subprocess.STDOUT)
+            (output / name).chmod(0o600)
+            receipt["commands"].append({"phase": phase, "command": command, "exit_code": p.returncode,
+                                        "log": name, "sha256": e.sha256((output / name).read_bytes())})
+            save()
+            if p.returncode:
+                raise e.Failure("Release failed; inspect receipt and reconcile deployed state/rollback before retry")
+    receipt["state"] = "verified"
+    save()
+    print(str(receipt_file))
+    return receipt
+
+
+def finalize(receipt_file, actor, logs_reviewed, summary, close=False):
+    if not logs_reviewed or not summary.strip():
+        raise e.Failure("Inspect/sanitize release logs and provide a release summary")
+    receipt = json.loads(receipt_file.read_text())
+    candidate = receipt["candidate"]
+    repo, issue = candidate["repo"], candidate["issue"]
+    if receipt.get("state") != "verified" or not (receipt.get("commands") or receipt.get("release_report")):
+        raise e.Failure("Release must have verified deployment evidence")
+    checked = gate(repo, issue, candidate["sha"], candidate["artifact"], actor)
+    if checked["candidate"] != candidate:
+        raise e.Failure("Release receipt belongs to a superseded nomination")
+    if receipt.get("release_report"):
+        if not e.report_passes(receipt["release_report"], checked["config"].get("release_criteria"), repo, candidate["sha"], candidate["artifact"]):
+            raise e.Failure("Release verification has failed criteria")
+    else:
+        verification = [c for c in receipt["commands"] if c["phase"] == "release_verification"]
+        required = checked["config"]["release_verification"]
+        latest = verification[-len(required):]
+        if [c["command"] for c in latest] != required or any(c["exit_code"] != 0 for c in latest):
+            raise e.Failure("Release verification is incomplete or failed")
+    published = dict(receipt, actor=actor, summary=summary, logs=[])
+    for c in receipt["commands"]:
+        name = c["log"]
+        if Path(name).name != name or (receipt_file.parent / name).is_symlink():
+            raise e.Failure("Invalid release log path")
+        text = (receipt_file.parent / name).read_text(errors="replace")
+        urls = []
+        for offset in range(0, max(1, len(text)), 10000):
+            body = f"Release log `{name}` for `{candidate['sha']}` / part {offset // 10000 + 1}\n\n" + text[offset:offset + 10000]
+            urls.append(e.api(f"repos/{repo}/issues/{issue}/comments", {"body": body})["html_url"])
+        published["logs"].append({"log": name, "sha256": e.sha256(text.encode()), "urls": urls})
+    body = "<!-- sdlc-release-v1 -->\n```json\n" + json.dumps(published, indent=2) + "\n```"
+    if len(body.encode()) > 60000:
+        raise e.Failure("Release receipt too large")
+    result = e.api(f"repos/{repo}/issues/{issue}/comments", {"body": body})
+    if close:
+        e.run("gh", "issue", "close", str(issue), "--repo", repo, "--reason", "completed")
+    print(result["html_url"])
+    return result
+
+
+def record_runbook(repo, issue, sha, artifact, actor, report_file, output):
+    checked = gate(repo, issue, sha, artifact, actor)
+    report = json.loads(report_file.read_text())
+    if not e.report_passes(report, checked["config"].get("release_criteria"), repo, sha, artifact):
+        raise e.Failure("Runbook verification failed; retain findings and reconcile delivery")
+    if not report.get("previous_artifact") or not report.get("recovery", "").strip():
+        raise e.Failure("Record previous artifact (or explicit initial release) and recovery procedure")
+    if output.exists():
+        raise e.Failure("Retain earlier attempts; use a new receipt path")
+    receipt = {"schema": 1, "candidate": checked["candidate"], "acceptance": checked["acceptance"],
+               "actor": actor, "state": "verified", "commands": [], "release_report": report}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(receipt, indent=2) + "\n")
+    output.chmod(0o600)
+    print(str(output))
+    return receipt
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    p = sub.add_parser("finalize")
+    p.add_argument("--receipt", type=Path, required=True)
+    p.add_argument("--expected-actor", required=True)
+    p.add_argument("--logs-reviewed", action="store_true")
+    p.add_argument("--summary", required=True)
+    p.add_argument("--close", action="store_true", help="Close the delivery issue when this completes its scope")
+    for name in ("nominate", "gate", "promote", "record"):
+        p = sub.add_parser(name)
+        p.add_argument("--repo", required=True)
+        p.add_argument("--issue", type=int, required=True)
+        p.add_argument("--sha", required=True)
+        p.add_argument("--artifact", required=True)
+        p.add_argument("--expected-actor", required=True)
+        if name == "nominate":
+            p.add_argument("--policy-sha", help="Reviewed immutable pre-adoption transition policy revision")
+            p.add_argument("--pr", type=int, action="append", required=True)
+            p.add_argument("--output", type=Path, required=True)
+        if name == "promote":
+            p.add_argument("--root", type=Path, default=Path.cwd())
+            p.add_argument("--output", type=Path, required=True)
+            p.add_argument("--resume", action="store_true")
+        if name == "record":
+            p.add_argument("--report", type=Path, required=True)
+            p.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        if args.action == "finalize":
+            finalize(args.receipt, args.expected_actor, args.logs_reviewed, args.summary, args.close)
+        elif args.action == "nominate":
+            nominate(args.repo, args.issue, args.sha, args.artifact, args.pr, args.expected_actor, args.output, args.policy_sha)
+        elif args.action == "gate":
+            print(json.dumps(gate(args.repo, args.issue, args.sha, args.artifact, args.expected_actor)))
+        elif args.action == "record":
+            record_runbook(args.repo, args.issue, args.sha, args.artifact, args.expected_actor, args.report, args.output)
+        else:
+            release(args.root, args.repo, args.issue, args.sha, args.artifact, args.expected_actor, args.output, args.resume)
+    except (e.Failure, OSError, ValueError, KeyError) as error:
+        print(f"sdlc-release: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

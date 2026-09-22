@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 -c 'import pathlib, platform; expected = pathlib.Path(".python-version").read_text().strip(); actual = platform.python_version(); assert actual == expected, f"Use Python {expected}; found {actual}"'
+bin/sdlc check
+bin/validate-solution-plans
+bin/check-marketplace
+python3 -m unittest discover -s tests -p 'test_*.py'

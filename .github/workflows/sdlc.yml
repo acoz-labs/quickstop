@@ -1,0 +1,18 @@
+name: SDLC conformity
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  sdlc:
+    name: sdlc
+    if: ${{ vars.SDLC_ACTIONS_ENABLED == 'true' }}
+    runs-on: [self-hosted, trusted-linux-x64]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify managed standard and regression tests
+        run: |
+          bin/sdlc check
+          python3 -m unittest discover -s tests -p 'test_sdlc*.py'

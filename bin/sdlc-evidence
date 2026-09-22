@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""Portable verification receipts. GitHub authenticates attestations, not execution."""
+import argparse
+import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import subprocess
+import sys
+import uuid
+
+MARKER = "<!-- sdlc-evidence-v1 -->"
+CONFIG = ".sdlc/config.json"
+
+
+class Failure(Exception):
+    pass
+
+
+def encoded(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def run(*args, cwd=None):
+    p = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+    if p.returncode:
+        raise Failure(f"{args[0]} failed (exit {p.returncode}); inspect locally")
+    return p.stdout.strip()
+
+
+def api(endpoint, payload=None):
+    args = ["gh", "api", endpoint]
+    if payload is not None:
+        args += ["--method", "POST", "--input", "-"]
+    p = subprocess.run(args, input=json.dumps(payload) if payload is not None else None,
+                       text=True, capture_output=True)
+    if p.returncode:
+        raise Failure("GitHub request failed; no success attested")
+    return json.loads(p.stdout)
+
+
+def pages(endpoint):
+    result = []
+    for n in range(1, 10001):
+        data = api(f"{endpoint}{'&' if '?' in endpoint else '?'}per_page=100&page={n}")
+        result.extend(data)
+        if len(data) < 100:
+            return result
+    raise Failure("Pagination bound exceeded")
+
+
+def identity(repo, expected):
+    actor = api("user")["login"]
+    if actor.lower() != expected.lower():
+        raise Failure("Authenticated actor mismatch")
+    if api(f"repos/{repo}/collaborators/{actor}/permission")["permission"] not in {"write", "maintain", "admin"}:
+        raise Failure("Repository write permission required")
+    return actor
+
+
+def config_at(root):
+    return json.loads((root / CONFIG).read_text())
+
+
+def commands_for(config, phase):
+    commands = config.get("validation") if phase == "validation" else config.get("acceptance")
+    if phase == "acceptance" and commands is None and config.get("acceptance_criteria"):
+        commands = []
+    if phase == "acceptance" and commands == [] and config.get("acceptance_criteria"):
+        return commands_for(config, "validation")
+    if not isinstance(commands, list) or not commands or any(not isinstance(c, str) or not c.strip() for c in commands):
+        raise Failure(f"Configure nonempty {phase} commands; missing capability is not success")
+    # Acceptance validates the selected merged revision as well as exercising the
+    # built artifact. PR-head evidence cannot certify changed merge bytes.
+    return commands_for(config, "validation") + commands if phase == "acceptance" else commands
+
+
+def immutable(artifact):
+    return bool(re.fullmatch(r"(?:[^\s]+@)?sha256:[0-9a-f]{64}", artifact or ""))
+
+
+def retained_config(policy, sha, artifact):
+    """Select only an explicit reviewed pre-adoption validation mapping.
+
+    Callers must separately prove policy ancestry and that the original source
+    lacks configuration. This does not authorize a nomination or execution.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", sha or "") or not immutable(artifact):
+        raise Failure("Retained transition requires exact source and artifact")
+    entries = policy.get("retained_candidates")
+    if not isinstance(entries, list):
+        raise Failure("No reviewed retained-candidate transition")
+    matches = [entry for entry in entries if isinstance(entry, dict)
+               and entry.get("sha") == sha and entry.get("artifact") == artifact]
+    if len(matches) != 1:
+        raise Failure("Retained candidate is missing or ambiguous in reviewed policy")
+    entry = matches[0]
+    if set(entry) != {"sha", "artifact", "validation", "reason"} or not isinstance(entry["reason"], str) or not entry["reason"].strip():
+        raise Failure("Transition permits only documented source validation, not policy overrides")
+    config = dict(policy, validation=entry["validation"])
+    commands_for(config, "validation")
+    return config
+
+
+def clean_head(root):
+    if run("git", "status", "--porcelain", "--untracked-files=normal", cwd=root):
+        raise Failure("Verification requires a clean checkout, including untracked files")
+    return run("git", "rev-parse", "HEAD", cwd=root)
+
+
+def report_passes(report, criteria, repo, sha, artifact):
+    if not isinstance(report, dict) or report.get("repo") != repo or report.get("sha") != sha or report.get("artifact") != artifact:
+        raise Failure("Verification report must identify the exact repository, commit and artifact")
+    scenarios = report.get("scenarios")
+    if not isinstance(scenarios, list) or not scenarios or not isinstance(criteria, list) or not criteria or any(not isinstance(c, str) or not c for c in criteria):
+        raise Failure("Configure and record concrete verification criteria")
+    if any(not isinstance(s, dict) or not isinstance(s.get("criterion"), str) for s in scenarios):
+        raise Failure("Malformed verification scenario")
+    ids = [s.get("criterion") for s in scenarios]
+    if len(ids) != len(set(ids)) or not set(criteria).issubset(ids):
+        raise Failure("Verification report omits or duplicates required criteria")
+    for scenario in scenarios:
+        if scenario.get("result") not in {"passed", "failed"} or not scenario.get("observation", "").strip():
+            raise Failure("Every scenario needs an observed result")
+        links = scenario.get("evidence")
+        if not isinstance(links, list) or not links or any(not isinstance(url, str) or not url.startswith("https://") for url in links):
+            raise Failure("Every scenario needs openable HTTPS evidence")
+    return all(s["result"] == "passed" for s in scenarios)
+
+
+def verify(root, repo, phase, output, artifact=None, artifact_file=None, candidate_file=None, report_file=None, policy_root=None):
+    root, output = root.resolve(), output.resolve()
+    if output == root or root in output.parents:
+        raise Failure("Evidence must be outside the checkout")
+    if output.exists():
+        raise Failure("Use a new evidence directory; retain prior attempts")
+    origin = run("git", "remote", "get-url", "origin", cwd=root)
+    if origin not in {f"https://github.com/{repo}.git", f"https://github.com/{repo}", f"git@github.com:{repo}.git"}:
+        raise Failure("Checkout origin does not match repository")
+    head = clean_head(root)
+    if artifact_file:
+        artifact_file = artifact_file.resolve()
+        actual = "sha256:" + sha256(artifact_file.read_bytes())
+        if artifact and artifact != actual:
+            raise Failure("Artifact bytes differ from requested identity")
+        artifact = actual
+    if phase == "acceptance" and not immutable(artifact):
+        raise Failure("Acceptance requires an immutable artifact digest")
+    if artifact and not immutable(artifact):
+        raise Failure("Mutable artifact identity refused")
+    candidate = json.loads(candidate_file.read_text()) if candidate_file else None
+    if candidate and (candidate.get("repo") != repo or candidate.get("sha") != head or candidate.get("artifact") != artifact):
+        raise Failure("Nomination differs from checkout or artifact")
+    policy_head = None
+    if policy_root is not None:
+        policy_root = policy_root.resolve()
+        if phase != "acceptance" or not candidate or not candidate.get("policy_sha"):
+            raise Failure("Separate policy requires a nominated pre-adoption acceptance")
+        if (root / CONFIG).exists() or (root / CONFIG).is_symlink():
+            raise Failure("Source already has delivery policy")
+        if output == policy_root or policy_root in output.parents:
+            raise Failure("Evidence must be outside policy checkout")
+        policy_head = clean_head(policy_root)
+        if policy_head != candidate["policy_sha"] or policy_head == head:
+            raise Failure("Policy checkout differs from nominated immutable revision")
+        if run("git", "remote", "get-url", "origin", cwd=policy_root) != origin:
+            raise Failure("Policy checkout origin differs from product source")
+        run("git", "merge-base", "--is-ancestor", head, policy_head, cwd=policy_root)
+        config = retained_config(config_at(policy_root), head, artifact)
+    else:
+        if candidate and candidate.get("policy_sha"):
+            raise Failure("Nominated transition requires --policy-root")
+        config = config_at(root)
+    if candidate and candidate.get("config_sha256") != sha256(encoded(config)):
+        raise Failure("Verification configuration differs from nomination")
+    commands = commands_for(config, phase)
+    report = json.loads(report_file.read_text()) if report_file else None
+    report_ok = True
+    if phase == "acceptance" and config.get("acceptance_criteria"):
+        report_ok = report_passes(report, config["acceptance_criteria"], repo, head, artifact)
+    output.mkdir(mode=0o700, parents=True)
+    receipt = {"schema": 1, "id": str(uuid.uuid4()), "repo": repo, "phase": phase,
+               "sha": head, "artifact": artifact, "config_sha256": sha256(encoded(config)),
+               "environment": {"system": platform.system(), "machine": platform.machine(),
+                               "release": platform.release(), "python": platform.python_version()},
+               "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+               "commands": [], "clean_before": True, "success": False}
+    if candidate:
+        receipt["candidate_sha256"] = sha256(encoded(candidate))
+    if policy_head:
+        receipt["policy_sha"] = policy_head
+    if report:
+        receipt["acceptance_report"] = report
+    env = os.environ.copy()
+    env.update(RELEASE_SHA=head, RELEASE_ARTIFACT=artifact or "",
+               RELEASE_ARTIFACT_FILE=str(artifact_file) if artifact_file else "")
+    # Tests do not need the credential used to publish the receipt. Role routing
+    # stays the caller's responsibility; this is not a security sandbox.
+    env.pop("GH_TOKEN", None)
+    env.pop("GITHUB_TOKEN", None)
+    try:
+        for i, command in enumerate(commands):
+            logfile = output / f"command-{i + 1}.log"
+            with logfile.open("wb") as stream:
+                p = subprocess.run(["bash", "-o", "pipefail", "-c", command], cwd=root, env=env,
+                                   stdout=stream, stderr=subprocess.STDOUT)
+            logfile.chmod(0o600)
+            receipt["commands"].append({"command": command, "exit_code": p.returncode,
+                                        "log": logfile.name, "sha256": sha256(logfile.read_bytes())})
+            print(f"{phase}: command {i + 1}/{len(commands)} exit {p.returncode}", flush=True)
+            if p.returncode:
+                break
+        receipt["clean_after"] = clean_head(root) == head
+        if policy_head and clean_head(policy_root) != policy_head:
+            raise Failure("Policy checkout changed during verification")
+        if artifact_file and "sha256:" + sha256(artifact_file.read_bytes()) != artifact:
+            raise Failure("Artifact changed during verification")
+        receipt["success"] = (report_ok and receipt["clean_after"] and len(receipt["commands"]) == len(commands)
+                              and all(c["exit_code"] == 0 for c in receipt["commands"]))
+    finally:
+        receipt["finished_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        p = output / "receipt.json"
+        p.write_text(json.dumps(receipt, indent=2) + "\n")
+        p.chmod(0o600)
+    if not receipt["success"]:
+        raise Failure(f"Verification failed; retained receipt: {output / 'receipt.json'}")
+    print(str(output / "receipt.json"))
+    return receipt
+
+
+def parse_comment(comment):
+    body = comment.get("body", "")
+    if not body.startswith(MARKER + "\n```json\n"):
+        return None
+    try:
+        return json.loads(body.split("\n```json\n", 1)[1].split("\n```", 1)[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def validate_receipt(receipt, repo, sha, config, phase, artifact=None):
+    if receipt.get("schema") != 1 or receipt.get("repo") != repo or receipt.get("sha") != sha or receipt.get("phase") != phase:
+        raise Failure("Receipt is for another repository, revision or phase")
+    if receipt.get("config_sha256") != sha256(encoded(config)):
+        raise Failure("Receipt uses different verification configuration")
+    if phase == "acceptance" and (not immutable(artifact) or receipt.get("artifact") != artifact):
+        raise Failure("Acceptance is for a different artifact")
+    if phase == "acceptance" and config.get("acceptance_criteria"):
+        if not report_passes(receipt.get("acceptance_report"), config["acceptance_criteria"], repo, sha, artifact):
+            raise Failure("Product acceptance has a rejected criterion")
+    if not receipt.get("success") or not receipt.get("clean_before") or not receipt.get("clean_after"):
+        raise Failure("Failed or dirty verification cannot authorize delivery")
+    commands = receipt.get("commands", [])
+    if [c.get("command") for c in commands] != commands_for(config, phase) or any(c.get("exit_code") != 0 for c in commands):
+        raise Failure("Required command missing, changed or failed")
+
+
+def publish(receipt_path, number, expected_actor, logs_reviewed, summary):
+    if not logs_reviewed or not summary.strip():
+        raise Failure("Inspect and sanitize logs, then supply --logs-reviewed and a review summary")
+    receipt = json.loads(receipt_path.read_text())
+    repo = receipt["repo"]
+    actor = identity(repo, expected_actor)
+    if receipt["phase"] == "validation":
+        pr = api(f"repos/{repo}/pulls/{number}")
+        if pr["state"] != "open" or pr["draft"] or pr["head"]["sha"] != receipt["sha"]:
+            raise Failure("PR must be open, ready and at the verified revision")
+    else:
+        issue = api(f"repos/{repo}/issues/{number}")
+        if issue["state"] != "open" or "pull_request" in issue:
+            raise Failure("Acceptance requires an open delivery issue")
+    # Publishing attests to reviewed logs. Redaction is explicit: a publisher may
+    # edit log files, but original run hashes and published hashes are both kept.
+    published = dict(receipt)
+    published.update(actor=actor, subject=number, summary=summary, logs=[])
+    for c in receipt["commands"]:
+        name = c["log"]
+        if Path(name).name != name:
+            raise Failure("Invalid log path")
+        p = receipt_path.parent / name
+        if p.is_symlink():
+            raise Failure("Symlink log refused")
+        text = p.read_bytes().decode("utf-8", errors="replace")
+        data = text.encode()
+        links = []
+        # Character budget conservatively below GitHub's byte limit, including
+        # worst-case UTF-8. Never silently truncate evidence.
+        for offset in range(0, max(1, len(text)), 10000):
+            chunk = text[offset:offset + 10000]
+            body = f"Verification log `{receipt['id']}` / `{name}` / part {offset // 10000 + 1}\n\n" + chunk
+            links.append(api(f"repos/{repo}/issues/{number}/comments", {"body": body})["html_url"])
+        published["logs"].append({"command": c["command"], "sha256": sha256(data), "urls": links})
+    body = MARKER + "\n```json\n" + json.dumps(published, indent=2) + "\n```"
+    if len(body.encode()) > 60000:
+        raise Failure("Receipt too large; split repository verification commands sensibly")
+    result = api(f"repos/{repo}/issues/{number}/comments", {"body": body})
+    print(result["html_url"])
+    return result
+
+
+def trusted_receipt(repo, number, sha, config, phase, excluded, artifact=None, eligible=None, candidate_sha256=None):
+    candidates = []
+    for comment in pages(f"repos/{repo}/issues/{number}/comments"):
+        receipt = parse_comment(comment)
+        if not receipt or receipt.get("sha") != sha or receipt.get("phase") != phase:
+            continue
+        actor = comment["user"]["login"].lower()
+        if actor in {x.lower() for x in excluded} or (eligible is not None and actor not in {x.lower() for x in eligible}):
+            continue
+        if api(f"repos/{repo}/collaborators/{actor}/permission")["permission"] not in {"write", "maintain", "admin"}:
+            continue
+        if receipt.get("actor", "").lower() != actor or receipt.get("subject") != number:
+            continue
+        candidates.append((comment, receipt))
+    if not candidates:
+        raise Failure("No independent maintainer verification receipt on this revision")
+    # A later failed run revokes an earlier success, including another artifact's
+    # acceptance at the same SHA. Changed code always needs a fresh receipt.
+    comment, receipt = max(candidates, key=lambda pair: pair[0]["id"])
+    validate_receipt(receipt, repo, sha, config, phase, artifact)
+    if candidate_sha256 and receipt.get("candidate_sha256") != candidate_sha256:
+        raise Failure("Acceptance is for a different nomination or implementation set")
+    logs = receipt.get("logs", [])
+    if len(logs) != len(receipt["commands"]) or any(not x.get("urls") for x in logs):
+        raise Failure("Receipt lacks openable command logs")
+    for command, log in zip(receipt["commands"], logs):
+        if log.get("command") != command["command"]:
+            raise Failure("Log belongs to a different command")
+        chunks = []
+        for part, url in enumerate(log["urls"], 1):
+            match = re.fullmatch(r"https://github.com/" + re.escape(repo) + r"/(?:issues|pull)/" + str(number) + r"#issuecomment-(\d+)", url)
+            if not match:
+                raise Failure("Log must be an authenticated comment on the same subject")
+            source = api(f"repos/{repo}/issues/comments/{match[1]}")
+            prefix = f"Verification log `{receipt['id']}` / `{command['log']}` / part {part}\n\n"
+            if source["user"]["login"].lower() != comment["user"]["login"].lower() or not source["body"].startswith(prefix):
+                raise Failure("Log provenance mismatch")
+            chunks.append(source["body"][len(prefix):])
+        if sha256("".join(chunks).encode()) != log.get("sha256"):
+            raise Failure("Published log was altered after attestation")
+    return comment["html_url"]
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="action", required=True)
+    v = sub.add_parser("run")
+    v.add_argument("--root", type=Path, default=Path.cwd())
+    v.add_argument("--repo", required=True)
+    v.add_argument("--phase", choices=["validation", "acceptance"], default="validation")
+    v.add_argument("--output", type=Path, required=True)
+    v.add_argument("--artifact")
+    v.add_argument("--artifact-file", type=Path)
+    v.add_argument("--candidate", type=Path, help="Saved nomination JSON; required by the release gate")
+    v.add_argument("--report", type=Path, help="Observed acceptance scenarios with openable evidence")
+    v.add_argument("--policy-root", type=Path, help="Clean checkout of nominated pre-adoption policy revision")
+    v = sub.add_parser("publish")
+    v.add_argument("--receipt", type=Path, required=True)
+    v.add_argument("--subject", type=int, required=True)
+    v.add_argument("--expected-actor", required=True)
+    v.add_argument("--logs-reviewed", action="store_true")
+    v.add_argument("--summary", required=True)
+    a = p.parse_args()
+    try:
+        if a.action == "run":
+            verify(a.root, a.repo, a.phase, a.output, a.artifact, a.artifact_file, a.candidate, a.report, a.policy_root)
+        else:
+            publish(a.receipt, a.subject, a.expected_actor, a.logs_reviewed, a.summary)
+    except (Failure, OSError, ValueError, KeyError) as e:
+        print(f"sdlc-evidence: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
