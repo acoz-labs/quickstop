@@ -1,83 +1,71 @@
 # Quickstop
 
-A Claude Code plugin marketplace. Home of **claudit** — audit and optimize your Claude Code configuration — maintained by [acoz-labs](https://github.com/acoz-labs).
+The [acoz-labs](https://github.com/acoz-labs) unified marketplace for agentic
+plugins. A plugin can support one harness or several. Support is explicit;
+feature parity across harnesses is not required.
 
-## Plugins
+## Find a plugin
 
-| Plugin | Problem solved |
-|---|---|
-| [claudit](plugins/claudit) | Audit and optimise your Claude Code config. Caches current Claude Code ecosystem knowledge for any subsequent agent task. |
+Browse the [plugin catalog](docs/catalog.md) for supported harnesses and package
+versions. Today, [Claudit](plugins/claudit) audits and optimizes Claude Code
+configuration. It remains **Claude Code-only**, at **3.0.0**.
 
 ## Install
 
-Add quickstop as a plugin marketplace, then install claudit:
+### Claude Code
 
-```bash
+```text
 /plugin marketplace add acoz-labs/quickstop
 /plugin install claudit@quickstop
 ```
 
-Or install from a local clone:
+For local development:
 
-```bash
+```sh
 git clone https://github.com/acoz-labs/quickstop.git
 claude --plugin-dir /path/to/quickstop/plugins/claudit
 ```
 
-## Claudit (v3.0.0)
+### Codex
 
-Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task — building a skill, configuring an MCP, authoring CLAUDE.md, debugging hooks — can read it via `/claudit:knowledge` instead of re-fetching docs.
+Quickstop provides a native Codex marketplace index. It currently contains no
+plugins because none advertise Codex support yet. The catalog will list eligible
+packages as they are added; Claudit is not included through compatibility fallback.
 
-- Recursive CLAUDE.md discovery: root, subdirectory, `.claude/rules/`, `CLAUDE.local.md`, and `@import` references
-- Automatic scope detection — comprehensive audit inside a git repo, global-only outside
-- Research-first: subagents fetch official Anthropic docs before analysis; over-engineering detection is the highest-weighted scoring category
-- Decision memory annotates recommendations with past context (team-shared, committable)
-- Optional PR delivery with educational inline comments
-- Knowledge cache at `~/.cache/claudit/` with version-based + 7-day TTL invalidation, exposed to any agent task via `/claudit:knowledge [domain|all]`
-
-**Commands:** `/claudit`, `/claudit:knowledge`, `/claudit:refresh`, `/claudit:status`
-
-## Using Claudit's Knowledge Cache
-
-Claudit's knowledge cache is general-purpose. Once it's been populated (any `/claudit` or `/claudit:refresh` invocation does this), any agent task that needs current Claude Code ecosystem knowledge can read it via `/claudit:knowledge` instead of re-fetching docs.
-
-| Domain | Covers |
-|---|---|
-| `ecosystem` | MCP servers, plugins, hooks, skills, sub-agents |
-| `core-config` | Settings, permissions, CLAUDE.md, memory system |
-| `optimization` | Performance patterns, over-engineering detection |
-
-In a skill or agent prompt, invoke `/claudit:knowledge ecosystem` (or whichever domain you need) and use the output as expert context. The skill checks freshness and auto-refreshes stale domains transparently. If claudit is not installed, fall back to your own research.
-
-```
-=== CLAUDIT KNOWLEDGE: ecosystem ===
-[cached research content]
-=== END CLAUDIT KNOWLEDGE ===
-
-Knowledge source: cache (fresh, fetched 2026-03-22) | Domains: ecosystem
+```sh
+codex plugin marketplace add acoz-labs/quickstop
 ```
 
-Manual refresh: `/claudit:refresh [domain|all]`. Status: `/claudit:status`.
+This registers the marketplace; it does not make unsupported plugins compatible.
+Use the harness's plugin browser to install a listed package when one is available.
+### Pi
 
-## Development
+Pi installs individual packages rather than a marketplace index. See the
+[Pi package list](docs/pi-packages.md) for generated install commands, run from a
+clone of a reviewed Quickstop revision. There are no Pi packages listed yet;
+Claudit remains Claude Code-only. Adding Pi support to a future plugin does not
+require Claude Code or Codex support.
 
-Start with [repository guidance](docs/repository.md) and the
-[shared SDLC](docs/operations/sdlc.md). Run `bin/ci` for local verification.
-Plugin creation and review follow the standard issue, contributor PR and
-independent maintainer review workflow. Plugin-specific conventions and the
-review checklist live in the development guide.
+Additional harnesses join through explicit adapters and acceptance procedures.
 
-- [Plugin development](docs/plugin-development.md)
+## Develop and maintain
+
+- [Repository guidance](docs/repository.md) and [shared SDLC](docs/operations/sdlc.md)
+- [Catalog and package structure](docs/marketplace.md)
+- [Plugin development and review](docs/plugin-development.md)
 - [Artifact delivery and recovery](docs/delivery.md)
-- [Onboarding investigation](docs/investigation.md)
 - [Project board](https://github.com/orgs/acoz-labs/projects/40)
+- [Onboarding investigation](docs/investigation.md)
 
-The public repository moved from `acostanzo/quickstop` to `acoz-labs/quickstop`.
-The marketplace name remains `quickstop`, so `claudit@quickstop` is unchanged.
-Existing consumers should update their marketplace source to the new owner;
-GitHub redirects preserve the previous repository URL. Claudit's existing author
-metadata is retained as historical attribution in the unchanged 3.0.0 payload.
+`catalog.json` declares each plugin's supported targets. Native manifests own
+package versions. `bin/check-marketplace --write` generates the native indexes
+and browsable catalog; `bin/ci` rejects drift and runs the repository tests.
+See repository guidance for the pinned Python runtime.
+
+The repository moved from `acostanzo/quickstop` to `acoz-labs/quickstop`.
+The marketplace identity remains `quickstop`, including `claudit@quickstop`.
+Existing Claudit files and historical author attribution are preserved.
 
 ## License
 
-MIT
+MIT. Preserve each package's license and attribution.
