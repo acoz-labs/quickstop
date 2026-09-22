@@ -6,13 +6,16 @@ inside that directory. Skills, agents, hooks and server configuration belong at
 the plugin root, not inside its manifest directory. Add only components needed
 by the assigned feature and document their effects and prerequisites.
 
+Choose a lowercase kebab-case name and refuse to overwrite an existing plugin
+directory when creating a new plugin.
+
 Register `./plugins/<name>` in the root marketplace with matching name and stable
 `major.minor.patch` version. Keep an accurate README, license and root catalog
 entry. Preserve existing license notices; do not copy personal author details into
 new templates. A deliberate license change is separate from routine scaffolding.
 
-Smith creates a usable plugin from the issue; Hone reviews concrete findings.
-Neither needs a fixed agent fan-out or a numerical quality score. Consult the
+Use the standard contributor workflow for implementation and independent
+maintainer review for findings. Consult the
 current [plugin reference](https://code.claude.com/docs/en/plugins-reference) and
 [marketplace guide](https://code.claude.com/docs/en/plugin-marketplaces) for host
 requirements. These sources were inspected during September 2026 onboarding;
@@ -30,3 +33,23 @@ Changes to any distributed bytes require a higher plugin and marketplace version
 because the host caches plugin versions. Repository-only maintenance does not
 require a Claudit version bump. Use [artifact delivery](delivery.md) for actual
 plugin publication; do not infer a release from an implementation PR alone.
+
+## Plugin review checklist
+
+Apply these checks to the assigned change; record findings by severity with
+paths, evidence and user impact.
+
+- Confirm the installed plugin discovers its declared skills and agents, and
+  referenced resources resolve inside the distributed payload.
+- Check registration, versions, licensing and whether the README accurately
+  describes capabilities, prerequisites and effects.
+- Identify duplicated instructions or unnecessary orchestration with a concrete
+  maintenance or usability cost; avoid arbitrary scores and stylistic rewrites.
+- Exercise permissions, cache freshness/failure behavior and consumer-state
+  boundaries relevant to the change, including read-only requests.
+- Verify relevant user scenarios in an isolated consumer workspace and distinguish
+  runtime observations from static validation.
+
+An audit request alone does not authorize fixes or publication. Assigned fixes
+follow the shared SDLC; resolve findings against the issue without adding routine
+owner approval gates.

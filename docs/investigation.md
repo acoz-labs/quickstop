@@ -13,9 +13,12 @@ the repository-specific guide.
 
 Smith and Hone together occupied 795 lines, backed by seven repository research
 and audit agents and copied specification/reference material. Those agents were
-used by the repository skills, not shipped Claudit entrypoints. The shortcuts
-are retained with concise task-specific instructions; duplicated supporting
-agents/manuals and mandatory interactive scoring have been removed. Existing
+used by the repository skills, not shipped Claudit entrypoints. The initial onboarding retained concise shortcuts while removing duplicated
+supporting agents/manuals and mandatory interactive scoring. Following the
+owner's review, the remaining Smith and Hone skills were also retired: ordinary
+implementation and independent review already cover their workflows. Their
+useful plugin-specific checks now live in `docs/plugin-development.md`, with no
+replacement skill or scaffolder. Existing
 MIT notices are preserved. Hooks are evaluated by their actual assigned purpose,
 not prohibited by the old scaffolder's blanket observability-only rule.
 

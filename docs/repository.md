@@ -3,7 +3,7 @@
 Quickstop is a public Claude Code plugin marketplace maintained by acoz-labs.
 Its only shipped plugin is Claudit 3.0.0. Keep the marketplace at
 `.claude-plugin/marketplace.json` and distributable files under `plugins/<name>/`.
-Repository authoring tools in `.claude/` are not plugin payloads.
+Plugin creation and review use the shared SDLC and development guide.
 
 `AGENTS.md` and `docs/operations/sdlc.md` define delivery authority and roles.
 `CLAUDE.md` imports this guidance for Claude Code. Use conventional commit titles;
@@ -49,7 +49,6 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 ## Layout and tracking
 
 - `plugins/claudit/`: consumer skills, agents and their shared references.
-- `.claude/skills/`: concise repository-only Smith and Hone shortcuts.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
