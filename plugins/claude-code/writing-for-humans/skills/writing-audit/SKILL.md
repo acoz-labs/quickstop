@@ -20,7 +20,7 @@ Resolve all relative paths from this installed skill directory, never the workin
 | PR descriptions | *(none yet; use the output style's section)* |
 | Commit messages | *(none yet; use the output style's section)* |
 
-A surface with no reference falls back to that surface's section in the output style, which is thinner but not nothing. When you write a reference, replace the placeholder with its path here and add a row to `writing-style/SKILL.md`.
+A surface with no reference falls back to that surface's section in the output style, which is thinner but not nothing. Package maintainers adding a reference update this table and `../writing-style/SKILL.md` in the source repository. An ordinary audit does not edit installed plugin files.
 
 <!-- Don't leave a path here for a file that doesn't exist. A broken pointer
      reads as "load this" and fails silently when the read comes back empty. -->
@@ -29,7 +29,7 @@ A surface with no reference falls back to that surface's section in the output s
 
 With the floor confirmed present, the per-surface references are what you still need to load.
 
-**Why this file names no rules.** An audit that carries its own copy of the standard drifts from the standard, and then quietly enforces the older, weaker version. If a rule seems to be missing from a reference, fix the reference, not this skill.
+**Why this file names no rules.** An audit that carries its own copy of the standard drifts from the standard, and then quietly enforces the older, weaker version. If a rule seems to be missing, suggest the improvement separately from the writing audit. Package maintainers change the reference in the source repository, not this skill; ordinary audits never modify installed references.
 
 ## What to audit
 
