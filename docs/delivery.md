@@ -19,7 +19,11 @@ exact file and the complete implementation PR set with `bin/sdlc-release` using
 the commands in [local verification](operations/local-verification.md).
 
 Independently extract and inspect the retained archive in a temporary directory.
-Run the repository checks there. For every advertised target in the release,
+Run repository checks in a clean full-history checkout at the same candidate SHA:
+release-lock verification needs the pinned historical Git objects, which a source
+archive intentionally does not contain. Compare each extracted package digest with
+the candidate checkout and exercise the extracted retained package bytes, not a
+freshly rebuilt substitute. For every advertised target in the release,
 follow its `catalog.json` acceptance procedure in an isolated native harness.
 Catalog/fixture checks cannot substitute for installing and exercising actual
 packages. Record harness version and target package digest independently:
@@ -49,20 +53,42 @@ A missing host or unavailable scenario is a gap to resolve, not a passing result
 
 ## Publication and verification
 
-The mutable marketplace branch currently makes merged plugin changes available
-to consumers before a separate release gate. This is a legacy distribution
-limitation, not protected pre-release promotion. Before the first future plugin
-release, implement reviewed candidate isolation (for example version-pinned
-marketplace sources) so unaccepted payloads cannot become the advertised version.
-Do not claim the existing branch model already enforces that boundary. Repository-only catalog maintenance that preserves all plugin bytes does not
-constitute a new plugin release. Native index generation is not promotion or an
-acceptance gate.
+Candidate source lives in `catalog.json`; advertised packages are selected by
+`releases.json`. Claude and Codex install commit-pinned subdirectories. Pi's
+published commands create a separate detached checkout at the accepted commit,
+verify the package digest and install that local directory. No candidate becomes
+advertised merely because its source or manifest is merged.
 
-After that prerequisite is resolved and the gate passes, retain an attempt record
+After exact-candidate acceptance, use the existing SDLC gate through:
+
+```sh
+bin/marketplace-release promote --name PLUGIN --harness HARNESS \
+  --commit ACCEPTED_SHA --issue ISSUE --artifact sha256:ARCHIVE_DIGEST \
+  --expected-actor MAINTAINER
+```
+
+Repeat for each accepted target. This prepares the release lock and generated
+indexes; it does not publish them or replace independent review. The command
+requires live independently authenticated acceptance for the nominated candidate.
+Inspect the package digest, manifest snapshot, source commit and acceptance
+receipt in the proposed change. Static lock validation proves consistency, not
+that a manually written acceptance claim is true. Every publication-pointer PR,
+including manual recovery edits, needs independent review against actual release
+evidence. Never introduce another legacy-provenance entry to bypass acceptance.
+
+The initial Claudit pin preserves its previously advertised 3.0.0 bytes and
+availability. It is migration evidence, not retrospective product acceptance.
+Candidate code and publication pointers have separate revisions: accept source
+artifacts at the candidate SHA, then independently review the pointer change that
+advertises those exact bytes. Record both revisions without rebuilding artifacts.
+
+After the gate passes, retain an attempt record
 and previous advertised version/source before publishing. Attach the retained
 archive and checksum to a versioned GitHub Release at the nominated SHA, using
 the maintainer identity. Never rebuild or replace existing published assets.
-Advertise only the accepted version through the reviewed marketplace mechanism.
+Publish the independently reviewed lock/index change to advertise only the
+accepted version. Verify the remote pointers after merge; generating them locally
+is not publication.
 Download the asset and install from the published marketplace in an isolated
 consumer environment; record:
 
@@ -74,8 +100,8 @@ consumer environment; record:
 - `recovery-recorded`: previous source/version and recovery steps are retained and
   verified; an initial release is stated explicitly when no predecessor exists.
 
-The current repository intentionally has no generic promotion command. Once actual
-publication and verification succeed, use `bin/sdlc-release record` and `finalize`
+`bin/marketplace-release promote` prepares verified pointers; remote publication
+still follows the reviewed runbook above. Once actual publication and verification succeed, use `bin/sdlc-release record` and `finalize`
 with the observed release report. Do not invent successful deployment receipts.
 After an interruption, inspect existing tags, assets, marketplace references and
 attempt records before retrying; never overwrite a different artifact.

@@ -13,8 +13,9 @@ assigned feature; document effects and prerequisites.
 
 Add the plugin and its supported targets to `catalog.json`, with native format,
 package path and a real acceptance procedure for each target. Native manifests
-own versions. Run `bin/check-marketplace --write` to update native listings and
-the support table. Keep an accurate package README and license; preserve notices.
+own versions. Candidate declarations alone do not advertise the package.
+`releases.json` controls accepted listings; `bin/check-marketplace --write`
+regenerates native listings and the support table from those retained pointers. Keep an accurate package README and license; preserve notices.
 A deliberate license change is separate from routine scaffolding.
 
 Use the standard contributor workflow for implementation and independent
