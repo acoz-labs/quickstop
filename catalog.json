@@ -27,7 +27,7 @@
           "acceptance": "docs/acceptance/writing-for-humans.md"
         },
         "codex": {
-          "format": "agent-plugin",
+          "format": "codex-plugin",
           "path": "plugins/codex/writing-for-humans",
           "acceptance": "docs/acceptance/writing-for-humans.md"
         },

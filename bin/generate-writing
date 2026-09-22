@@ -44,9 +44,8 @@ def generate(target, destination):
             events.append("UserPromptSubmit")
             json_file(destination / ".claude-plugin/plugin.json", manifest)
         else:
-            json_file(destination / "plugin.json", {
-                "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-                **manifest, "extensions": {"com.openai": {"hooks": "./hooks/hooks.json"}}})
+            json_file(destination / ".codex-plugin/plugin.json", {
+                **manifest, "hooks": "./hooks/hooks.json"})
         variable = "CLAUDE_PLUGIN_ROOT" if target == "claude-code" else "PLUGIN_ROOT"
         hooks = {}
         for event in events:
