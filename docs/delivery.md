@@ -37,9 +37,9 @@ packages. Record harness version and target package digest independently:
   confirm read-only requests and intended write/network/PR boundaries. Use no
   personal configuration or externally sent test PRs without scoped authorization.
 
-For Claudit, use [its Claude Code procedure](acceptance/claudit.md). There is no
-Codex or Pi runtime acceptance to perform until a real target for that harness
-is introduced. Pi acceptance includes dependency and extension behavior as well
+For Claudit, use [its Claude Code procedure](acceptance/claudit.md). For Writing for Humans, use [the kit conversion procedure](acceptance/writing-for-humans.md).
+Both current plugin products target Claude Code; no Codex or Pi runtime acceptance
+is required for them. Pi acceptance includes dependency and extension behavior as well
 as its linked local-package lifecycle.
 For separate packages, acceptance and version changes can be scoped to affected
 targets; retained evidence must identify unchanged targets rather than silently
