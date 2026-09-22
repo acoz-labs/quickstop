@@ -86,14 +86,26 @@ def git(root, *args):
     return result.stdout
 
 
-def validate_resources(package, manifest):
-    for key in ('skills', 'agents', 'hooks', 'mcpServers', 'apps'):
-        value = manifest.get(key)
+def validate_resources(package, manifest, claude=False):
+    allowed = {'skills': (str, list) if claude else (str,),
+               'agents': (str, list) if claude else (),
+               'hooks': (str, list, dict) if claude else (str,),
+               'mcpServers': (str, list, dict) if claude else (str, dict),
+               'apps': (str,)}
+    for key, types in allowed.items():
+        if key not in manifest:
+            continue
+        value = manifest[key]
+        require(isinstance(value, types), f'{key}: invalid resource declaration type')
         if isinstance(value, str):
             component_path(package, value)
         elif isinstance(value, list):
             for item in value:
                 component_path(package, item)
+        elif key == 'mcpServers':
+            require(all(isinstance(server, dict) for server in value.values()), 'inline MCP servers must be objects')
+        elif key == 'hooks':
+            require(isinstance(value.get('hooks'), dict), 'inline hooks need a hooks object')
     interface = manifest.get('interface', {})
     require(isinstance(interface, dict), 'interface must be an object')
     for key in ('composerIcon', 'logo', 'logoDark'):
@@ -137,7 +149,7 @@ def package_manifest(root, plugin, harness, target):
                 require(isinstance(value, str) and not any(c in value for c in '*?[]!{}'), 'Quickstop Pi resources require explicit paths, not globs')
                 component_path(package, value)
     # Validate declared file resources without claiming the complete host schema.
-    validate_resources(package, manifest)
+    validate_resources(package, manifest, claude=target['format'] == 'claude-plugin')
     extension = manifest.get('extensions', {}).get('com.openai', {})
     require(isinstance(extension, dict), 'OpenAI extension must be an object')
     validate_resources(package, extension)
@@ -149,8 +161,11 @@ def package_manifest(root, plugin, harness, target):
                 require(compatibility[key] == manifest[key], f'portable/compatibility {key} mismatch')
         validate_resources(package, compatibility)
     skill_roots = {package / 'skills'}
-    if isinstance(manifest.get('skills'), str):
-        skill_roots.add(component_path(package, manifest['skills']))
+    declared_skills = manifest.get('skills', [])
+    if isinstance(declared_skills, str):
+        declared_skills = [declared_skills]
+    for value in declared_skills:
+        skill_roots.add(component_path(package, value))
     if target['format'] == 'pi-package':
         for value in manifest['pi'].get('skills', []):
             skill_roots.add(component_path(package, value))
