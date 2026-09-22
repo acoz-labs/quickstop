@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "name": "quickstop",
+  "display_name": "Acoz Labs",
+  "description": "The acoz-labs unified marketplace for agentic plugins.",
+  "plugins": [
+    {
+      "name": "claudit",
+      "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
+      "category": "Productivity",
+      "targets": {
+        "claude-code": {
+          "format": "claude-plugin",
+          "path": "plugins/claudit",
+          "acceptance": "docs/acceptance/claudit.md"
+        }
+      }
+    }
+  ]
+}
