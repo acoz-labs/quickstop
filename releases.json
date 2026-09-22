@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "releases": [
+    {
+      "name": "claudit",
+      "harness": "claude-code",
+      "commit": "b7370388e26ccac0ebf2c48a6b86942eb7259a9d",
+      "sha256": "7fae979a3cfe8da4b4a4adacb1eb043848c63732b59cc4a0baaff54a2b4e3867",
+      "target": {
+        "format": "claude-plugin",
+        "path": "plugins/claudit",
+        "acceptance": "docs/acceptance/claudit.md"
+      },
+      "manifest": {
+        "name": "claudit",
+        "version": "3.0.0",
+        "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
+        "author": {
+          "name": "quickstop",
+          "url": "https://github.com/acostanzo/quickstop"
+        },
+        "license": "MIT",
+        "keywords": [
+          "audit",
+          "configuration",
+          "optimization",
+          "health-check",
+          "best-practices"
+        ]
+      },
+      "provenance": {
+        "kind": "legacy-preserved",
+        "note": "Preserves previously advertised Claudit 3.0.0 bytes. This pin is migration provenance, not new runtime acceptance."
+      }
+    }
+  ]
+}
