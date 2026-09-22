@@ -6,7 +6,7 @@ After the accepted release is listed in Quickstop, add the marketplace with `cla
 
 Node.js 22 or later must be available as `node` to hook commands. SessionStart delivers the core at startup, resume, clear, fork and compaction; SubagentStart delivers it directly to subagents. Ordinary prompts do not inject another full copy. The package does not select or override an output style. Preserve existing styles and coding instructions.
 
-Use `claude plugin list` to verify installation and enablement, and `/hooks` to inspect hooks. Start a new session after changing installation. Ask a fictional writing question and assess understanding and factual preservation; hook discovery alone is insufficient. Invoke writing-setup for diagnosis if needed.
+Use `claude plugin list` to verify installation and enablement, and `/hooks` to inspect hooks. Enable an installed disabled plugin with `claude plugin enable writing-for-humans@quickstop`; use the native command at the intended scope instead of editing settings JSON. Start a new session after changing installation. Ask a fictional writing question and assess understanding and factual preservation; hook discovery alone is insufficient. Invoke writing-setup for diagnosis if needed.
 
 Use `claude plugin update writing-for-humans@quickstop` for an accepted update and restart. `claude plugin disable writing-for-humans@quickstop` disables it; `claude plugin uninstall writing-for-humans@quickstop` removes it. Existing conversation context can retain earlier guidance, so verify disabling in a fresh session. No global instruction copy or output-style change needs removal.
 
