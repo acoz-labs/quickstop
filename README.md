@@ -1,6 +1,6 @@
 # Quickstop
 
-A Claude Code plugin marketplace. Home of **claudit** — audit and optimize your Claude Code configuration — plus the repo-level tooling used to author marketplace plugins.
+A Claude Code plugin marketplace. Home of **claudit** — audit and optimize your Claude Code configuration — maintained by [acoz-labs](https://github.com/acoz-labs).
 
 ## Plugins
 
@@ -13,14 +13,14 @@ A Claude Code plugin marketplace. Home of **claudit** — audit and optimize you
 Add quickstop as a plugin marketplace, then install claudit:
 
 ```bash
-/plugin marketplace add acostanzo/quickstop
+/plugin marketplace add acoz-labs/quickstop
 /plugin install claudit@quickstop
 ```
 
 Or install from a local clone:
 
 ```bash
-git clone https://github.com/acostanzo/quickstop.git
+git clone https://github.com/acoz-labs/quickstop.git
 claude --plugin-dir /path/to/quickstop/plugins/claudit
 ```
 
@@ -59,20 +59,24 @@ Knowledge source: cache (fresh, fetched 2026-03-22) | Domains: ecosystem
 
 Manual refresh: `/claudit:refresh [domain|all]`. Status: `/claudit:status`.
 
-## Dev Tools
+## Development
 
-Repo-level skills for plugin authors (not distributable plugins — these live in `.claude/`):
+Start with [repository guidance](docs/repository.md) and the
+[shared SDLC](docs/operations/sdlc.md). Run `bin/ci` for local verification.
+The repository provides two small Claude Code shortcuts: `/smith <name>` to
+create a plugin and `/hone <name>` to review one. They follow the same issue,
+contributor PR and independent maintainer review workflow as other work.
 
-| Command | Purpose |
-|---------|---------|
-| `/smith <name>` | Scaffold a new plugin with correct structure and conventions |
-| `/hone <name>` | Audit an existing plugin's quality (8-category scoring with interactive fixes) |
+- [Plugin development](docs/plugin-development.md)
+- [Artifact delivery and recovery](docs/delivery.md)
+- [Onboarding investigation](docs/investigation.md)
+- [Project board](https://github.com/orgs/acoz-labs/projects/40)
 
-Both tools dispatch research agents to fetch the latest Anthropic plugin docs before operating, ensuring scaffolds and audits reflect the current spec.
-
-## Documentation
-
-See the [Claude Code plugin documentation](https://docs.anthropic.com/en/docs/claude-code/plugins) for plugin authoring and marketplace details.
+The public repository moved from `acostanzo/quickstop` to `acoz-labs/quickstop`.
+The marketplace name remains `quickstop`, so `claudit@quickstop` is unchanged.
+Existing consumers should update their marketplace source to the new owner;
+GitHub redirects preserve the previous repository URL. Claudit's existing author
+metadata is retained as historical attribution in the unchanged 3.0.0 payload.
 
 ## License
 
