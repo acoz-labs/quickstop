@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Validate Quickstop's local marketplace contract; no network or host writes."""
+import argparse
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+class Invalid(ValueError):
+    pass
+
+
+def read_json(path):
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise Invalid(f'{path.name}: invalid or missing JSON') from exc
+    if not isinstance(value, dict):
+        raise Invalid(f'{path.name}: expected an object')
+    return value
+
+
+def version(value):
+    # Quickstop currently publishes stable releases only.
+    if not isinstance(value, str) or not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', value):
+        raise Invalid(f'invalid stable version: {value!r}')
+    return tuple(map(int, value.split('.')))
+
+
+def git(root, *args):
+    result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True)
+    if result.returncode:
+        raise Invalid('Git comparison failed; supply an existing commit with --base')
+    return result.stdout
+
+
+def validate(root, base=None):
+    root = root.resolve()
+    market = read_json(root / '.claude-plugin/marketplace.json')
+    if market.get('name') != 'quickstop' or not market.get('owner', {}).get('name'):
+        raise Invalid('marketplace name and owner are required')
+    entries = market.get('plugins')
+    if not isinstance(entries, list) or not entries:
+        raise Invalid('marketplace must register at least one plugin')
+    names = set()
+    manifests = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise Invalid('plugin entry must be an object')
+        name = entry.get('name', '')
+        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9]*(-[a-z0-9]+)*', name) or name in names:
+            raise Invalid('plugin names must be unique lowercase kebab-case')
+        names.add(name)
+        if entry.get('source') != f'./plugins/{name}':
+            raise Invalid(f'{name}: source must be ./plugins/{name}')
+        directory = root / 'plugins' / name
+        if directory.is_symlink() or not directory.resolve().is_relative_to(root):
+            raise Invalid(f'{name}: plugin directory must remain inside this checkout')
+        if any(p.is_symlink() for p in directory.rglob('*')):
+            raise Invalid(f'{name}: symlinks require an explicit packaging design')
+        manifest = read_json(directory / '.claude-plugin/plugin.json')
+        manifests[name] = manifest
+        if manifest.get('name') != name or manifest.get('version') != entry.get('version'):
+            raise Invalid(f'{name}: manifest and marketplace name/version differ')
+        version(manifest.get('version'))
+        if not manifest.get('description') or not (directory / 'README.md').is_file():
+            raise Invalid(f'{name}: description and README are required')
+        if manifest.get('license') and not (directory / 'LICENSE').is_file():
+            raise Invalid(f'{name}: declared license needs its LICENSE file')
+        for skill in (directory / 'skills').glob('*'):
+            if skill.is_dir() and not (skill / 'SKILL.md').is_file():
+                raise Invalid(f'{name}: skill {skill.name} has no SKILL.md')
+        for document in list((directory / 'skills').glob('*/SKILL.md')) + list((directory / 'agents').rglob('*.md')):
+            content = document.read_text()
+            if not content.startswith('---\n') or '\n---\n' not in content[4:]:
+                raise Invalid(f'{document.name}: missing frontmatter')
+            header = content.split('\n---\n', 1)[0]
+            for field in ('name', 'description'):
+                if not re.search(rf'^{field}:\s*\S', header, re.M):
+                    raise Invalid(f'{document.name}: missing {field}')
+    directories = {p.name for p in (root / 'plugins').iterdir() if p.is_dir()}
+    if directories != names:
+        raise Invalid('plugin directories and marketplace registrations differ')
+    if base:
+        base = git(root, 'rev-parse', '--verify', f'{base}^{{commit}}').strip()
+        previous = json.loads(git(root, 'show', f'{base}:.claude-plugin/marketplace.json'))
+        old_names = {p['name'] for p in previous['plugins']}
+        changed = git(root, 'diff', '--no-renames', '--name-only', '-z', base, '--', 'plugins/').split('\0')
+        changed_names = {p.split('/')[1] for p in changed if p and len(p.split('/')) > 2}
+        # Include newly created, untracked payloads in developer checks.
+        untracked = git(root, 'ls-files', '--others', '--exclude-standard', '-z', '--', 'plugins/').split('\0')
+        changed_names.update(p.split('/')[1] for p in untracked if p and len(p.split('/')) > 2)
+        for name in changed_names & names & old_names:
+            old = json.loads(git(root, 'show', f'{base}:plugins/{name}/.claude-plugin/plugin.json'))
+            if version(manifests[name]['version']) <= version(old['version']):
+                raise Invalid(f'{name}: changed distributed files require a higher version')
+    return len(names)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument('--base', help='known pre-change commit; checks all distributed bytes, including README')
+    args = parser.parse_args()
+    try:
+        count = validate(args.root, args.base)
+    except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        print(f'Marketplace validation failed: {exc}', file=sys.stderr)
+        return 1
+    print(f'Marketplace valid: {count} plugin(s)' + ('; version changes checked' if args.base else ''))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

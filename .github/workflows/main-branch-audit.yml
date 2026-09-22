@@ -1,0 +1,26 @@
+name: Main branch audit
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  direct_push_audit:
+    name: direct_push_audit
+    if: ${{ vars.SDLC_ACTIONS_ENABLED == 'true' }}
+    runs-on: [self-hosted, trusted-linux-x64]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify documentation authority or independent code review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          for attempt in {1..12}; do
+            if bin/sdlc audit --repo "$REPO" --before "$BEFORE" --sha "$SHA"; then exit 0; fi
+            if [[ "$attempt" != 12 ]]; then sleep 5; fi
+          done
+          exit 1

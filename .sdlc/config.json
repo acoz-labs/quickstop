@@ -1,0 +1,22 @@
+{
+  "delivery_profile": "artifact",
+  "verification_mode": "local",
+  "validation": [
+    "bin/ci"
+  ],
+  "required_checks": [
+    "ci",
+    "sdlc"
+  ],
+  "acceptance_criteria": [
+    "plugin-installation",
+    "assigned-plugin-scenarios",
+    "consumer-state-boundaries"
+  ],
+  "release_criteria": [
+    "published-byte-identity",
+    "marketplace-installation",
+    "recovery-recorded"
+  ],
+  "delivery_runbook": "docs/delivery.md"
+}

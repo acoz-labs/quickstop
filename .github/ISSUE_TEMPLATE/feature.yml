@@ -1,0 +1,31 @@
+name: Feature
+description: Define an executable outcome without a mandatory planning ceremony.
+title: ""
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and scope
+      description: Who benefits, what should change, and what is outside scope?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable behavior the maintainer will verify against the candidate.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and risks
+      description: Include real dependencies and an optional plan when complexity warrants one.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and delivery
+      description: Tests, documentation, rendered evidence when relevant, release expectations and any explicit stopping point.
+    validations:
+      required: true
