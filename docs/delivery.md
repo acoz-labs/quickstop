@@ -127,3 +127,11 @@ evidence and limitations. Do not run plugin installation gates or create a
 plugin release/version to publish a guide. Mixed changes still require every
 affected plugin's existing artifact procedure. Consumer adaptations are never
 modified automatically; corrections use reviewed updates or reverts.
+
+Advertised workflows also have copyable storefront receipts. Follow the
+[receipt publication and update steps](workflows.md#storefront-receipts-and-updates)
+when releasing or revising a workflow. If a change affects its starter prompt,
+listing or receipt instructions, delivery includes refreshing the site's reviewed
+snapshot, deploying it through the site's service procedure, and verifying the
+live displayed/copied prompt. Guide-only changes with no receipt impact can still
+complete at verified repository publication; record that determination explicitly.
