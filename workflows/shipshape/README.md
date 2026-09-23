@@ -15,23 +15,27 @@ useful gaps in your process; leave the rest alone.
 Give an agent that can read this repository the following prompt. Adjust the
 last sentence if you want it to implement changes as well as propose them.
 
-> Read Quickstop's Shipshape workflow at
-> https://github.com/acoz-labs/quickstop/tree/main/workflows/shipshape,
-> including its process, adaptation guide and examples. Inspect this project's
-> existing instructions, contribution process, checks and release practices.
-> Identify any concrete gaps that Shipshape could help with. Preserve applicable
-> rules and what already works; do not add duplicate process or mandatory gates.
-> Recommend the smallest useful adaptation, explain its tradeoffs and how we
-> would verify it, and call out any capabilities we do not have. If there is no
-> useful gap, say so. Stop at a reviewable proposal; do not change files, settings,
-> permissions or external services yet.
+```text
+Read Quickstop's Shipshape workflow at
+https://github.com/acoz-labs/quickstop/tree/main/workflows/shipshape,
+including its process, adaptation guide and examples. Inspect this project's
+existing instructions, contribution process, checks and release practices.
+Identify any concrete gaps that Shipshape could help with. Preserve applicable
+rules and what already works; do not add duplicate process or mandatory gates.
+Recommend the smallest useful adaptation, explain its tradeoffs and how we
+would verify it, and call out any capabilities we do not have. If there is no
+useful gap, say so. Stop at a reviewable proposal; do not change files, settings,
+permissions or external services yet.
+```
 
 The proposal boundary belongs to this starter prompt, not to the workflow itself.
 For an implementation task, replace its final sentence with a boundary such as:
 
-> Implement the useful documentation changes in this repository, run relevant
-> checks, and prepare a pull request. Stop before merge or publication. If the
-> adaptation requires configuration or external changes, describe those separately.
+```text
+Implement the useful documentation changes in this repository, run relevant
+checks, and prepare a pull request. Stop before merge or publication. If the
+adaptation requires configuration or external changes, describe those separately.
+```
 
 Adjust that scope to the work you actually want done. A link to Shipshape never
 grants authority to publish, send messages, change access, or deploy software.
