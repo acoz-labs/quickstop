@@ -13,12 +13,3 @@ acceptance and deliver without routine owner approval.
 PRs explain behavior, validation, documentation impact and applicable release or
 rollback details. Use `Refs #N` when the issue stays open through release and
 `Closes #N` only when merge completes the documented delivery profile.
-
-Choose the contribution guide for the thing you are making:
-
-- [Plugins](docs/plugin-development.md): explicitly supported native capabilities.
-- [Workflows](docs/workflows.md): practical documentation people and agents adapt.
-
-Agent-authority and workflow-policy changes use independent review even when
-written in Markdown. Keep examples fictional and personal/private material out
-of this public repository.
