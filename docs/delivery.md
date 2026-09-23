@@ -1,6 +1,6 @@
-# Plugin artifact delivery
+# Quickstop publication
 
-Quickstop's delivery profile is **artifact**: consumers install plugin files,
+For installable plugins, Quickstop's delivery profile is **artifact**: consumers install plugin files,
 not a hosted service. Repository-only marketplace or SDLC maintenance can complete at reviewed
 merge when an issue explicitly preserves plugin payloads. It is not a new Claudit
 release and supplies no retrospective runtime acceptance for 3.0.0.
@@ -115,3 +115,15 @@ consumer update/reinstall instructions, since cached installations are not chang
 by a repository rollback. A fix to published plugin bytes uses a new version and
 repeats acceptance. Repository-only regressions use an independently reviewed
 revert followed by `bin/ci` and current-head evidence.
+
+## Read-and-adapt workflows
+
+Workflow guides are published as reviewed repository documentation, with the
+agent-authority review boundary described in [workflow guidance](workflows.md).
+For a workflow-only issue that preserves plugin payloads, publication completes
+at reviewed merge plus verification of the public entry page, supporting links
+and intended guidance at that exact revision. Record actual adaptation review
+evidence and limitations. Do not run plugin installation gates or create a
+plugin release/version to publish a guide. Mixed changes still require every
+affected plugin's existing artifact procedure. Consumer adaptations are never
+modified automatically; corrections use reviewed updates or reverts.
