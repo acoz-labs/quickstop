@@ -80,7 +80,7 @@ permalink used as a reference when traceability matters; do not automatically
 overwrite local decisions when Quickstop changes.
 
 Quickstop maintainers should compare relevant changes to the public
-[source standard](https://github.com/acoz-labs/software-repo-template/blob/main/docs/operations/sdlc.md)
+[standard used by Quickstop](../../docs/operations/sdlc.md)
 and incorporate improvements that apply to this portable guide. Keep organization
 policy, account setup and enforcement tooling in their own sources. This guide
 does not become the authority for Quickstop's own repository operations.

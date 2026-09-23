@@ -27,9 +27,14 @@ last sentence if you want it to implement changes as well as propose them.
 > permissions or external services yet.
 
 The proposal boundary belongs to this starter prompt, not to the workflow itself.
-For an implementation task, state which changes the agent may make and where it
-must stop. A link to Shipshape never grants authority to publish, send messages,
-change access, or deploy software.
+For an implementation task, replace its final sentence with a boundary such as:
+
+> Implement the useful documentation changes in this repository, run relevant
+> checks, and prepare a pull request. Stop before merge or publication. If the
+> adaptation requires configuration or external changes, describe those separately.
+
+Adjust that scope to the work you actually want done. A link to Shipshape never
+grants authority to publish, send messages, change access, or deploy software.
 
 ## What to read
 
@@ -62,7 +67,7 @@ is claimed: readers use whatever tools they actually have to read and apply it.
 ## Where it comes from
 
 Shipshape distills principles from the maintained
-[acoz-labs software delivery standard](https://github.com/acoz-labs/software-repo-template/blob/main/docs/operations/sdlc.md).
+[software delivery standard used by Quickstop](../../docs/operations/sdlc.md).
 It is an adaptation guide, not a copy of that organization's operational policy.
 You do not need its accounts, repository tooling, project boards or role setup.
 The documents here are sufficient to begin.
