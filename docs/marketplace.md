@@ -1,4 +1,7 @@
-# Unified marketplace contract
+# Plugin marketplace contract
+
+This contract covers installable plugins. Read-and-adapt guides follow the
+[workflow contribution guide](workflows.md) and stay out of native indexes.
 
 Quickstop separates candidate authoring from accepted native distribution indexes. It does not
 translate arbitrary plugin behavior between harnesses. The `quickstop` identity

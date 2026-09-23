@@ -1,25 +1,44 @@
 # Quickstop
 
-The [acoz-labs](https://github.com/acoz-labs) unified marketplace for agentic
-plugins. A plugin can support one harness or several. Support is explicit;
-feature parity across harnesses is not required.
+A little convenience store for your agents. Useful plugins, practical workflows,
+and a few good additions to the way you work.
 
-## Find a plugin
+Quickstop brings together two kinds of open-source tools from
+[acoz-labs](https://github.com/acoz-labs):
 
-Browse the [plugin catalog](docs/catalog.md) for supported harnesses and package
-versions. Today, [Claudit](plugins/claudit) audits and optimizes Claude Code
-configuration. It remains **Claude Code-only**, at **3.0.0**.
+| On the shelf | What you get | Get started |
+| --- | --- | --- |
+| **Plugins** | Installable capabilities for the agents they explicitly support. | [Browse plugins](docs/catalog.md) |
+| **Workflows** | Practical guides you and your agent can adapt to your project. | [Read and adapt](workflows/README.md) |
 
-## Install
+Visit the [Quickstop storefront](https://acoz.dev/projects/quickstop/) for a look around.
+
+## Plugins
+
+[Writing for Humans](plugins/claude-code/writing-for-humans) provides a selectable
+writing style and two skills for clearer human-facing communication.
+[Claudit](plugins/claudit) audits and improves Claude Code configuration.
+Both currently support **Claude Code only**. The [plugin catalog](docs/catalog.md)
+records advertised versions and supported harnesses.
+
+A plugin can support one harness or several. Support is explicit; parity is not
+required. Quickstop has native distribution patterns for Claude Code, Codex and Pi,
+but that does not make every plugin compatible with all three.
 
 ### Claude Code
 
+Inside Claude Code:
+
 ```text
 /plugin marketplace add acoz-labs/quickstop
-/plugin install claudit@quickstop
+/plugin install writing-for-humans@quickstop
 ```
 
-For local development:
+Restart Claude Code, then select `/output-style writing-for-humans:writing-for-humans`.
+For Claudit, use `/plugin install claudit@quickstop`. See each package's README
+for its setup and usage.
+
+For local plugin development:
 
 ```sh
 git clone https://github.com/acoz-labs/quickstop.git
@@ -29,43 +48,53 @@ claude --plugin-dir /path/to/quickstop/plugins/claudit
 ### Codex
 
 Quickstop provides a native Codex marketplace index. It currently contains no
-plugins because none advertise Codex support yet. The catalog will list eligible
-packages as they are added; Claudit is not included through compatibility fallback.
+plugins because none advertise Codex support yet.
 
 ```sh
 codex plugin marketplace add acoz-labs/quickstop
 ```
 
-This registers the marketplace; it does not make unsupported plugins compatible.
-Use the harness's plugin browser to install a listed package when one is available.
+This registers the marketplace. Use the harness's plugin browser to install a
+listed package when one is available.
+
 ### Pi
 
-Pi installs individual packages rather than a marketplace index. See the
-[Pi package list](docs/pi-packages.md) for generated install commands, run from a
-clone of a reviewed Quickstop revision. There are no Pi packages listed yet;
-Claudit remains Claude Code-only. Adding Pi support to a future plugin does not
-require Claude Code or Codex support.
+Pi installs individual packages. The [Pi package list](docs/pi-packages.md)
+contains generated installation instructions; no Pi packages are advertised yet.
 
-Additional harnesses join through explicit adapters and acceptance procedures.
+## Workflows
+
+**[Shipshape](workflows/shipshape/README.md)** — From first idea to ready to ship.
+A practical software delivery workflow you and your agents can make your own.
+
+Read it yourself or give its adoption instructions to your agent. Workflows help
+you shape your existing project agreements, tools and habits. They do not install
+plugins, run background processes, or require another layer of instructions in a
+project that already works well. Adopting a workflow is a deliberate change;
+reading a guide alone does not configure anything.
+
+[Browse workflows](workflows/README.md) · [How workflow contributions work](docs/workflows.md)
 
 ## Develop and maintain
 
 - [Repository guidance](docs/repository.md) and [shared SDLC](docs/operations/sdlc.md)
-- [Catalog and package structure](docs/marketplace.md)
+- [Plugin catalog and package structure](docs/marketplace.md)
 - [Plugin development and review](docs/plugin-development.md)
-- [Artifact delivery and recovery](docs/delivery.md)
+- [Workflow authoring and review](docs/workflows.md)
+- [Publication and recovery](docs/delivery.md)
 - [Project board](https://github.com/orgs/acoz-labs/projects/40)
-- [Onboarding investigation](docs/investigation.md)
 
-`catalog.json` declares each plugin's supported targets. Native manifests own
-package versions. `bin/check-marketplace --write` generates the native indexes
-and browsable catalog; `bin/ci` rejects drift and runs the repository tests.
-See repository guidance for the pinned Python runtime.
+`catalog.json` and `releases.json` govern installable plugins. Native manifests own
+package versions; generated indexes advertise accepted releases. Workflow guides
+live in `workflows/` and stay out of native plugin indexes. There is no workflow
+installer or separate workflow packaging format.
+
+Run `bin/ci` with the pinned Python runtime described in repository guidance.
 
 The repository moved from `acostanzo/quickstop` to `acoz-labs/quickstop`.
-The marketplace identity remains `quickstop`, including `claudit@quickstop`.
-Existing Claudit files and historical author attribution are preserved.
+The marketplace identity remains `quickstop`; existing package identities and
+historical author attribution are preserved.
 
 ## License
 
-MIT. Preserve each package's license and attribution.
+MIT. Preserve license notices and attribution when adapting the material.

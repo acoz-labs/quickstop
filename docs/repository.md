@@ -1,6 +1,7 @@
 # Quickstop repository
 
-Quickstop is the acoz-labs unified marketplace for agentic plugins. Claudit 3.0.0
+Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
+[Shipshape](../workflows/shipshape/README.md) is its first workflow. Claudit 3.0.0
 is advertised for Claude Code. Writing for Humans is a Claude Code-only kit conversion
 whose publication state is recorded in the generated catalog. `catalog.json`
 declares supported targets; native package manifests own versions. Generated
@@ -54,6 +55,7 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 
 - `catalog.json`: ordered plugin catalog and explicit supported targets.
 - `plugins/`: self-contained packages; Claudit retains `plugins/claudit/`.
+- `workflows/`: ordinary Markdown guides with a browsable entry index; no native installable packages.
 - `.claude-plugin/` and `.agents/plugins/`: generated native marketplace indexes.
 - `docs/catalog.md`: generated support/version table.
 - `docs/pi-packages.md`: generated individual Pi install commands.
