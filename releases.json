@@ -32,6 +32,29 @@
         "kind": "legacy-preserved",
         "note": "Preserves previously advertised Claudit 3.0.0 bytes. This pin is migration provenance, not new runtime acceptance."
       }
+    },
+    {
+      "name": "writing-for-humans",
+      "harness": "claude-code",
+      "commit": "288b7a6fdda9b96c6e86b8267acce1f81fe871fd",
+      "sha256": "6696c5ff9dad4bc4088819202556439bce56d956a4bc1fe8a8b36d683a37ce66",
+      "target": {
+        "format": "claude-plugin",
+        "path": "plugins/claude-code/writing-for-humans",
+        "acceptance": "docs/acceptance/writing-for-humans.md"
+      },
+      "manifest": {
+        "name": "writing-for-humans",
+        "version": "0.2.0",
+        "description": "Plain, direct Claude Code writing with context, evidence and an opinionated voice preset.",
+        "license": "MIT"
+      },
+      "provenance": {
+        "kind": "sdlc-accepted",
+        "issue": 129,
+        "artifact": "sha256:3a16f870d436852f27150054bd9cae16f9332d05debcb3ccf769435a29b28e12",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/129#issuecomment-5795512954"
+      }
     }
   ]
 }

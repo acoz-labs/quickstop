@@ -23,6 +23,17 @@
         "health-check",
         "best-practices"
       ]
+    },
+    {
+      "name": "writing-for-humans",
+      "version": "0.2.0",
+      "description": "The original Writing for Humans kit, packaged as a selectable Claude Code output style and two skills.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/acoz-labs/quickstop.git",
+        "path": "plugins/claude-code/writing-for-humans",
+        "sha": "288b7a6fdda9b96c6e86b8267acce1f81fe871fd"
+      }
     }
   ]
 }
