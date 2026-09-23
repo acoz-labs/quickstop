@@ -58,9 +58,8 @@ when the interface changes warrant them.
 
 Run the repository's required checks. Record what ran, the candidate it checked,
 results and relevant limitations. Preserve enough evidence for a reviewer to
-assess the outcome without exposing secrets or personal data. A missing test
-result means the result is unknown; it does not establish that testing never
-happened.
+assess the outcome without exposing secrets or personal data. Distinguish failed
+verification from checks whose results you have not observed.
 
 Fix failures within scope and repeat affected checks. Do not broaden testing
 indefinitely after the relevant checks pass unless new changes or unresolved
