@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "version": "2026.09.21.3",
+  "version": "2026.09.25.1",
   "files": {
     "AGENTS.md": {
-      "sha256": "e11fb1efe1f668ee245b66313508b3b75e5cb84231994c37bdcfcf7aa0860b32",
+      "sha256": "c46d32f586220642af8bb43905358054b12d879a4dce4633cd7eb35ff1921451",
       "mode": "644"
     },
     "CONTRIBUTING.md": {
@@ -11,7 +11,7 @@
       "mode": "644"
     },
     "SDLC_VERSION": {
-      "sha256": "6f5f9ae27713cd40de21965cc0a736423b9f24329ba12f7bbc55087b2bdd2a96",
+      "sha256": "74a6af87dacc399d9382d29877028ccb8300b0ac2d97de50ab685053d06c91f7",
       "mode": "644"
     },
     ".github/ISSUE_TEMPLATE/feature.yml": {
@@ -19,7 +19,7 @@
       "mode": "644"
     },
     "bin/sdlc": {
-      "sha256": "2ff513bfa97756970695dec04d62d43018b998c2fc5cfba01d3a99f3a115dae0",
+      "sha256": "af626e3956a8fbe7d69d9c6474f8554405cf529e2665a97660c2bb2593b85572",
       "mode": "755"
     },
     "bin/sdlc-evidence": {
@@ -51,15 +51,15 @@
       "mode": "644"
     },
     "docs/operations/sdlc.md": {
-      "sha256": "85dc7a7f402a8b4881ab07646df6de6355246b39bf8f10e151c3c4366782afc7",
+      "sha256": "d87fd294434e23a566d705a0c320fae65fa5e9245bd90693070470d86279cd7c",
       "mode": "644"
     },
     "docs/operations/repo-standard.md": {
-      "sha256": "527a793300c40274fbc5a0a7c391647a3d48ecfe294c09a582786c874fe23af8",
+      "sha256": "6df9af8194ca25042ef87ef7c501871e1fa8b2298a40c451ddc3aee3b4b39278",
       "mode": "644"
     },
     "docs/operations/local-verification.md": {
-      "sha256": "e5391959567d42b508d63be595b64656b41bb585c562396051691d286e73574c",
+      "sha256": "b7ce2495815cbf802ea7e0e7e8c7cdf422b154328b879f89ebe5cf5681b8e458",
       "mode": "644"
     },
     "docs/plans/README.md": {
