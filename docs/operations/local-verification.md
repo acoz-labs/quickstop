@@ -50,6 +50,10 @@ new verification and review. Keep failed attempts and publish their outcome; do
 not conceal a failure by presenting an earlier successful receipt. Documentation
 uses its simpler write/validate/publish lane.
 
+After review or verification, apply the [workspace-cleanup policy](sdlc.md#workspace-cleanup).
+Keep required evidence outside disposable worktrees, and record any workspace
+retained for a later acceptance or release step with its cleanup trigger.
+
 ## Accept and release an immutable candidate
 
 After merge, select a fixed commit and build a retained artifact once. Run the

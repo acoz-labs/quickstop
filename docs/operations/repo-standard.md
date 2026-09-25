@@ -1,6 +1,6 @@
 # Managed repository standard
 
-SDLC template version: `2026.09.21.3`.
+SDLC template version: `2026.09.25.1`.
 
 The template owns the files enumerated in `.sdlc/managed.json`. Their hashes
 identify the installed content. `bin/sdlc check` verifies them.

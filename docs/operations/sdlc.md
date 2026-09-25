@@ -1,6 +1,6 @@
 # Software delivery
 
-Standard version: `2026.09.21.3`.
+Standard version: `2026.09.25.1`.
 
 ## Authority and roles
 
@@ -98,6 +98,36 @@ Do not reuse an old acceptance verdict for changed bytes. Missing acceptance
 capabilities are explicit implementation work, never invented success.
 Production and publication within an assigned delivery task need no new owner
 sign-off. Live unrelated data migrations remain outside that task's scope.
+
+## Workspace cleanup
+
+Use isolated worktrees for development and independent review. Cleanup is part
+of task closeout for contributors and maintainers, including temporary review
+and verification workspaces. Once the corresponding PR is merged or closed and
+the workspace is no longer needed, remove its worktrees and task-created
+temporary resources. For work without a PR, use completion of the assigned task
+as the cleanup trigger. Respect explicit stopping points and ongoing handoffs.
+
+Before removal, verify live PR status, local changes, untracked and ignored files,
+unpublished commits, and ongoing use by processes or other sessions. A clean Git
+status alone does not establish that ignored data or release artifacts are safe
+to delete. Preserve unfinished work, required release and acceptance evidence,
+retained artifacts, and recovery material before removing a workspace. Do not
+force removal to bypass unresolved changes, locks, or ongoing use. Scope cleanup
+to resources created for the task; leave unrelated user files and shared services
+alone.
+
+Remove worktrees through Git and prune stale registrations only after verifying
+that their directories are gone and any unique commits are preserved. Delete
+local task branches only after verifying that their commits are merged or safely
+retained and no other task needs them. Closing a PR does not prove its commits
+were merged. Remote branch deletion is a separate repository-policy decision.
+
+Report cleanup at handoff or closeout. For every retained workspace or temporary
+resource, record why it remains, the responsible role, and the event that permits
+cleanup. Keep private machine paths in local task records; public issues and PRs
+contain only non-sensitive workspace identifiers and retention reasons. A merged
+PR may still need a retained acceptance or release workspace until that work ends.
 
 ## Project state
 

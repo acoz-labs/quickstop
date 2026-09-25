@@ -11,6 +11,10 @@ Follow `docs/operations/sdlc.md` for the shared delivery contract and
   issue and PR. Plans are optional and proportional, not a Ready prerequisite.
 - SDLC improvements update the template and every active repository in one
   maintenance operation, without pilot stages or deferred adoption waves.
+- Use isolated worktrees and clean up completed task workspaces and temporary
+  resources under the SDLC workspace-cleanup policy. Preserve active work and
+  required evidence; record the reason, responsible role and cleanup trigger for
+  anything retained.
 - Preserve exact-candidate checks, independent acceptance and release evidence.
 - Preserve task stopping points, product boundaries, secrets and honest authorship.
 - Keep personal identities and machine/account configuration outside product repos.
