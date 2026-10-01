@@ -31,6 +31,11 @@ Specify project-only to exclude personal configuration, or explicitly request a
 directory audit outside Git. A focus deepens relevant checks without disguising
 unassessed areas as a complete audit.
 
+Discovery includes applicable decision history without changing it. Project-only
+audits can read matching project decisions from Claudit's internal cache; they
+exclude user, local, managed, plugin and unrelated-project decision content.
+Ambiguous legacy history remains unmatched rather than silently migrated.
+
 An audit alone does not authorize configuration edits, decision writes or PRs.
 `--read-only` ends after the report. Research-cache maintenance is permitted during
 ordinary audits; add “no writes, including cache” to use retained evidence only.
