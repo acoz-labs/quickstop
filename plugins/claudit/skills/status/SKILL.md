@@ -1,93 +1,17 @@
 ---
 name: status
-description: Show claudit knowledge cache status — freshness, TTL, and domain coverage
-allowed-tools: Read, Bash
+description: Inspect Claudit cache domain freshness, provenance and failures without fetching or changing anything.
 ---
 
-# Claudit: Knowledge Cache Status
+# Claudit status
 
-You are the claudit cache status reporter. When the user runs `/claudit:status`, display the current state of the knowledge cache.
+Run `claude --version` and the helper
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/runtime.py" status --host-version "<actual output>"`.
+Use the actual detected version, not the example text. No writes, refreshes,
+agent dispatch or network requests belong to this skill.
 
-## Step 1: Get Current Version
-
-Run via Bash: `claude --version 2>/dev/null` → store as **CURRENT_VERSION**
-
-## Step 2: Read Manifest
-
-Read `~/.cache/claudit/manifest.json`.
-
-**If the file does not exist** (Read returns an error):
-
-```
-╔══════════════════════════════════════════════════╗
-║         CLAUDIT KNOWLEDGE CACHE                  ║
-╠══════════════════════════════════════════════════╣
-
-No knowledge cache found.
-
-Run /claudit:refresh or /claudit to populate the cache.
-
-The knowledge cache speeds up repeated audits and provides
-current Claude Code expert context to any subsequent agent task —
-building a skill, configuring an MCP, authoring CLAUDE.md, etc.
-╚══════════════════════════════════════════════════╝
-```
-
-Stop here.
-
-## Step 3: Compute Freshness
-
-Parse the manifest JSON and compute:
-
-1. **Version match**: Compare `claude_code_version` in manifest to CURRENT_VERSION
-   - Match → `✓ matches`
-   - Mismatch → `✗ stale (cached: {old}, current: {new})`
-
-2. **Per-domain TTL**: For each domain in `domains`, compute:
-   - Age = current date minus domain's `cached_at`
-   - TTL remaining = `max_ttl_days` minus age (in days and hours)
-   - If TTL remaining <= 0 → `expired`
-
-3. **Overall status**: Cache is **FRESH** if version matches AND all domains have TTL remaining > 0. Otherwise **STALE**.
-
-## Step 4: Verify Domain Files
-
-For each domain, check if the corresponding cache file exists:
-- `~/.cache/claudit/core-config.md`
-- `~/.cache/claudit/ecosystem.md`
-- `~/.cache/claudit/optimization.md`
-
-Run via Bash: `ls -la ~/.cache/claudit/*.md 2>/dev/null` to get file sizes.
-
-## Step 5: Display Status
-
-```
-╔══════════════════════════════════════════════════╗
-║         CLAUDIT KNOWLEDGE CACHE                  ║
-╠══════════════════════════════════════════════════╣
-
-Status:      {FRESH or STALE}
-Claude Code: v{CURRENT_VERSION} ({version match status})
-
-Domain             Cached            TTL Left     File
-core-config        {date}            {Xd Xh}      {size or MISSING}
-ecosystem          {date}            {Xd Xh}      {size or MISSING}
-optimization       {date}            {Xd Xh}      {size or MISSING}
-
-Max TTL: {max_ttl_days} days | Cache: ~/.cache/claudit/
-╚══════════════════════════════════════════════════╝
-```
-
-If STALE, add:
-
-```
-Cache will be refreshed on the next /claudit run.
-To refresh now: /claudit:refresh
-```
-
-If FRESH, add:
-
-```
-Access via: /claudit:knowledge — any subsequent agent task can read
-the cached ecosystem/core-config/optimization knowledge directly.
-```
+Present each domain's state, source date, recorded host version and reasons. Read
+[cache protocol](../../references/cache-check-protocol.md) if interpretation is
+needed. Missing files, corruption and failed refreshes affect status; do not infer
+freshness from an old manifest alone. For non-fresh domains mention
+`/claudit:refresh <domain>` as an available next action, without executing it.

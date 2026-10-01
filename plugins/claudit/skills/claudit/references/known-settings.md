@@ -1,285 +1,78 @@
-# Known Claude Code Settings & Configuration Reference
+# Current baseline and evidence pointers
 
-Static baseline derived from Anthropic's official Claude Code documentation. Research agents should fetch the latest docs and update their persistent memory with any changes.
+Reviewed against official documentation on 2026-10-01 and host 2.1.287. This is a
+small fallback reference, not a permanently current schema. Fresh official source
+claims and observed native behavior take precedence; unknown fields need research,
+not automatic deletion. Record which host a finding applies to.
 
-## Official Documentation URLs
+## Configuration and permissions
 
-Research agents should fetch these pages to build expert context:
-
-| Topic | URL |
-|-------|-----|
-| Settings | `https://docs.anthropic.com/en/docs/claude-code/settings.md` |
-| Permissions | `https://docs.anthropic.com/en/docs/claude-code/permissions.md` |
-| Memory & CLAUDE.md | `https://docs.anthropic.com/en/docs/claude-code/memory.md` |
-| Best Practices | `https://docs.anthropic.com/en/docs/claude-code/best-practices.md` |
-| MCP Servers | `https://docs.anthropic.com/en/docs/claude-code/mcp.md` |
-| Hooks | `https://docs.anthropic.com/en/docs/claude-code/hooks.md` |
-| Skills | `https://docs.anthropic.com/en/docs/claude-code/skills.md` |
-| Sub-agents | `https://docs.anthropic.com/en/docs/claude-code/sub-agents.md` |
-| Plugins | `https://docs.anthropic.com/en/docs/claude-code/plugins.md` |
-| Model Configuration | `https://docs.anthropic.com/en/docs/claude-code/model-config.md` |
-| CLI Reference | `https://docs.anthropic.com/en/docs/claude-code/cli-reference.md` |
-
-## settings.json Known Fields
-
-Settings can appear at multiple levels. The fields below are common across levels; project shared (`.claude/settings.json`) and project local (`.claude/settings.local.json`) support the same fields.
-
-Global settings (`~/.claude/settings.json`):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `permissions` | object | Global permission overrides |
-| `allowedTools` | string[] | Tools allowed without confirmation |
-| `deniedTools` | string[] | Tools that are blocked |
-| `hooks` | object | Global hooks configuration |
-| `model` | string | Default model selection |
-| `smallModelOverride` | string | Override for haiku-class tasks |
-| `enabledPlugins` | string[] | Plugin paths or marketplace references |
-| `claudeMdExcludes` | string[] | Path globs to skip CLAUDE.md files from loading |
-| `autoMemoryEnabled` | boolean | Toggle auto-memory (default: true) |
-| `apiKey` | string | API key (should NOT be in settings) |
-
-Project settings (`.claude/settings.json` shared, `.claude/settings.local.json` local):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `permissions` | object | Project-level permission rules |
-| `allowedTools` | string[] | Tools allowed without confirmation |
-| `deniedTools` | string[] | Tools that are blocked |
-| `hooks` | object | Project-level hooks configuration |
-| `claudeMdExcludes` | string[] | Path globs to skip CLAUDE.md files |
-| `autoMemoryEnabled` | boolean | Toggle auto-memory for this project |
-
-## Permission System
-
-### Permission Modes
-
-| Mode | Description |
-|------|-------------|
-| `default` | Ask for each tool use |
-| `plan` | Auto-approve reads, ask for writes |
-| `auto-edit` | Auto-approve file edits, ask for bash |
-| `full-auto` | Auto-approve everything (use with caution) |
-
-### Permission Pattern Formats
-
-```
-# Tool-level
-"allowedTools": ["Read", "Glob", "Grep"]
-
-# Tool with path constraints
-"allowedTools": ["Edit:/src/**", "Write:/src/**"]
-
-# Bash with command patterns
-"allowedTools": ["Bash(npm test)", "Bash(git status)"]
-
-# MCP tool patterns
-"allowedTools": ["mcp__servername__toolname"]
-```
-
-### Common Anti-Patterns
-
-- Dozens of granular `Bash(...)` rules when `auto-edit` mode would suffice
-- Duplicating allow rules that a higher permission mode already covers
-- Mixing `allowedTools` with a permission mode that already grants those tools
-
-## CLAUDE.md Configuration
-
-### CLAUDE.md File Hierarchy
-
-Claude Code loads instruction files from multiple locations with different behaviors:
-
-**Loading Behavior:**
-
-| Load Type | Behavior | Description |
-|-----------|----------|-------------|
-| Always loaded | Automatic | Root `CLAUDE.md`, `CLAUDE.local.md`, `~/.claude/CLAUDE.md` |
-| On-demand (subdirectory) | Loaded when working in that directory | `**/CLAUDE.md` files in subdirectories |
-| Path-filtered (rules) | Loaded when file path matches `paths:` frontmatter | `.claude/rules/*.md` files |
-
-**File Types:**
-
-| File | Location | Scope | Git Tracked |
-|------|----------|-------|-------------|
-| `CLAUDE.md` | Project root | Team — shared project instructions | Yes |
-| `CLAUDE.local.md` | Project root | Personal — gitignored project overrides | No |
-| `**/CLAUDE.md` | Any subdirectory | Team — scoped to that directory tree | Yes |
-| `.claude/rules/*.md` | Project `.claude/rules/` | Team — modular rules with optional path filtering | Yes |
-| `~/.claude/CLAUDE.md` | Home `.claude/` dir | Personal — global instructions across all projects | No |
-| `~/CLAUDE.md` | Home dir (legacy) | Personal — legacy global location | No |
-| Managed policy (macOS) | `/Library/Application Support/ClaudeCode/CLAUDE.md` | Enterprise — admin-managed | N/A |
-| Managed policy (Linux/WSL) | `/etc/claude-code/CLAUDE.md` | Enterprise — admin-managed | N/A |
-| Managed policy (Windows) | `C:\Program Files\ClaudeCode\CLAUDE.md` | Enterprise — admin-managed | N/A |
-
-**`@import` Syntax:**
-
-- Reference other files from within instruction files: `@path/to/file`
-- Max 5 levels of import depth
-- Circular import detection is built-in
-- Paths are relative to the file containing the import
-
-**`.claude/rules/` YAML Frontmatter:**
-
-```yaml
----
-paths:
-  - "src/api/**"
-  - "tests/api/**"
----
-
-# API Development Rules
-These rules apply only when working in the API source or test directories.
-```
-
-The `paths:` field accepts glob patterns. Rules without `paths:` frontmatter apply globally within the project.
-
-**`claudeMdExcludes` Setting:**
-
-In `settings.json`, the `claudeMdExcludes` field accepts path globs to skip specific CLAUDE.md files from loading:
+Settings scopes generally rank managed > CLI/session > local > project > user,
+with merged arrays and field-specific security exceptions. `permissions.allow`,
+`permissions.ask`, `permissions.deny` and `permissions.defaultMode` belong in
+settings. `--allowedTools` and `--disallowedTools` are CLI/SDK surfaces, not
+corresponding top-level settings lists. Current documented modes include
+`default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions` and `auto` where
+supported; availability depends on version/account/environment. Neither
+`auto-edit` nor `full-auto` is the current setting spelling. Default permission
+behavior is valid; more permissive modes are not an optimization for granular rules.
+Inspect sandbox configuration separately from permission prompts.
 
 ```json
 {
-  "claudeMdExcludes": ["vendor/**/CLAUDE.md", "third_party/**/CLAUDE.md"]
-}
-```
-
-**Size Guideline:** Individual instruction files should be under 200 lines per file (per Anthropic docs). Prefer decomposing large files into `.claude/rules/` or subdirectory `CLAUDE.md` files.
-
-### Recommended Structure
-
-A well-structured CLAUDE.md should be concise and include:
-
-1. **Project context** - What the project is and its key technology stack
-2. **Repository structure** - Brief directory layout
-3. **Key conventions** - Only project-specific conventions Claude wouldn't know
-4. **Build/test commands** - How to build, test, lint
-5. **Important patterns** - Architectural patterns specific to this codebase
-
-### Size Guidelines
-
-| Size | Assessment |
-|------|------------|
-| < 500 tokens | Lean and effective |
-| 500-1500 tokens | Good, comprehensive |
-| 1500-2500 tokens | Getting verbose, review for redundancy |
-| 2500+ tokens | Likely over-engineered, active performance cost |
-
-### Common Over-Engineering Patterns
-
-- Restating Claude's built-in behaviors ("always read files before editing")
-- Prescribing exact formatting rules Claude already follows
-- Long lists of "do not" instructions for things Claude wouldn't do
-- Duplicating information available in package.json, tsconfig, etc.
-- Embedding full API documentation instead of pointing to files
-- Adding instructions that fight Claude's natural coding style
-
-## Hooks Configuration
-
-### Event Types
-
-| Event | When It Fires |
-|-------|---------------|
-| `PreToolUse` | Before any tool is called |
-| `PostToolUse` | After any tool returns |
-| `Notification` | When Claude sends a notification |
-| `Stop` | When Claude finishes a response |
-| `SubagentStop` | When a subagent completes |
-| `SessionStart` | At the beginning of a session |
-
-### Hook Schema
-
-```json
-{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": ["Bash(git status)"]
+  },
   "hooks": {
-    "EventName": [
-      {
-        "matcher": "ToolName",
-        "command": "shell command",
-        "timeout": 10000
-      }
-    ]
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{"type": "command", "command": "./scripts/check-command.sh", "timeout": 30}]
+    }]
   }
 }
 ```
 
-### Common Anti-Patterns
+This illustrates schema, not a recommendation to install or execute the example
+hook. Hook handlers are nested under matcher groups. Timeouts use **seconds**,
+and omission selects a type-specific default. Current hooks include command,
+prompt, agent, HTTP and `mcp_tool` handlers; event compatibility, async behavior, matchers,
+exit/output contracts and auth fields differ by handler. Fetch the current event
+reference rather than maintaining a guessed fixed event count.
 
-- Hooks that duplicate built-in Claude Code behavior
-- Overly broad matchers that fire on every tool call
-- Hooks with no timeout (can hang the session)
-- Chains of hooks that could be a single script
+## Plugins and context
 
-## MCP Server Configuration
+`commands/` remains supported; new workflows may benefit from skills, but an
+existing command is not broken. The plugin manifest is optional; when supplied,
+`name` is required. Other metadata and component directories are optional.
+Validate actual default and declared paths, including inline hook/MCP/LSP config.
+Official marketplace entries receive the same evidence-based checks as others.
 
-### Schema (.mcp.json)
+MCP transports have different requirements: stdio requires a command (args may
+be omitted); HTTP/SSE endpoints do not require a local command. A configured name
+is not proof of connection health or usage. Tool search/deferred loading and
+`alwaysLoad` affect prompt overhead. Inspect actual `/context` or plugin cost
+observations when available; do not assign a universal per-server token charge.
 
-```json
-{
-  "mcpServers": {
-    "server-name": {
-      "command": "binary",
-      "args": ["arg1", "arg2"],
-      "env": { "KEY": "value" }
-    }
-  }
-}
-```
+Skills/subagents use native Claude frontmatter. Model aliases resolve on the
+host; do not freeze a stale model catalog or invent effort levels. Research uses
+`sonnet` for source discrimination, no persistent memory, and `omitClaudeMd: true`
+(supported since 2.1.271) to avoid unrelated instruction loading. This is an
+architectural choice, not a measured latency/quality guarantee. Audit agents also
+omit inherited instructions and receive the scoped files explicitly as data.
 
-### Health Indicators
+## Official sources
 
-- Command binary exists and is executable
-- Server responds to tool listing
-- Tools are actually used (not just configured)
-- No duplicate functionality across servers
-
-## Official Feature-Flag Plugins
-
-Anthropic publishes official plugins under the `claude-plugins-official` namespace (e.g., `typescript-lsp@claude-plugins-official`, `rust-analyzer-lsp@claude-plugins-official`). These are **empty shells** — typically containing only a LICENSE and README — that act as feature flags to activate built-in Claude Code capabilities (such as the LSP client). They intentionally lack `plugin.json`, `skills/`, `agents/`, and other standard plugin structure. Audits should recognize these by their `@claude-plugins-official` suffix and skip structure validation.
-
-## Plugin Structure (Current Standard)
-
-```
-plugin-name/
-├── .claude-plugin/
-│   └── plugin.json         # Required: name, version, description
-├── agents/                  # Subagents (YAML frontmatter + markdown)
-│   └── agent-name.md
-├── skills/                  # Skills (current standard, replaces commands/)
-│   └── skill-name/
-│       ├── SKILL.md         # Skill definition
-│       └── references/      # Supporting files
-├── hooks/
-│   └── hooks.json           # Event hooks
-├── .mcp.json                # MCP server config
-└── README.md
-```
-
-### Subagent Frontmatter Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Agent identifier |
-| `description` | Yes | What the agent does (include examples) |
-| `tools` | No | List of tools the agent can use (defaults to all) |
-| `model` | No | `inherit`, `haiku`, `sonnet`, `opus` |
-| `memory` | No | `user` (persists across sessions) or `project` |
-| `color` | No | Terminal color for output |
-
-### Skill Frontmatter Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Skill identifier |
-| `description` | Yes | Trigger phrases and purpose |
-| `disable-model-invocation` | No | Prevent auto-triggering (true for deliberate actions) |
-| `allowed-tools` | No | Tools the skill can use |
-| `context` | No | Additional context files to load |
-| `agent` | No | Default agent for the skill |
-
-### Legacy vs Current
-
-| Legacy | Current | Migration |
-|--------|---------|-----------|
-| `commands/` directory | `skills/` directory | Move .md to skills/name/SKILL.md |
-| Simple markdown commands | YAML frontmatter skills | Add frontmatter with name, description |
-| No tool restrictions | `allowed-tools` field | Specify needed tools |
+- [Settings and precedence](https://code.claude.com/docs/en/settings)
+- [All settings](https://code.claude.com/docs/en/settings-reference)
+- [Permissions](https://code.claude.com/docs/en/permissions)
+- [Memory and instruction loading](https://code.claude.com/docs/en/memory)
+- [Hooks](https://code.claude.com/docs/en/hooks)
+- [MCP](https://code.claude.com/docs/en/mcp)
+- [Plugin manifest](https://code.claude.com/docs/en/plugins-reference)
+- [Plugin components](https://code.claude.com/docs/en/plugins/components)
+- [Plugin cost measurement](https://code.claude.com/docs/en/plugins/measure)
+- [Mods](https://code.claude.com/docs/en/plugins/mods/overview)
+- [Skills](https://code.claude.com/docs/en/skills)
+- [Subagents](https://code.claude.com/docs/en/sub-agents)
+- [Models and effort](https://code.claude.com/docs/en/model-config)

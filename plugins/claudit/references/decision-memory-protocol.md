@@ -1,107 +1,63 @@
-# Claudit Decision Memory Protocol
+# Scoped decision history
 
-This reference defines the standard procedure for reading and writing claudit decision memory. Decision memory stores user responses to audit recommendations so future runs can present past context alongside new findings.
+History annotates findings; it never suppresses them or authorizes action. A
+read-only audit reads existing stores without creating, migrating or updating any.
+Record only an explicit selection, rejection/deferment or successfully applied
+fix covered by existing user authorization. Omission or “skip” is not rejection.
 
-**Core principle:** Previous decisions are context, not constraints. Claudit always surfaces all recommendations — decisions annotate them, never suppress them.
+## Locations
 
-## Storage Location
+- Personal: `<cache>/decisions-v2.json`, including user/local/plugin/managed and
+  private project decisions. Namespace project records by a stable project key
+  (normalized absolute project root) in `project_id` and match only that project.
+- Shared: `<project>/.claude/claudit-decisions-shared-v2.json` only when the user
+  explicitly wants project decisions shared. Only project-relative, shareable
+  targets and sanitized project reasons belong here.
+- Historical: `<project>/.claude/claudit-decisions.json` and
+  `<cache>/decisions.json`. Read with `decisions-read`; v1 records are returned as
+  `legacy_unmatched`. Preserve them unchanged. They mix basenames/scopes and must
+  not automatically match, migrate, or be staged/published.
 
-- **Project audits** (comprehensive scope): `{PROJECT_ROOT}/.claude/claudit-decisions.json`
-- **Global-only audits**: `~/.cache/claudit/decisions.json`
+A known project identity can survive a move if explicitly reconciled; do not
+silently merge records from unrelated same-named clones. Always load relevant
+personal and shared history separately, keeping provenance and unresolved conflicts.
 
-Project decision files are committable — team members benefit from shared context. The `reason` field doubles as documentation for intentional deviations from best practice.
+## Identity and record
 
-## Schema
+Run `identity <scope> <scope-root> <target-path> <category> <issue-type>` to compute
+an escaped JSON tuple of scope, normalized relative path, category and issue type.
+Scopes: `project`, `local`, `user`, `managed`, `plugin`. For plugin scope, use the
+installed plugin root plus `project_id`/plugin identity in matching context. Distinct
+subdirectory files and same-named personal/project files must not collide.
+Cross-file findings use an explicit representative file and list related paths.
 
 ```json
 {
-  "schema_version": 1,
-  "decisions": [
-    {
-      "fingerprint": "over-engineering:restated-builtin:CLAUDE.md",
-      "category": "Over-Engineering",
-      "recommendation": "Remove restated built-in: 'Always read files before editing'",
-      "action": "rejected",
-      "reason": "Team onboarding — keeping for junior devs",
-      "decided_by": "acostanzo",
-      "timestamp": "2026-03-24T10:30:00Z",
-      "context": {
-        "claudit_version": "2.4.0",
-        "claude_code_version": "2.1.81",
-        "score_impact": 10
-      }
-    }
-  ]
+  "fingerprint": "[\"project\",\".claude/settings.json\",\"security\",\"broad-bash-allow\"]",
+  "project_id": "/normalized/project/root",
+  "action": "accepted",
+  "recommendation": "Narrow one observed Bash permission",
+  "reason": "User-selected fix",
+  "decided_by": "actual git identity or unknown",
+  "timestamp": "actual ISO timestamp",
+  "context": {"claudit_version":"3.1.0","claude_code_version":"actual detected version","score_impact":15}
 }
 ```
 
-### Field Definitions
+Do not copy example timestamps or identities. Use `decision-save <destination>
+<entry-json>`; add `--shared` only for the explicitly selected shared destination.
+The helper locks and atomically upserts a v2 store, retaining replaced records in
+history. It refuses malformed stores, personal records in shared mode and mixed
+legacy publication. Never fall back to overwriting a corrupt store by hand.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `fingerprint` | string | Composite key: `{category_slug}:{issue_type}:{file_stem}` |
-| `category` | string | Scoring category name (e.g., "Over-Engineering") |
-| `recommendation` | string | The recommendation text as presented |
-| `action` | enum | `accepted`, `rejected`, `alternative`, `deferred` |
-| `reason` | string? | Optional user-provided reason (most valuable for `rejected`) |
-| `decided_by` | string | Git user name (`git config user.name`) at decision time |
-| `timestamp` | string | ISO 8601 timestamp |
-| `context.claudit_version` | string | Plugin version at decision time |
-| `context.claude_code_version` | string | Claude Code version at decision time |
-| `context.score_impact` | number | Point impact at decision time |
+Match fingerprint **and** project/plugin identity where applicable. Keep legacy
+records visible as unmatched context until the user explicitly disambiguates
+scope/path. Flag a matched decision for reevaluation on host-version change,
+score impact change >=5, age >90 days, or deferred age >30 days. Previously
+accepted issues that recur are regressions; rejected/deferred choices remain
+visible with their reasons. History is not evidence that a current defect exists.
 
-### Action Types
-
-| Action | Meaning | Future Behavior |
-|--------|---------|-----------------|
-| `accepted` | User applied the fix | If issue recurs, annotate as regression |
-| `rejected` | User intentionally declined | Annotate with reason, check staleness |
-| `alternative` | User took a different approach | Annotate with what they did instead |
-| `deferred` | User will address later | Treat as new after 30 days |
-
-## Fingerprinting
-
-`{category_slug}:{issue_type}:{file_stem}`
-
-- **category_slug**: Slugified scoring category (see Issue Type Slugs table in scoring-rubric.md)
-- **issue_type**: Normalized from rubric deductions (e.g., `restated-builtin`, `missing-binary`)
-- **file_stem**: Target file basename (e.g., `CLAUDE.md`, `settings.json`) or `_global` for cross-file issues
-
-This three-part key is stable across runs without hashing flagged content — which matters because the model can't compute a reliable content hash anyway. Two distinct findings of the same `issue_type` in the same file share a fingerprint; that's an accepted trade-off (one decision covers the pattern for that file), kept deliberately simple.
-
-### Matching Algorithm
-
-When a new recommendation is generated, compute its fingerprint and match against stored decisions:
-
-1. **Match** (same fingerprint): A past decision applies. Surface it as context and check staleness.
-2. **No match**: New recommendation. No past decision applies.
-
-## Staleness Rules
-
-A past decision is flagged for re-evaluation when ANY condition is met:
-
-| Condition | Reason | Check |
-|-----------|--------|-------|
-| Score impact delta >= 5 | Rubric or analysis weighted it differently | Compare `context.score_impact` to current |
-| Claude Code version changed | Best practices may have evolved | Compare `context.claude_code_version` to current |
-| Decision age > 90 days | Periodic re-evaluation | Compare `timestamp` to current date |
-| Deferred age > 30 days | Deferred items expire sooner | Action is `deferred` and age > 30 days |
-
-**Precedence:** The 30-day deferred expiry takes precedence over the 90-day general threshold for `deferred` items — report the 30-day reason, not both.
-
-Stale decisions are annotated in the report with the specific staleness reason, prompting the user to re-evaluate.
-
-## Read Procedure
-
-1. Determine scope: comprehensive → read `{PROJECT_ROOT}/.claude/claudit-decisions.json`; global-only → read `~/.cache/claudit/decisions.json`
-2. If file does not exist → `DECISION_HISTORY = []` (first run, no decisions yet)
-3. If file exists, parse JSON and validate `schema_version` is 1
-4. Store parsed `decisions` array as `DECISION_HISTORY`
-
-## Write Procedure
-
-1. Compute new decisions from Phase 4 selections
-2. Load existing decisions (same read procedure)
-3. Merge: new decisions overwrite any with matching `fingerprint` (upsert)
-4. Write merged array back to file
-5. For `decided_by`: run `git config user.name 2>/dev/null` and use the result (fall back to "unknown")
+Shared records must omit local absolute project IDs, personal paths, secret
+values and private reasons before publication. Shared matching uses the containing
+repository as project identity. Review the exact proposed diff; schema validation
+cannot determine whether free text contains personal information.
