@@ -30,7 +30,14 @@ class RuntimeTests(unittest.TestCase):
         self.config = self.home / '.claude'
         self.project = self.base / 'project'
         self.project.mkdir()
-        self.env = patch.dict(os.environ, {'CLAUDIT_CACHE_DIR': str(self.cache)}, clear=False)
+        # Fixture Git must never consult operator signing, hooks or credentials.
+        self.env = patch.dict(os.environ, {
+            'CLAUDIT_CACHE_DIR': str(self.cache),
+            'HOME': str(self.home),
+            'USERPROFILE': str(self.home),
+            'GIT_CONFIG_GLOBAL': os.devnull,
+            'GIT_CONFIG_NOSYSTEM': '1',
+        }, clear=False)
         self.env.start()
         self.addCleanup(self.env.stop)
 
@@ -470,6 +477,28 @@ class RuntimeTests(unittest.TestCase):
         status = json.loads(self.cli('status', '--host-version', '2.1.287', 'core-config').stdout)[0]
         self.assertEqual(status['state'], 'degraded')
         self.assertIn('denied by host permissions', status['last_failure'])
+
+    def test_fixture_git_ignores_inherited_signer_and_hook_configuration(self):
+        hostile = self.write(self.base / 'operator.gitconfig',
+                             '[commit]\n\tgpgsign = true\n'
+                             '[gpg]\n\tprogram = nonexistent-claudit-test-signer\n'
+                             '[core]\n\thooksPath = /nonexistent-claudit-test-hooks\n')
+        # Model a caller whose actual Git setup would fail or request credentials.
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': str(hostile)}, clear=False):
+            isolated = RuntimeTests(methodName='test_status_cli_default_is_nonmutating_and_unknown_domain_fails')
+            try:
+                isolated.setUp()
+                isolated.repo()
+                self.assertEqual(isolated.git('log', '-1', '--format=%an <%ae>'),
+                                 'Synthetic Test <synthetic@example.invalid>')
+                config = isolated.git('config', '--show-origin', '--list')
+                self.assertNotIn('operator.gitconfig', config)
+                self.assertNotIn('gpgsign', config)
+                self.assertNotIn('hookspath', config)
+                self.assertEqual(os.environ['GIT_CONFIG_GLOBAL'], os.devnull)
+                self.assertEqual(os.environ['GIT_CONFIG_NOSYSTEM'], '1')
+            finally:
+                isolated.doCleanups()
 
 
 if __name__ == '__main__':
