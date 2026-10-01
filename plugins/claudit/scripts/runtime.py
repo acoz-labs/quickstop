@@ -480,7 +480,9 @@ def discover(cwd, home, config=None, managed=None, limit=200, scope='auto'):
     omitted = other[max(0, limit - len(critical)):]
     gaps.extend(['Filesystem candidates do not prove effective CLI, environment, remote managed/MDM policy, trust or enabled-plugin state; confirm /status, /memory and /mcp when needed.',
                  'Instruction imports and claudeMdExcludes require source inspection; omitted files and excluded dependency directories are not assessed.'])
-    return {'scope': scope, 'git_root': git_root, 'cwd': str(cwd), 'project_root': str(project), 'main_worktree': str(main), 'config_dir': str(config),
+    history = decision_context(cache_root(), project, main, scope, plugins)
+    gaps.extend(history['gaps'])
+    return {'scope': scope, 'git_root': git_root, 'decision_context': history, 'cwd': str(cwd), 'project_root': str(project), 'main_worktree': str(main), 'config_dir': str(config),
             'files': kept, 'mcp': mcp, 'plugins': plugins, 'coverage': {'discovered': len(files), 'included': len(kept),
             'omitted': [{'path': f['path'], 'kind': f['kind']} for f in omitted], 'gaps': gaps},
             'precedence': 'managed > CLI/session > local > project > user; list merging and field-specific exceptions require current source verification'}
@@ -549,6 +551,61 @@ def decisions_read(path):
         raise ValueError('Unsupported decisions schema')
     except FileNotFoundError:
         return {'schema_version': 2, 'decisions': [], 'legacy_unmatched': []}
+
+
+def decision_context(cache, project, main, scope, plugins):
+    """Return applicable decision evidence without migrating or changing any store."""
+    project, main = Path(project).resolve(), Path(main).resolve()
+    project_ids = {str(project), str(main)}
+    plugin_ids = {value for plugin in plugins for value in (plugin['name'], str(Path(plugin['root']).resolve()))}
+    stores = [(Path(cache) / 'decisions-v2.json', 'private')]
+    if scope != 'global':
+        stores.append((project / '.claude/claudit-decisions-shared-v2.json', 'shared'))
+        stores.append((project / '.claude/claudit-decisions.json', 'legacy'))
+    if scope != 'project':
+        stores.append((Path(cache) / 'decisions.json', 'legacy'))
+    result = {'stores': [], 'decisions': [], 'gaps': [],
+              'matching': 'Scoped fingerprint and full project/plugin identity; preserve conflicting applicable records separately'}
+    for path, storage in stores:
+        state = file_state(path)['state']
+        receipt = {'path': str(path), 'storage': storage, 'state': state,
+                   'applicable_count': 0, 'excluded_count': 0, 'legacy_unmatched_count': 0}
+        result['stores'].append(receipt)
+        if state == 'missing':
+            continue
+        if state != 'present':
+            result['gaps'].append(f'Decision store {state}; history unassessed: {path}')
+            continue
+        try:
+            data = decisions_read(path)
+            receipt['legacy_unmatched_count'] = len(data.get('legacy_unmatched', []))
+            if storage == 'legacy':
+                receipt['legacy_unmatched_count'] += len(data['decisions'])
+                continue
+            for entry in data['decisions']:
+                record_scope, relative, _, _ = validate_decision(entry)
+                namespace = entry.get('project_id')
+                if storage == 'shared':
+                    applicable = record_scope == 'project' and not namespace and not personal_path(relative)
+                    if not applicable:
+                        result['gaps'].append(f'Shared decision store contains out-of-scope records; excluded: {path}')
+                elif record_scope in ('project', 'local'):
+                    applicable = scope != 'global' and namespace in project_ids
+                    if scope == 'project' and record_scope != 'project':
+                        applicable = False
+                elif record_scope == 'plugin':
+                    applicable = scope != 'project' and namespace in plugin_ids
+                else:
+                    applicable = scope != 'project' and (not namespace or namespace in project_ids)
+                if applicable:
+                    receipt['applicable_count'] += 1
+                    result['decisions'].append({'source': str(path), 'storage': storage, 'record': entry})
+                else:
+                    receipt['excluded_count'] += 1
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            receipt['state'] = 'corrupt'
+            result['gaps'].append(f'Invalid decision store; history unassessed: {path}')
+    return result
 
 
 def validate_decision(entry):

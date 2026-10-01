@@ -45,8 +45,18 @@ content. Default scope is comprehensive inside Git and global-only outside Git. 
 explicit directory/project audit can include a non-Git working directory. “Global
 only” explicitly skips project analysis. Present a compact map and coverage gaps.
 
-Read [decision protocol](../../references/decision-memory-protocol.md) only to
-load applicable history. Reads do not create or migrate records.
+Before delegation, consume the **`decision_context` returned near the beginning
+of discovery output**. It reads `<cache>/decisions-v2.json`, current-project shared
+v2 history, and applicable legacy stores without writing. Do not replace it with
+only a read of the legacy project file. Preserve each applicable record's scope,
+full project/plugin identity and provenance; report corrupt stores as gaps and
+legacy counts as unmatched. Pass relevant current records to each audit agent,
+even when there are no legacy decisions. Never forward excluded other-project
+records. Project-only can use matching project decision metadata from Claudit's
+internal cache, but exposes no user/local/managed/plugin decisions. Global-only
+excludes project/local decisions. Read the
+[decision protocol](../../references/decision-memory-protocol.md) for matching and
+annotations. Reads do not create, migrate or update records.
 
 ## 1. Obtain current evidence
 
@@ -68,7 +78,8 @@ Use the host Agent tool (Task on older hosts) with native types:
 - `claudit:audit-ecosystem`: MCP/plugin/hook/skill/agent map + `ecosystem`, and only
   tool-search/context measurement claims from `optimization`.
 
-Dispatch independent agents concurrently in the foreground. Pass paths and
+Set **`run_in_background: false` explicitly on every Agent/Task call**. Dispatch
+independent agents concurrently in the foreground and wait for each result. Pass paths and
 redacted metadata, scope restrictions, relevant claim/source IDs, coverage gaps,
 focus, preserved research limitations and applicable scoped decisions. Do not copy every domain into every prompt.
 The audit agents are read-only and cannot perform fixes. If one fails, identify
@@ -85,10 +96,28 @@ Report coverage alongside any assessed-subset score; never label it a complete
 health grade when material scope is unassessed. Deduplicate overlapping agents'
 findings before scoring. Show scoped decision context without suppressing issues.
 
+Resolve current permission-pattern anchoring (`//`, `/`, `~/`) before comparing
+targets, and verify explicit intended protection when supplied. A demonstrated
+anchor/target mismatch can be a real defect. Calibrate intent before calling
+something a defect: a deny rule protecting an
+absolute path different from the current home is valid, not evidence of the wrong
+home; a scoped rule whose glob currently matches no files may intentionally cover
+future files. Both are intent-unknown observations unless the user states the
+intended target or an observed required operation demonstrates a mismatch. Do not
+remove them or deduct points on absence alone. A confirmed finding needs an
+applicable failure/consequence, not merely a surprising path or empty match set.
+
 For token estimates, identify what actually loads and when. `chars/4` on text is
 an approximation, not measured usage; settings JSON size and all configured MCP
 tools are not automatically prompt tokens. Native `/context` or plugin cost
 observations can strengthen a claim but are optional read-only evidence.
+
+### Read-only final-output check
+
+For `--read-only`, “review only” or “no changes”, finish after the evidence report.
+Recommendations may describe possible changes, but the final response must contain
+**no offer to apply fixes, follow-up selection question, PR offer or decision-write
+prompt**. Check the final paragraph before sending; omit Phases 4 and 5 entirely.
 
 ## 4. Apply authorized selections
 
