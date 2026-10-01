@@ -1,6 +1,6 @@
 ---
 name: claudit
-description: Audit and optimize Claude Code configuration against current official documentation. Use when the user requests a Claude Code setup audit or tuning.
+description: Audit or tune Claude Code configuration against current official documentation, or apply selected Claudit recommendations with scoped local edits or PR delivery.
 argument-hint: "[focus-area] [--read-only]"
 ---
 
@@ -96,8 +96,15 @@ Read [scoring rubric](references/scoring-rubric.md) and
 configuration evidence, a current source and an applicable consequence. Separate
 confirmed defects, optional improvements and unresolved observations. Do not
 score unknown/unreadable areas as perfect or penalize absent optional features.
-Report coverage alongside any assessed-subset score; never label it a complete
-health grade when material scope is unassessed. Deduplicate overlapping agents'
+Before presenting **any numeric score or letter grade**, run the helper's read-only
+`score` command as specified in the rubric. Pass each category's actual evidence
+coverage: assessed with a supported numeric score, partial, unknown or N/A. Missing
+categories remain unknown. “No defects found” does not mean fully assessed. The
+helper excludes partial/unknown/N/A categories from numeric scoring and suppresses
+all overall scores/letter grades when any material category remains unassessed.
+Use its returned fields exactly; do not add an A+ to an assessed-subset score. If
+you do not run the helper, omit numeric scores and grades entirely. Consume its
+stdout directly without scratch files. Deduplicate overlapping agents'
 findings before scoring. Show scoped decision context without suppressing issues.
 
 Resolve current permission-pattern anchoring (`//`, `/`, `~/`) before comparing

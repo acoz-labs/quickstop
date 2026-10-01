@@ -500,6 +500,81 @@ class RuntimeTests(unittest.TestCase):
             finally:
                 isolated.doCleanups()
 
+    def test_partial_score_excludes_unknowns_and_never_grades_subset(self):
+        result = self.cli('score', '--category', 'claudemd-quality:assessed:100',
+                          '--category', 'mcp-config:partial', '--category', 'security:unknown',
+                          '--category', 'plugin-health:na')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report['assessed_subset_score'], 100)
+        self.assertEqual(report['assessed_weight'], 20)
+        self.assertEqual(report['applicable_weight'], 85)
+        self.assertEqual(report['assessment'], 'incomplete')
+        self.assertNotIn('overall_score', report)
+        self.assertNotIn('grade', report)
+        self.assertEqual(report['categories']['over-engineering']['state'], 'unknown')
+        for name in ('mcp-config', 'security', 'plugin-health', 'over-engineering'):
+            self.assertNotIn('score', report['categories'][name])
+        self.assertFalse(self.cache.exists())
+
+    def test_complete_score_uses_fixed_weights_and_preserves_grades(self):
+        values = {'over-engineering': 90, 'claudemd-quality': 80, 'security': 70,
+                  'mcp-config': 60, 'plugin-health': 50, 'context-efficiency': 40}
+        report = r.score_categories([f'{name}:assessed:{score}' for name, score in values.items()])
+        expected = sum(values[name] * weight for name, weight in r.SCORE_WEIGHTS.items()) / 100
+        self.assertEqual(report['overall_score'], expected)
+        self.assertEqual(report['grade'], 'C')
+        self.assertEqual(report['coverage_percent'], 100)
+        self.assertEqual(report['assessment'], 'complete')
+        self.assertNotIn('assessed_subset_score', report)
+        for value, grade in ((100, 'A+'), (95, 'A+'), (94, 'A'), (90, 'A'),
+                             (89, 'B'), (75, 'B'), (60, 'C'), (40, 'D'), (0, 'F')):
+            with self.subTest(value=value):
+                complete = r.score_categories([f'{name}:assessed:{value}' for name in r.SCORE_WEIGHTS])
+                self.assertEqual(complete['grade'], grade)
+        applicable = r.score_categories([f'{name}:assessed:100' for name in r.SCORE_WEIGHTS if name != 'claudemd-quality'] + ['claudemd-quality:na'])
+        self.assertEqual(applicable['assessed_weight'], 80)
+        self.assertEqual(applicable['applicable_weight'], 80)
+        self.assertEqual(applicable['overall_score'], 100)
+        self.assertEqual(applicable['grade'], 'A+')
+
+    def test_score_rejects_invalid_coverage_numbers_and_duplicates(self):
+        invalid = ['mcp-config:partial:100', 'security:unknown:0', 'plugin-health:na:100',
+                   'security:assessed', 'security:assessed:NaN', 'security:assessed:inf',
+                   'security:assessed:-inf', 'security:assessed:1e309', 'security:assessed:-1',
+                   'security:assessed:101', 'security:assessed:', 'unknown:assessed:100',
+                   'security:maybe:100', 'security', 'security:assessed:100:extra']
+        for value in invalid:
+            with self.subTest(value=value):
+                result = self.cli('score', '--category', value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(json.loads(result.stderr)['operation_failed'])
+                self.assertEqual(result.stdout, '')
+        with self.assertRaises(ValueError):
+            r.score_categories(['security:assessed:100', 'security:unknown'])
+        with self.assertRaises(ValueError):
+            r.score_categories([None])
+        self.assertFalse(self.cache.exists())
+
+    def test_missing_or_na_score_never_invents_grade_and_keeps_state_unchanged(self):
+        self.seed()
+        before = {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        empty = json.loads(self.cli('score').stdout)
+        self.assertEqual(empty['assessed_weight'], 0)
+        self.assertEqual(empty['coverage_percent'], 0)
+        self.assertEqual(empty['assessment'], 'incomplete')
+        self.assertEqual(len(empty['unassessed_categories']), 6)
+        for field in ('overall_score', 'assessed_subset_score', 'grade'):
+            self.assertNotIn(field, empty)
+        na = r.score_categories([f'{name}:na' for name in r.SCORE_WEIGHTS])
+        self.assertEqual(na['assessment'], 'not-applicable')
+        self.assertEqual(na['applicable_weight'], 0)
+        self.assertIsNone(na['coverage_percent'])
+        self.assertNotIn('overall_score', na)
+        self.assertNotIn('grade', na)
+        after = {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        self.assertEqual(after, before)
+
 
 if __name__ == '__main__':
     unittest.main()

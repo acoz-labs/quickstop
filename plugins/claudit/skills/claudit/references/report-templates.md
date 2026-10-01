@@ -25,9 +25,15 @@ cross-agent findings. Note matching decisions with reason, scope and any stalene
 
 ## Score and limits
 
-Show each assessed category, deduction rationale and score; mark N/A and unknown.
-Include weights and any renormalization. If materially incomplete, label the
-result “assessed-subset score”; otherwise show the overall score/grade. Research
+Use the helper `score` output for every numeric score or grade, otherwise omit
+numbers/grades. Show assessed categories with their supported deductions and score;
+partial, unknown and N/A rows have no numeric score. Report assessed/applicable
+weight, coverage and unassessed categories. If the helper returns only an
+`assessed_subset_score`, label it exactly and show **no overall score or letter
+grade**. Only the helper's complete-coverage result permits an overall score/grade.
+A table of 100s is invalid when its own evidence says MCP is redacted/partial,
+plugin components unread, or security policy unassessed; classify those rows before
+calling the helper rather than treating absent defects as complete evidence. Research
 source dates, current/recorded host, stale/degraded domains, unreadable files and
 failed agents remain explicit. A fresh cache is not semantic verification.
 
