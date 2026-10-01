@@ -11,7 +11,11 @@ user's requested scope and existing authorization. An audit alone authorizes
 analysis and Claudit research-cache maintenance, not consumer edits, decisions,
 commits or PRs. `--read-only` (also “review only”, “no changes”) stops after the
 report: no fixes, decision writes or delivery prompts. If “no writes” includes
-caches, use existing knowledge without refresh and label its limitations.
+caches, use existing knowledge without refresh and label its limitations. Under an
+explicit no-files/no-writes request, create **no scratch or temporary files**, even
+outside the consumer/cache directories: no stdout redirects, tee-to-file, generated
+JSON aggregates or saved agent-context summaries. Consume tool output directly and
+pass relevant claims inline or existing per-domain record/source paths to agents.
 
 Runtime: Claude Code 2.1.287, Python 3.11+, Git for repository and
 PR operations. Check `claude --version` and `python3 --version`. Do not install
@@ -110,7 +114,12 @@ applicable failure/consequence, not merely a surprising path or empty match set.
 For token estimates, identify what actually loads and when. `chars/4` on text is
 an approximation, not measured usage; settings JSON size and all configured MCP
 tools are not automatically prompt tokens. Native `/context` or plugin cost
-observations can strengthen a claim but are optional read-only evidence.
+observations can strengthen a claim but are optional read-only evidence. Distinguish
+“configured/default expectation” from “runtime observed”: an absent `alwaysLoad`
+setting does not verify that MCP tools are actually deferred. Tool-search thresholds,
+environment overrides, enabled state and session behavior may change loading. Use
+“verified” only with applicable actual session/native observations, never solely
+because configuration matches a documented default.
 
 ### Read-only final-output check
 

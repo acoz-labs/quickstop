@@ -8,7 +8,8 @@ description: Inspect Claudit cache domain freshness, provenance and failures wit
 Run `claude --version` and the helper
 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/runtime.py" status --host-version "<actual output>"`.
 Use the actual detected version, not the example text. No writes, refreshes,
-agent dispatch or network requests belong to this skill.
+agent dispatch or network requests belong to this skill. This also excludes output
+redirects, tee-to-file and temporary/scratch summaries: consume stdout directly.
 
 Present each domain's state, source date, recorded host version, reasons and preserved limitations. Read
 [cache protocol](../../references/cache-check-protocol.md) if interpretation is

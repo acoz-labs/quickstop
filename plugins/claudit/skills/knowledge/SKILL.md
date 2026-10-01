@@ -13,7 +13,10 @@ names with the supported choices. Follow the shared
 Run the helper's `status` for requested domains using the actual host version.
 Refresh only non-fresh requested domains, once, using current official source
 fetches and the corresponding native research agent. Preserve explicit no-network
-or no-write constraints: serve labeled retained evidence instead. No consumer
+or no-write constraints: serve labeled retained evidence instead. Under explicit
+no-writes, do not redirect output, use tee-to-file or generate temporary/scratch
+JSON/context summaries, even outside the cache. Consume the tool response directly;
+use existing per-domain record/source paths and inline relevant claims. No consumer
 configuration or decision changes are part of knowledge retrieval.
 
 Run `knowledge` for the same domains. Return concise claims with source links,
