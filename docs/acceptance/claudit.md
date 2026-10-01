@@ -38,6 +38,9 @@ action, an agent's success claim or matching headings is not evidence it happene
 - Exercise large instruction inventories and unreadable or malformed configuration.
   Critical sources must remain visible; skipped content and uncertain effective
   managed/session state must appear as coverage limitations, not healthy results.
+  Verify actual score-helper inputs and output: partial or unknown categories
+  have no numeric score or weight in the assessed subset, and unknown coverage
+  prevents an overall score or letter grade.
 - Invoke knowledge, refresh and status for fresh, stale, missing and corrupt cache
   state. Refresh one domain after a host-version change and on first use; a second
   read must reuse it. Other domains retain their own freshness. Concurrent domain
@@ -64,7 +67,10 @@ action, an agent's success claim or matching headings is not evidence it happene
 - Exercise PR preparation with staged unrelated changes, unstaged edits in the same
   file, untracked files, paths containing spaces and an existing branch. Inspect
   the proposed commit/diff and verify the original index/worktree are preserved.
-  Test failure/retry cleanup. Use a local test remote or instrumented GitHub boundary
+  Test failure/retry recovery: occupied destinations and existing branches must
+  fail before creating refs, and a failure after mutation must retain an inspectable
+  recovery receipt. A retry must not overwrite it or discard consumer work.
+  Use a local test remote or instrumented GitHub boundary
   unless an actual external test PR is explicitly in scope; label simulated remote
   checks honestly and do not claim them as a real published PR.
 
