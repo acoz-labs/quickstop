@@ -1,9 +1,9 @@
 # Quickstop repository
 
 Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
-[Shipshape](../workflows/shipshape/README.md) is its first workflow. Claudit 3.0.0
-is advertised for Claude Code. Writing for Humans is a Claude Code-only kit conversion
-whose publication state is recorded in the generated catalog. `catalog.json`
+[Shipshape](../workflows/shipshape/README.md) is its first workflow. Claudit and the
+Writing for Humans kit target Claude Code; their advertised versions and publication
+state are recorded in the [generated catalog](catalog.md). `catalog.json`
 declares supported targets; native package manifests own versions. Generated
 indexes and package layouts follow [the marketplace contract](marketplace.md).
 Plugin creation and review use the shared SDLC and development guide.
