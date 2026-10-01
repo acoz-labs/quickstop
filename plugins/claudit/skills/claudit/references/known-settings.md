@@ -16,7 +16,13 @@ corresponding top-level settings lists. Current documented modes include
 supported; availability depends on version/account/environment. Neither
 `auto-edit` nor `full-auto` is the current setting spelling. Default permission
 behavior is valid; more permissive modes are not an optimization for granular rules.
-Inspect sandbox configuration separately from permission prompts.
+Inspect sandbox configuration separately from permission prompts. Resolve file
+permission pattern anchors before judging their effect: in `Read`/`Edit` rules,
+`//path` is filesystem-absolute, `/path` is relative to the settings source, and
+`~/path` is home-relative (see Permissions → Read and Edit). A path outside the
+current home is not intrinsically wrong. If the user explicitly intends an
+absolute protected target but the rule uses a settings-relative anchor, the
+verified mismatch is a real finding; never infer that intent from a path alone.
 
 ```json
 {

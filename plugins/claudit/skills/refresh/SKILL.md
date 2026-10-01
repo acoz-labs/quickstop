@@ -22,3 +22,7 @@ last-good evidence, and show a table of actual state, source date and host versi
 and preserved research limitations from a final helper `status` call. “Refreshed” applies only to committed domains;
 report failed/superseded attempts separately. No assertion of universal currency,
 confidence or performance follows from a timestamp alone.
+
+Set `run_in_background: false` explicitly on each research Agent/Task dispatch.
+For a denied fetch call, follow the cache protocol's failure-logging/final-status
+path without retrying the denied action or requesting redundant approval.

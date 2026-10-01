@@ -22,3 +22,7 @@ Fresh/degraded/stale are distinct. Last-good evidence can be useful after a fail
 refresh but is not newly verified. If nothing valid is available, state the gap;
 do not invent domain content or imply successful research. Cache freshness does
 not establish semantic correctness or measured runtime behavior.
+
+Set `run_in_background: false` explicitly on each research Agent/Task dispatch.
+For a denied fetch call, follow the cache protocol's failure-logging/final-status
+path without retrying the denied action or requesting redundant approval.

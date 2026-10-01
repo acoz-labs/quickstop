@@ -22,6 +22,26 @@ A known project identity can survive a move if explicitly reconciled; do not
 silently merge records from unrelated same-named clones. Always load relevant
 personal and shared history separately, keeping provenance and unresolved conflicts.
 
+## Mandatory audit read
+
+`discover` returns `decision_context` before the large files map. The orchestrator
+must consume it before delegation, not substitute a legacy-only read. It reads
+private v2, current-project shared v2, and applicable historical stores without
+creating directories, lock files, migrations or decisions. Each store has state,
+provenance, applicable/excluded counts and unmatched legacy count. Invalid stores
+remain explicit history gaps; records from conflicting applicable stores remain
+separate evidence, not a silent winner.
+
+Private project/local records match the full normalized project or main-worktree
+root; plugin records match an applicable discovered plugin name or install root.
+Records for unrelated project roots are excluded. Global-only excludes project/
+local decisions and shared project stores. Project-only may use matching project
+decision metadata in Claudit's internal cache but returns no user/local/managed/
+plugin records. This does not authorize reading their personal target files.
+Historical ambiguous records are counted with provenance, never automatically
+matched or forwarded as current scoped decisions. Explicitly scoped history reads
+for other purposes can still use `decisions-read <path>`.
+
 ## Identity and record
 
 Run `identity <scope> <scope-root> <target-path> <category> <issue-type>` to compute

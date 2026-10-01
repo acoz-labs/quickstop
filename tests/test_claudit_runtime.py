@@ -410,6 +410,67 @@ class RuntimeTests(unittest.TestCase):
                 r.commit_cache(self.cache, newer_bundle, newer_research)
             self.assertEqual((self.cache / 'v2/core-config.json').read_bytes(), before)
 
+    def test_discovery_loads_scoped_decisions_without_other_project_leakage_or_writes(self):
+        self.repo()
+        def entry(scope, path, project_id=None, label='applicable'):
+            value = {'fingerprint': r.identity(scope, self.project, self.project / path, 'security', 'issue'),
+                     'action': 'rejected', 'reason': label}
+            if project_id: value['project_id'] = project_id
+            return value
+        project_record = entry('project', 'CLAUDE.md', str(self.project))
+        local_record = entry('local', '.claude/settings.local.json', str(self.project))
+        user_record = entry('user', '.claude/settings.json')
+        unrelated = entry('project', 'CLAUDE.md', str(self.base / 'other-project'), 'UNRELATED-PRIVATE-REASON')
+        self.write(self.cache / 'decisions-v2.json', {'schema_version': 2, 'decisions': [project_record, local_record, user_record, unrelated]})
+        self.write(self.project / '.claude/claudit-decisions-shared-v2.json', {'schema_version': 2, 'decisions': [entry('project', 'CLAUDE.md', label='shared decision')]})
+        self.write(self.project / '.claude/claudit-decisions.json', {'schema_version': 1, 'decisions': [{'fingerprint': 'ambiguous', 'reason': 'LEGACY-PRIVATE-REASON'}]})
+        def snapshot():
+            return {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        before = snapshot()
+        for scope, expected in (('comprehensive', ['project', 'local', 'user', 'project']),
+                                ('project', ['project', 'project']), ('global', ['user'])):
+            with self.subTest(scope=scope):
+                data = r.discover(self.project, self.home, self.config, self.base / 'managed', scope=scope)
+                context = data['decision_context']
+                actual = [json.loads(item['record']['fingerprint'])[0] for item in context['decisions']]
+                self.assertEqual(actual, expected)
+                self.assertNotIn('UNRELATED-PRIVATE-REASON', json.dumps(data))
+                self.assertNotIn('LEGACY-PRIVATE-REASON', json.dumps(data))
+                self.assertLess(list(data).index('decision_context'), list(data).index('files'))
+                self.assertEqual(snapshot(), before)
+        comprehensive = r.discover(self.project, self.home, self.config, self.base / 'managed')
+        self.assertEqual(sum(s['legacy_unmatched_count'] for s in comprehensive['decision_context']['stores']), 1)
+
+    def test_decision_context_matches_main_worktree_and_applicable_plugin_identity(self):
+        self.repo()
+        main = self.base / 'main-root'
+        plugin_root = self.base / 'installed-plugin'
+        entries = []
+        for scope, namespace, label in (('local', str(main), 'main-worktree'),
+                                         ('plugin', str(plugin_root), 'applicable-plugin'),
+                                         ('plugin', 'other-plugin', 'excluded-plugin')):
+            entries.append({'fingerprint': r.identity(scope, self.project, self.project / 'CLAUDE.md', 'security', 'issue'),
+                            'project_id': namespace, 'action': 'accepted', 'reason': label})
+        self.write(self.cache / 'decisions-v2.json', {'schema_version': 2, 'decisions': entries})
+        context = r.decision_context(self.cache, self.project, main, 'comprehensive', [{'name': 'plugin', 'root': str(plugin_root)}])
+        self.assertEqual([x['record']['reason'] for x in context['decisions']], ['main-worktree', 'applicable-plugin'])
+        self.write(self.cache / 'decisions-v2.json', '{bad')
+        context = r.decision_context(self.cache, self.project, main, 'comprehensive', [])
+        self.assertEqual(context['stores'][0]['state'], 'corrupt')
+        self.assertTrue(context['gaps'])
+        self.assertEqual(context['decisions'], [])
+
+    def test_denied_fetch_failure_receipt_preserves_existing_knowledge(self):
+        self.seed()
+        record = self.cache / 'v2/core-config.json'
+        before = record.read_bytes()
+        denied = self.cli('cache-fail', 'core-config', 'official source fetch denied by host permissions')
+        self.assertEqual(denied.returncode, 0, denied.stderr)
+        self.assertEqual(record.read_bytes(), before)
+        status = json.loads(self.cli('status', '--host-version', '2.1.287', 'core-config').stdout)[0]
+        self.assertEqual(status['state'], 'degraded')
+        self.assertIn('denied by host permissions', status['last_failure'])
+
 
 if __name__ == '__main__':
     unittest.main()

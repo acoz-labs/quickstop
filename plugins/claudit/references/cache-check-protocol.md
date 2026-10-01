@@ -1,7 +1,9 @@
 # Research cache protocol
 
 All four skills use `scripts/runtime.py`, resolved from `${CLAUDE_PLUGIN_ROOT}`.
-Call `claude --version` and pass its actual output as `--host-version` (quoted).
+Call `claude --version` and pass its actual output as `--host-version` (quoted)
+**only for `status`, `knowledge` and `fetch`**. `cache-put` takes exactly the bundle
+and issued research_output positional paths; it does not accept --host-version.
 The helper normalizes a semantic version. Do not invent one if detection fails.
 The cache defaults to `~/.cache/claudit`; `CLAUDIT_CACHE_DIR` overrides it for
 isolation. Python 3.11+ is required; locks use fcntl on POSIX and msvcrt on Windows. No third-party modules.
@@ -31,7 +33,8 @@ Each claim remains model synthesis that must be checked against its cited source
    separate Markdown `content_path` files. It never consults persistent agent memory. It reports
    failed source IDs without overwriting last-good knowledge. Network access is
    subject to host permissions. No credentials are sent to these public sources.
-2. Dispatch the matching foreground `claudit:research-core`,
+2. Dispatch with **`run_in_background: false` explicitly set** on every Agent/Task
+   call and wait for its result. Use the matching foreground `claudit:research-core`,
    `claudit:research-ecosystem` or `claudit:research-optimization` agent with the
    bundle path, host version and relevant focus. Agents read the fresh bundle and
    return JSON, not edits. Do not dispatch duplicate research for the same domain
@@ -50,6 +53,16 @@ Each claim remains model synthesis that must be checked against its cited source
    last-good evidence or unsupported-domain gaps. Never retry in a loop, stamp old
    knowledge as newly fetched, or delete memory to force a fresh-looking state.
 5. Re-run `status`/`knowledge`; show the actual resulting state for each domain.
+
+If the host denies the exact `fetch` tool call before the helper runs, do not retry
+or bypass the denied network action. That denial does not by itself revoke already
+permitted cache logging. If cache writes remain authorized, run `cache-fail` with a
+sanitized “official source fetch denied by host permissions” reason, then run final
+`status` and report degraded/last-good evidence. Do not ask again for permission
+to perform this already-authorized failure logging. If writes are also prohibited
+or unavailable, state that no failure receipt was written and last-good state was
+retained; run read-only status where permitted. Never claim a successful refresh
+or silently treat denied fetching as current verification.
 
 Research output schema:
 

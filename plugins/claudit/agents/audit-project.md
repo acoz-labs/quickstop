@@ -34,7 +34,12 @@ orchestrator read-only native validation if essential; do not claim it ran yours
 Return compact findings with category, stable issue type, scope, normalized target
 path/line, observed evidence, official source ID/section, consequence and suggested
 change. Separate confirmed defects, optional adoption and unknowns. Redact secrets.
-List analyzed and unassessed scope. State loaded/conditional/deferred context
+Verify permission-pattern anchoring against current docs and explicit intended
+targets before judging mismatches. A deny path need not equal the current home, and a scoped rule need not match an
+existing file today. Future-file or external-path intent is unknown unless supplied
+by the user. Without explicit intended targets or demonstrated required-operation
+failure, these are observations, not defects or deductions. Preserve intentional
+protections and conventions. List analyzed and unassessed scope. State loaded/conditional/deferred context
 assumptions; text chars/4 is an estimate, not measured prompt overhead. Unobserved
 usage, default settings, disabled installs and missing optional features incur no
 deduction. Apply relevant decision context without suppressing findings or matching

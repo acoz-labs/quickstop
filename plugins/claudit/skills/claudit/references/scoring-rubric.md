@@ -44,7 +44,12 @@ Do **not** deduct for missing optional settings, instructions, MCP, plugins,
 skills, memory, env blocks, hook timeouts, absent telemetry, old publication date,
 supported `commands/`, missing optional manifest fields, disabled installs,
 perceived formatting style, explicit narrow permissions, or unobserved usage.
-No official-marketplace exemption exists. A source-verified outdated version can
+A glob with no current matches may intentionally target future files; an absolute
+deny path outside the current home may intentionally protect another location.
+Neither establishes a wrong setting or dead rule. Without explicit target intent
+or demonstrated failure of a required operation, report an optional/unknown-intent
+observation with **no deduction**. Do not infer intent from the test/current home,
+repository contents or naming alone. No official-marketplace exemption exists. A source-verified outdated version can
 be an optional update; age alone is not a defect. Word/line count thresholds
 (including 200-line advice) guide discussion, not proof that content is harmful.
 
