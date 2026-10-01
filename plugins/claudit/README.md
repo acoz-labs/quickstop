@@ -72,6 +72,8 @@ read-only findings but must report deterministic checks as unverified.
   features. Supported commands and optional manifests are valid. Official plugins
   receive the same checks. Scores are explained heuristics; missing telemetry,
   unused-by-observation tools and JSON file size are not performance defects.
+  The read-only scoring helper excludes unassessed categories and withholds an
+  overall score or letter grade while material coverage remains unknown.
 - Research fetches official source bytes before synthesis. Agents have no persistent
   research memory; source hashes, timestamps and sections support inspection.
   Domain-specific source slices reduce repetition without claiming measured savings.
@@ -84,7 +86,8 @@ read-only findings but must report deterministic checks as unverified.
 - PR preparation starts from an isolated clean HEAD, even when the consumer has
   staged or uncommitted work. Selected fixes are reapplied independently; snapshots
   and path gates catch accidental inclusion. Exact diff review remains necessary
-  for semantic correctness and private free-text content.
+  for semantic correctness and private free-text content. Failed preparation
+  retains recovery state instead of silently deleting branches or consumer work.
 
 ## Cache and history
 

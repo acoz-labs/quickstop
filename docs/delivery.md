@@ -10,7 +10,7 @@ release and supplies no retrospective runtime acceptance for 3.0.0.
 For a plugin release, keep the issue open (`Refs #N` on implementation PRs).
 From the fixed reviewed merged SHA, retain one source archive with
 `git archive --format=tar --output=/private/artifacts/quickstop.tar FULL_SHA`.
-A source archive is the actual distributable for the current Markdown/JSON
+A source archive is the actual distributable for the current Markdown/JSON/Python
 Claudit package. Future compiled plugins must retain their actual built packages,
 not substitute a source archive. Preserve each target package identity and the
 exact generated catalog/index revision in the candidate record. Hash it with SHA-256 and record
