@@ -4,8 +4,8 @@
     {
       "name": "claudit",
       "harness": "claude-code",
-      "commit": "b7370388e26ccac0ebf2c48a6b86942eb7259a9d",
-      "sha256": "7fae979a3cfe8da4b4a4adacb1eb043848c63732b59cc4a0baaff54a2b4e3867",
+      "commit": "d04bae5fdb35ae96a4885a5b2a1f4c9f32eeacf5",
+      "sha256": "03a0e8bc782a006060180dd442bceb666748522a5356a5a11bc6ccdc62b57c17",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claudit",
@@ -13,7 +13,7 @@
       },
       "manifest": {
         "name": "claudit",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
         "author": {
           "name": "quickstop",
@@ -29,8 +29,10 @@
         ]
       },
       "provenance": {
-        "kind": "legacy-preserved",
-        "note": "Preserves previously advertised Claudit 3.0.0 bytes. This pin is migration provenance, not new runtime acceptance."
+        "kind": "sdlc-accepted",
+        "issue": 138,
+        "artifact": "sha256:6d9eb80033574b518cb5b346c394425cc9625f4ba0d431d68756c2bc236e08da",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/138#issuecomment-5940176838"
       }
     },
     {
