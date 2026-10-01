@@ -90,6 +90,12 @@ alongside the domain record. `status` and `knowledge` share freshness logic:
 missing, corrupt, stale, degraded or fresh. Seven-day TTL applies to fetched
 sources independently for each host/domain.
 
+A fresh record can contain useful verified-source claims alongside explicit
+coverage limitations, such as unread sections or unknown account applicability.
+Those limitations stay visible in status, knowledge and audits. Missing required
+sources or failed research still prevent a successful refresh. Each fetch also
+reserves its own synthesis output path to keep concurrent research separate.
+
 Existing `manifest.json`, cached Markdown, research-agent memory and legacy
 `claudit-decisions.json` files are never silently deleted. Legacy knowledge is
 unverified until a successful fresh fetch replaces that domain's active view.
