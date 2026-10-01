@@ -49,8 +49,8 @@ class RuntimeTests(unittest.TestCase):
             return result
         result = r.fetch(self.cache, domain, host, opener)
         bundle = r.read_json(result['bundle'])
-        research = self.write(Path(result['bundle']).parent / 'research.json', {
-            'claims': [{'text': 'Observed source behavior', 'source_ids': [s['id']], 'section': 'Behavior'} for s in bundle['sources']], 'gaps': []})
+        research = self.write(Path(result['research_output']), {
+            'claims': [{'text': 'Observed source behavior', 'source_ids': [s['id']], 'section': 'Behavior'} for s in bundle['sources']], 'gaps': [], 'limitations': []})
         return result['bundle'], research
 
     def seed(self, domain='core-config', host='2.1.287'):
@@ -371,6 +371,44 @@ class RuntimeTests(unittest.TestCase):
         receipt = self.prepare()
         self.git('checkout', '-b', 'other-branch')
         with self.assertRaises(ValueError): r.verify_pr(receipt['receipt'])
+
+    def test_concurrent_synthesis_outputs_are_issued_and_isolated(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            pairs = list(executor.map(lambda _: self.bundle(), range(2)))
+        self.assertNotEqual(pairs[0][1], pairs[1][1])
+        for bundle, research in pairs:
+            self.assertEqual(Path(research), Path(bundle).parent / 'synthesis.json')
+            self.assertIn(r.commit_cache(self.cache, bundle, research)['status'], ('committed', 'superseded'))
+        shared = self.write(self.base / 'shared-research.json', r.read_json(pairs[0][1]))
+        with self.assertRaisesRegex(ValueError, 'research_output'):
+            r.commit_cache(self.cache, pairs[0][0], shared)
+        with self.assertRaisesRegex(ValueError, 'research_output'):
+            r.commit_cache(self.cache, pairs[0][0], pairs[1][1])
+
+    def test_limited_valid_synthesis_retains_limits_but_fatal_gaps_preserve_last_good(self):
+        bundle, research = self.bundle()
+        synthesis = r.read_json(research)
+        limits = ['Linked provider page outside supplied sources was not reviewed',
+                  'Account-specific feature availability is unknown']
+        synthesis['limitations'] = limits
+        self.write(research, synthesis)
+        self.assertEqual(r.commit_cache(self.cache, bundle, research)['status'], 'committed')
+        state = r.domain_state(self.cache, 'core-config', '2.1.287')
+        self.assertEqual(state['state'], 'fresh')
+        self.assertEqual(state['limitations'], limits)
+        knowledge = json.loads(self.cli('knowledge', '--host-version', '2.1.287', 'core-config').stdout)[0]
+        self.assertEqual(knowledge['knowledge']['limitations'], limits)
+        before = (self.cache / 'v2/core-config.json').read_bytes()
+        for field, values in (('gaps', ['Required supplied memory source is unreadable']),
+                              ('gaps', [None]), ('limitations', 'not a list'),
+                              ('limitations', [None])):
+            newer_bundle, newer_research = self.bundle()
+            invalid = r.read_json(newer_research)
+            invalid[field] = values
+            self.write(newer_research, invalid)
+            with self.assertRaises(ValueError):
+                r.commit_cache(self.cache, newer_bundle, newer_research)
+            self.assertEqual((self.cache / 'v2/core-config.json').read_bytes(), before)
 
 
 if __name__ == '__main__':

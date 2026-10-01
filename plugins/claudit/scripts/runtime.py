@@ -138,6 +138,10 @@ def validate_record(record, domain):
             raise ValueError('Invalid claim')
         if not isinstance(claim.get('source_ids'), list) or not claim['source_ids'] or not all(isinstance(i, str) for i in claim['source_ids']) or not set(claim['source_ids']) <= ids:
             raise ValueError('Invalid claim source')
+    for field in ('gaps', 'limitations'):
+        values = record.get(field, [])
+        if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+            raise ValueError(f'Invalid {field}')
     if record.get('content_sha256') != digest(json.dumps(claims, sort_keys=True).encode()):
         raise ValueError('Claim integrity mismatch')
 
@@ -157,7 +161,8 @@ def domain_state(root, domain, host, instant=None):
             if digest(source_path.read_bytes()) != source['sha256']:
                 raise ValueError('Retained source integrity mismatch')
         fetched = parse_time(record['fetched_at'])
-        result.update(fetched_at=record['fetched_at'], host_version=record['host_version'], state='fresh')
+        result.update(fetched_at=record['fetched_at'], host_version=record['host_version'], state='fresh',
+                      limitations=record.get('limitations', []))
         if record['host_version'] != host:
             result['reasons'].append('host-version-changed')
         if instant - fetched >= TTL or fetched > instant + dt.timedelta(minutes=5):
@@ -220,13 +225,17 @@ def fetch(root, domain, host, opener=urllib.request.urlopen):
               'fetched_at': started, 'sources': sources, 'errors': errors}
     path = bundle_dir / 'bundle.json'
     atomic(path, bundle)
-    return {'bundle': str(path), 'fetched': len(sources), 'errors': errors,
+    return {'bundle': str(path), 'research_output': str(bundle_dir / 'synthesis.json'),
+            'fetched': len(sources), 'errors': errors,
             'commit_allowed': not errors}
 
 
 def commit_cache(root, bundle_path, research_path):
     bundle_path = Path(bundle_path).resolve()
     bundle_path.relative_to((root / 'v2/research').resolve())
+    expected_output = bundle_path.parent / 'synthesis.json'
+    if Path(research_path).resolve() != expected_output:
+        raise ValueError('Use the exact research_output path returned by fetch for this bundle')
     bundle, research = read_json(bundle_path), read_json(research_path)
     domain = bundle['domain']
     if domain not in DOMAINS or bundle['errors']:
@@ -259,10 +268,13 @@ def commit_cache(root, bundle_path, research_path):
     if used != set(sources):
         raise ValueError('Research must cover every required source; record a failed attempt otherwise')
     gaps = research.get('gaps', [])
-    if not isinstance(gaps, list) or gaps:
-        raise ValueError('Incomplete research cannot replace last good cache')
+    if not isinstance(gaps, list) or not all(isinstance(value, str) for value in gaps) or gaps:
+        raise ValueError('Fatal research gaps cannot replace last good cache')
+    limitations = research.get('limitations', [])
+    if not isinstance(limitations, list) or not all(isinstance(value, str) for value in limitations):
+        raise ValueError('Research limitations must be a list of strings')
     record = {k: bundle[k] for k in ('schema_version', 'domain', 'host_version', 'fetched_at')}
-    record.update(claims=claims, gaps=[], content_sha256=digest(json.dumps(claims, sort_keys=True).encode()),
+    record.update(claims=claims, gaps=[], limitations=limitations, content_sha256=digest(json.dumps(claims, sort_keys=True).encode()),
                   sources=[{k: s[k] for k in ('id', 'url', 'fetched_at', 'sha256', 'content_path')} for s in sources.values()],
                   evidence_basis='official bytes fetched; semantic synthesis is model-authored, not mechanically verified')
     with locked(root / 'v2' / f'{domain}.lock'):

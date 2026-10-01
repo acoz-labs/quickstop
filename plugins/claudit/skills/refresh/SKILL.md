@@ -19,6 +19,6 @@ verification. Preserve old research memory files without reading them as current
 
 Commit successful research independently per domain. Record failures, preserve
 last-good evidence, and show a table of actual state, source date and host version
-from a final helper `status` call. “Refreshed” applies only to committed domains;
+and preserved research limitations from a final helper `status` call. “Refreshed” applies only to committed domains;
 report failed/superseded attempts separately. No assertion of universal currency,
 confidence or performance follows from a timestamp alone.

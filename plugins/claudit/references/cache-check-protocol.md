@@ -27,7 +27,8 @@ Each claim remains model synthesis that must be checked against its cited source
 
 1. Run `fetch --host-version "<actual output>" <domain>`. It fetches the required
    official Markdown pages now, records URLs, timestamps and SHA-256, and returns
-   a unique compact `bundle` path and separate Markdown `content_path` files. It never consults persistent agent memory. It reports
+   a unique compact `bundle` path, its isolated `research_output` destination, and
+   separate Markdown `content_path` files. It never consults persistent agent memory. It reports
    failed source IDs without overwriting last-good knowledge. Network access is
    subject to host permissions. No credentials are sent to these public sources.
 2. Dispatch the matching foreground `claudit:research-core`,
@@ -36,8 +37,10 @@ Each claim remains model synthesis that must be checked against its cited source
    return JSON, not edits. Do not dispatch duplicate research for the same domain
    in one invocation. If fetch failed, report partial evidence and keep last-good
    knowledge explicitly degraded; do not commit it as a successful refresh.
-3. Write the agent's returned JSON to a unique temporary file outside consumer
-   configuration. Pass `cache-put "<bundle>" "<research JSON>"`. Claims must cite
+3. Write the agent's returned JSON to the **exact `research_output` path returned
+   by this fetch** (`synthesis.json` inside its unique bundle directory). Do not
+   invent a shared `/tmp` filename. Pass `cache-put "<bundle>" "<research_output>"`;
+   the helper rejects any other synthesis path. Claims must cite
    fetched source IDs and source sections, covering the required sources. The
    helper checks shape/coverage, not semantic truth. Check suspicious or conflicting
    claims against source text before committing. No invented event counts, model
@@ -51,8 +54,23 @@ Each claim remains model synthesis that must be checked against its cited source
 Research output schema:
 
 ```json
-{"claims":[{"text":"Source-backed claim with host applicability.","source_ids":["settings"],"section":"Settings precedence"}],"gaps":[]}
+{"claims":[{"text":"Source-backed claim with host applicability.","source_ids":["settings"],"section":"Settings precedence"}],"gaps":[],"limitations":[]}
 ```
+
+`gaps` contains only fatal evidence failures: a required supplied source cannot
+be read, or evidence required to support the returned claims is unavailable.
+Nonempty gaps or failed source fetches prevent replacing last-good knowledge.
+`limitations` records unreviewed sections, linked pages outside the required
+bundle, account/provider uncertainty and other boundaries of the targeted review.
+Both are lists of strings. Do not erase gaps or mechanically relabel a failed
+research pass to make it commit. The agent must classify its observed evidence
+honestly. Reading every line of every manual is not required: inspect the sections
+needed for source-backed claims and state the remaining limits.
+
+A successful bounded synthesis preserves `limitations` in the cache, status and
+knowledge output. Display them and pass relevant limitations to audit agents.
+Fresh means source/claim integrity and TTL are current, not exhaustive coverage;
+unassessed areas remain unknown and cannot earn a perfect score.
 
 Use actual source IDs from the bundle (some contain `/`), and separate supported
 behavior from optional recommendations. Keep summaries compact, roughly 1000–2000
