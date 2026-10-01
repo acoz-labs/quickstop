@@ -48,6 +48,10 @@ action, an agent's success claim or matching headings is not evidence it happene
   writes establish freshness. With research unavailable/failed/partial, preserve
   the previous good payload and report degraded coverage; do not mark failed
   research as a successful current refresh. Never delete old agent memory silently.
+- Distinguish actual missing required evidence from honest coverage limitations.
+  A successful bounded synthesis must preserve and display unread sections and
+  account applicability limits. Verify that concurrent fetches have distinct
+  synthesis files and that a shared temporary output is rejected at commit time.
 - Run a read-only audit with existing decision records and personal configuration.
   Consumer files and decisions must remain unchanged. Record allowed plugin cache
   effects separately, and honor an explicit no-write request for those too.
