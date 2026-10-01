@@ -70,7 +70,7 @@ Use the host Agent tool (Task on older hosts) with native types:
 
 Dispatch independent agents concurrently in the foreground. Pass paths and
 redacted metadata, scope restrictions, relevant claim/source IDs, coverage gaps,
-focus and applicable scoped decisions. Do not copy every domain into every prompt.
+focus, preserved research limitations and applicable scoped decisions. Do not copy every domain into every prompt.
 The audit agents are read-only and cannot perform fixes. If one fails, identify
 its unassessed scope; do not issue a comprehensive grade.
 

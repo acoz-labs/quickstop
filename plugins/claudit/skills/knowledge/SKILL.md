@@ -17,7 +17,7 @@ or no-write constraints: serve labeled retained evidence instead. No consumer
 configuration or decision changes are part of knowledge retrieval.
 
 Run `knowledge` for the same domains. Return concise claims with source links,
-fetched date, recorded/current host versions and each domain's actual state.
+fetched date, recorded/current host versions and each domain's actual state and preserved limitations.
 Fresh/degraded/stale are distinct. Last-good evidence can be useful after a failed
 refresh but is not newly verified. If nothing valid is available, state the gap;
 do not invent domain content or imply successful research. Cache freshness does

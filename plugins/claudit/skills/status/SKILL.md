@@ -10,7 +10,7 @@ Run `claude --version` and the helper
 Use the actual detected version, not the example text. No writes, refreshes,
 agent dispatch or network requests belong to this skill.
 
-Present each domain's state, source date, recorded host version and reasons. Read
+Present each domain's state, source date, recorded host version, reasons and preserved limitations. Read
 [cache protocol](../../references/cache-check-protocol.md) if interpretation is
 needed. Missing files, corruption and failed refreshes affect status; do not infer
 freshness from an old manifest alone. For non-fresh domains mention
