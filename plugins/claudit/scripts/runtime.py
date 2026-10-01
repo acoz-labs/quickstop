@@ -674,10 +674,59 @@ def consumer_snapshot(root):
     return result
 
 
+def pr_recovery(root, destination, branch):
+    """Observe retained Git state; never remove a ref or worktree during recovery."""
+    result = {'branch': branch, 'worktree': str(destination),
+              'destination_exists': os.path.lexists(destination),
+              'branch_exists': None, 'branch_head': None, 'worktree_registered': None,
+              'registered_branch': None, 'worktree_head': None, 'observation_errors': []}
+    try:
+        probe = subprocess.run(['git', '-C', str(root), 'show-ref', '--verify', '--quiet',
+                                f'refs/heads/{branch}'], capture_output=True)
+        if probe.returncode == 0:
+            result['branch_exists'] = True
+            result['branch_head'] = git(root, 'rev-parse', '--verify', f'refs/heads/{branch}')
+        elif probe.returncode == 1:
+            result['branch_exists'] = False
+        else:
+            result['observation_errors'].append('branch-state-unavailable')
+        fields = subprocess.check_output(['git', '-C', str(root), 'worktree', 'list', '--porcelain', '-z']).split(b'\0')
+        result['worktree_registered'] = False
+        current = False
+        for field in fields:
+            if field.startswith(b'worktree '):
+                current = Path(os.fsdecode(field[len(b'worktree '):])).resolve() == destination
+                result['worktree_registered'] |= current
+            elif current and field.startswith(b'branch '):
+                result['registered_branch'] = os.fsdecode(field[len(b'branch '):])
+            elif current and field.startswith(b'HEAD '):
+                result['worktree_head'] = field[len(b'HEAD '):].decode('ascii')
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        result['observation_errors'].append('git-recovery-observation-unavailable')
+    return result
+
+
 def prepare_pr(root, destination, branch, paths):
-    root, destination = Path(root).resolve(), Path(destination).resolve()
+    root = Path(root).resolve()
+    supplied_destination = Path(destination).absolute()
+    if os.path.lexists(supplied_destination):
+        raise ValueError('Delivery destination already exists; preserve it and choose a new destination')
+    destination = supplied_destination.resolve()
     if destination.is_relative_to(root):
         raise ValueError('Delivery worktree must be outside consumer tree')
+    receipt_path = destination.parent / f'{destination.name}.claudit-receipt.json'
+    if os.path.lexists(receipt_path):
+        raise ValueError(f'Prior preparation receipt exists; inspect and preserve it: {receipt_path}')
+    try:
+        if git(root, 'check-ref-format', '--branch', branch) != branch:
+            raise ValueError('Use an explicit new branch name, not a checkout shorthand')
+    except subprocess.CalledProcessError as exc:
+        raise ValueError('Invalid delivery branch name') from exc
+    initial = pr_recovery(root, destination, branch)
+    if initial['observation_errors']:
+        raise ValueError('Cannot verify branch/worktree preflight; no preparation attempted')
+    if initial['branch_exists'] or initial['worktree_registered']:
+        raise ValueError('Delivery branch or worktree is already registered; preserve it and inspect before retrying')
     if not paths or any(personal_path(p) for p in paths):
         raise ValueError('Only explicitly selected shareable paths are eligible')
     dirty_targets = []
@@ -691,16 +740,39 @@ def prepare_pr(root, destination, branch, paths):
     head, base = git(root, 'rev-parse', 'HEAD'), git(root, 'branch', '--show-current')
     if not base:
         raise ValueError('Detached consumer HEAD requires an explicitly chosen base before PR delivery')
-    subprocess.run(['git', '-C', str(root), 'worktree', 'add', '-b', branch, str(destination), head], check=True, capture_output=True)
-    receipt = {'root': str(root), 'worktree': str(destination), 'branch': branch, 'base': base, 'head': head,
-               'paths': paths, 'dirty_targets_excluded': dirty_targets, 'consumer_snapshot': snapshot}
-    receipt_path = destination.parent / f'{destination.name}.claudit-receipt.json'
-    atomic(receipt_path, receipt)
+    receipt = {'state': 'planned', 'attempt_id': uuid.uuid4().hex, 'planned_at': stamp(),
+               'root': str(root), 'worktree': str(destination), 'branch': branch, 'base': base, 'head': head,
+               'paths': paths, 'dirty_targets_excluded': dirty_targets, 'consumer_snapshot': snapshot,
+               'recovery': initial}
+    # Reserve before Git mutations, exclusively: another attempt's receipt is never overwritten.
+    receipt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, 'w') as stream:
+        json.dump(receipt, stream, indent=2, ensure_ascii=False)
+        stream.write('\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        subprocess.run(['git', '-C', str(root), 'worktree', 'add', '-b', branch, str(destination), head], check=True, capture_output=True)
+        receipt.update(state='prepared', prepared_at=stamp(), recovery=pr_recovery(root, destination, branch))
+        if receipt['recovery']['observation_errors'] or not receipt['recovery']['worktree_registered']:
+            raise ValueError('Git returned but prepared worktree state could not be verified')
+        atomic(receipt_path, receipt)
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        receipt.update(state='failed', failed_at=stamp(), recovery=pr_recovery(root, destination, branch),
+                       failure={'type': type(exc).__name__, 'returncode': getattr(exc, 'returncode', None)})
+        try:
+            atomic(receipt_path, receipt)
+        except OSError as receipt_error:
+            raise ValueError(f'Preparation failed; recovery update unavailable. Preserve planned receipt and inspect retained Git state: {receipt_path}') from receipt_error
+        raise ValueError(f'Preparation failed; retained branch/worktree recovery is recorded at {receipt_path}. Inspect it before retrying; nothing was automatically deleted') from exc
     return {'receipt': str(receipt_path), **receipt}
 
 
 def verify_pr(receipt_path):
     receipt = read_json(receipt_path)
+    if receipt.get('state') != 'prepared':
+        raise ValueError('Preparation is incomplete or failed; inspect retained recovery state before delivery')
     root, worktree = Path(receipt['root']), Path(receipt['worktree'])
     if consumer_snapshot(root) != receipt['consumer_snapshot']:
         raise ValueError('Consumer changed since preparation; inspect before proceeding, never restore over it')
