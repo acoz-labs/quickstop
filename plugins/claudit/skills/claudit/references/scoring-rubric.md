@@ -3,9 +3,56 @@
 Scores are Claudit heuristics, not an Anthropic security certification or measured
 performance. Preserve the six categories and weights, but score only assessed
 applicable categories. A category with no applicable components is N/A; an
-unreadable or materially incomplete scope is unknown. Renormalize assessed weights
-and label the result **assessed-subset score** whenever coverage is incomplete.
-Do not give unknowns a 100, invent deductions, or round a heuristic into certainty.
+unreadable scope is unknown; partially inspected applicable scope is partial.
+Neither receives a number or contributes to the numeric denominator. Do not give
+unknowns a 100, invent deductions, or round a heuristic into certainty.
+
+## Mandatory score gate
+
+For any numeric score or letter grade, run the read-only helper `score` command.
+If no helper call is made, report findings and coverage without scores/grades.
+The helper consumes repeated CLI arguments directly; no input/output file or
+scratch aggregate is needed. Use these forms:
+
+- `--category <slug>:assessed:<0-100>` only when the applicable category has been
+  assessed with sufficient actual file/native evidence; apply the deductions below.
+- `--category <slug>:partial` when some applicable evidence was assessed but
+  material evidence remains redacted, unread or unavailable.
+- `--category <slug>:unknown` when applicable coverage has not been established.
+- `--category <slug>:na` only when the category is genuinely outside scope or no
+  applicable components exist, not as a substitute for missing evidence.
+
+Missing categories default to unknown. Partial/unknown/N/A with a numeric value
+is rejected. “No confirmed defects” is not evidence of complete coverage.
+
+For example, a global audit with redacted MCP details, unassessed security policy,
+unread installed plugin components and no project instruction scope might use:
+
+```sh
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/runtime.py" score \
+  --category over-engineering:assessed:100 \
+  --category claudemd-quality:na \
+  --category security:unknown \
+  --category mcp-config:partial \
+  --category plugin-health:unknown \
+  --category context-efficiency:unknown
+```
+
+Use actual observations, not these example values. This returns a subset score
+only for the assessed 20 weight units, with no overall score or grade. Display
+coverage and the unassessed categories. Do not attach an A+ or category score to
+partial/unknown rows. Global-only project instruction quality is N/A, not 100.
+An installed registry entry does not establish component health; redacted MCP
+metadata does not fully assess its transport/auth/runtime configuration; unread
+sandbox/managed/session policy prevents a comprehensive security score. Unknown
+actual loading similarly limits context-efficiency coverage.
+
+The helper fixes the six weights and exposes `assessed_weight`, `applicable_weight`
+and `coverage_percent`. Any partial/unknown category permits at most an
+`assessed_subset_score`, with no letter grade. Only complete coverage of applicable
+categories can return `overall_score` and `grade`. All-N/A yields neither score nor
+grade. These are arithmetic/coverage checks, not a claim that the model's supplied
+coverage classification or source-backed deductions are independently verified.
 
 | Category / slug | Weight |
 |---|---:|
@@ -59,7 +106,8 @@ output. Static JSON file size is not startup prompt size. Use measured native
 observations where available; label chars/4 estimates with their assumptions.
 Never claim performance improvements from score changes alone.
 
-Weighted score = sum(score * weight) / sum(assessed weights). Grades: >=95 A+,
+The helper computes sum(score * weight) / sum(assessed weights). Only for complete
+applicable coverage, grades are >=95 A+,
 >=90 A, >=75 B, >=60 C, >=40 D, otherwise F. Severity is consequence-based:
 active exposure/broken function first, then material maintainability, then optional
 adoption. Separate security severity from arbitrary score impact.

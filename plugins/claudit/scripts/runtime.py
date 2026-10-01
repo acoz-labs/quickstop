@@ -5,6 +5,7 @@ import contextlib
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -723,6 +724,59 @@ def verify_pr(receipt_path):
     return {'status': 'verified', 'paths': sorted(changed), 'base': receipt['base'], 'head': receipt['head']}
 
 
+SCORE_WEIGHTS = {
+    'over-engineering': 20, 'claudemd-quality': 20, 'security': 15,
+    'mcp-config': 15, 'plugin-health': 15, 'context-efficiency': 15,
+}
+
+
+def score_categories(specifications):
+    """Gate aggregate scores on explicit coverage; no files, cache or model calls."""
+    supplied = {}
+    for specification in specifications:
+        if not isinstance(specification, str):
+            raise ValueError('Scoring categories must be CLI strings')
+        parts = specification.split(':')
+        if len(parts) not in (2, 3) or parts[0] not in SCORE_WEIGHTS:
+            raise ValueError('Use category:assessed:score or category:partial|unknown|na')
+        category, state = parts[:2]
+        if category in supplied:
+            raise ValueError(f'Duplicate scoring category: {category}')
+        if state not in ('assessed', 'partial', 'unknown', 'na'):
+            raise ValueError(f'Invalid coverage state: {state}')
+        value = None
+        if state == 'assessed':
+            if len(parts) != 3:
+                raise ValueError('An assessed category requires a finite score from 0 to 100')
+            value = float(parts[2])
+            if not math.isfinite(value) or not 0 <= value <= 100:
+                raise ValueError('An assessed category requires a finite score from 0 to 100')
+        elif len(parts) != 2:
+            raise ValueError('Partial, unknown and N/A categories cannot have numeric scores')
+        supplied[category] = {'state': state}
+        if value is not None:
+            supplied[category]['score'] = value
+    categories = {category: {'weight': weight, **supplied.get(category, {'state': 'unknown'})}
+                  for category, weight in SCORE_WEIGHTS.items()}
+    assessed_weight = sum(c['weight'] for c in categories.values() if c['state'] == 'assessed')
+    applicable_weight = sum(c['weight'] for c in categories.values() if c['state'] != 'na')
+    incomplete = [name for name, c in categories.items() if c['state'] in ('partial', 'unknown')]
+    result = {'categories': categories, 'assessed_weight': assessed_weight,
+              'applicable_weight': applicable_weight, 'unassessed_categories': incomplete,
+              'coverage_percent': round(100 * assessed_weight / applicable_weight, 2) if applicable_weight else None,
+              'assessment': 'incomplete' if incomplete else 'complete' if assessed_weight else 'not-applicable'}
+    if assessed_weight:
+        weighted = math.fsum(c['score'] * c['weight'] for c in categories.values() if c['state'] == 'assessed')
+        score = round(weighted / assessed_weight, 2)
+        if incomplete:
+            result['assessed_subset_score'] = score
+        else:
+            result['overall_score'] = score
+            thresholds = ((95, 'A+'), (90, 'A'), (75, 'B'), (60, 'C'), (40, 'D'), (0, 'F'))
+            result['grade'] = next(grade for threshold, grade in thresholds if score >= threshold)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -730,6 +784,7 @@ def main():
         p = sub.add_parser(name)
         p.add_argument('--host-version', required=True)
         p.add_argument('domains', nargs='*')
+    p = sub.add_parser('score'); p.add_argument('--category', action='append', default=[])
     p = sub.add_parser('cache-put'); p.add_argument('bundle'); p.add_argument('research')
     p = sub.add_parser('cache-fail'); p.add_argument('domain', choices=DOMAINS); p.add_argument('reason')
     p = sub.add_parser('discover'); p.add_argument('--cwd', default=os.getcwd()); p.add_argument('--home', default=str(Path.home())); p.add_argument('--config'); p.add_argument('--managed'); p.add_argument('--limit', type=int, default=200); p.add_argument('--scope', choices=['auto', 'global', 'project', 'comprehensive'], default='auto')
@@ -755,6 +810,7 @@ def main():
                         item['knowledge'] = read_json(item['record'])
                     except (OSError, ValueError):
                         item['knowledge'] = None
+    elif args.command == 'score': result = score_categories(args.category)
     elif args.command == 'cache-put': result = commit_cache(root, args.bundle, args.research)
     elif args.command == 'cache-fail': result = fail(root, args.domain, args.reason)
     elif args.command == 'discover': result = discover(args.cwd, args.home, args.config, args.managed, args.limit, args.scope)

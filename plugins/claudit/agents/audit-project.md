@@ -44,3 +44,11 @@ assumptions; text chars/4 is an estimate, not measured prompt overhead. Unobserv
 usage, default settings, disabled installs and missing optional features incur no
 deduction. Apply relevant decision context without suppressing findings or matching
 legacy basenames automatically. Focus directives deepen relevant checks only.
+
+Return coverage for each relevant category: assessed, partial, unknown or N/A,
+with the actual file/native observations and material missing evidence. No defects
+found is not proof of complete coverage. Redacted MCP configuration is partial;
+unread installed plugin components are unknown/partial; unassessed effective
+security/sandbox/policy prevents a complete security assessment. Do not substitute
+N/A for missing applicable evidence or assign numeric health scores/letter grades.
+The orchestrator uses Claudit's deterministic score helper for any scored report.
