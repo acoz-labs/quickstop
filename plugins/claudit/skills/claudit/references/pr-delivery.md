@@ -1,72 +1,59 @@
-# Phase 5: PR Delivery
+# Safe selected-fix delivery
 
-After Phase 4 fixes are applied, check if any project-scoped files were modified. If no project files were changed (only personal/global edits), skip this phase.
+An audit does not authorize a PR or consumer edits. Honor explicit existing
+local/PR authorization; otherwise ask once with concrete selected fixes and delivery
+choices. Do not apply edits and then decide how to isolate them.
 
-## Offer PR Option
+## Local edits
 
-Use `AskUserQuestion` (single-select) to ask the user:
+Reread targets before each edit, record the narrow diff and preserve unrelated
+staged/untracked work. Do not stage, stash, reset, checkout over, or commit consumer
+files as part of local delivery. If an overlapping concurrent edit prevents a
+safe update, report it without reverting anyone's work. Personal scope requires
+explicitly covered authorization and is never eligible for a PR.
 
-- **"Open a PR"** — Create branch, commit changes, push, open PR with educational inline comments
-- **"Keep as local edits"** — Leave changes uncommitted in the working tree
+## PR delivery
 
-## Check Prerequisites
+1. Check Git and `gh` availability, current branch and the intended authenticated
+   identity/repository. Read repository delivery instructions. Verify the chosen
+   remote base exists and includes the current HEAD; if the consumer has unpublished
+   commits, explain that a PR against that base would include unrelated commits and
+   choose an appropriate isolated base before proceeding. Do not push consumer
+   commits as an incidental audit action. Never change global credentials/identity.
+2. Before any edits, run the helper `prepare-pr --root "<consumer root>"
+   --destination "<new external worktree path>" --branch "claudit/<unique-name>"
+   "<selected shareable path>" ...`. It records HEAD, branch, index/worktree state,
+   and authorized paths, creates an isolated worktree, and returns a receipt.
+   Other dirty/staged/untracked files in the consumer remain untouched. Already
+   modified selected files are reported as excluded from the isolated baseline.
+   Independently apply the selected fix to clean HEAD; retain the consumer file
+   untouched. If the fix depends on uncommitted context, report that conflict and
+   resolve a separate local-edit outcome. Never copy the whole dirty file to the PR.
+3. Apply **only selected project changes** in the new worktree. Personal/local
+   settings, local instructions, auto-memory, authentication, historical mixed
+   decisions and private findings/reasons are excluded. A new shared decision
+   file requires explicit sharing authorization and sanitized content.
+4. Run relevant syntax/native validation without executing untrusted components.
+   Run `verify-pr "<receipt>"`. Inspect `git diff <recorded-head>` and untracked
+   candidates in the isolated worktree for secrets, personal content and unrelated
+   edits. The helper enforces path selection, not semantic privacy. If consumer
+   state changed concurrently, inspect and report it; never restore its snapshot.
+5. Stage only the selected reviewed paths **in the isolated worktree**, never
+   `git add .`, and inspect the staged diff. Verify the exact staged name list is
+   a subset of the receipt paths. Commit using the actual configured identity.
+   Re-run `verify-pr` after committing (it checks against recorded HEAD), and
+   inspect the commit contents/base range before push.
+6. Push only the new branch and create the PR against the verified remote base.
+   Use a temporary UTF-8 body file with `gh pr create --body-file` so literal
+   newlines and shell text survive safely. Include problem, selected behavior,
+   actual checks and material limitations. Do not publish the full personal audit
+   report. Additional comments/messages require authorization; no automatic
+   inline-review-comment storm is part of delivery.
+7. Return actual PR URL and head. Preserve worktree/receipt on failure or while
+   review needs them, stating the failed stage and recovery command. Inspect live
+   remote/PR state before retrying so a transient response cannot duplicate a PR.
+   Clean up only task-created resources after confirming work is safely retained
+   and no longer needed. Do not reset, stash/pop or switch the consumer branch.
 
-Before attempting PR delivery:
-1. Verify `gh` CLI is available: `command -v gh`
-2. Verify `gh` is authenticated: `gh auth status`
-3. If either fails, tell the user `gh` CLI is required for PR delivery and fall back to "Keep as local edits"
-
-## Create the PR
-
-If PR delivery is selected and prerequisites pass:
-
-1. **Record the current branch**: `CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)` — this is the branch the user was on before claudit creates its own branch. The PR will target this branch so the diff only shows claudit changes.
-2. **Create branch**: `git checkout -b claudit/improvements-YYYY-MM-DD-HHMM` (use today's date and current time to avoid same-day collisions)
-3. **Stage changed project files**: Stage project-scoped files modified in Phase 4, plus the decisions file if it was created/updated. Never stage:
-   - `CLAUDE.local.md` (gitignored/personal)
-   - `.claude/settings.local.json` (personal local settings)
-   - Any file under `~/.claude/` (personal config)
-   - Any file outside the project root
-
-   **Always stage if present**: `{PROJECT_ROOT}/.claude/claudit-decisions.json` — decision history is team-shared context documenting intentional deviations.
-4. **Commit** with a clear message including the score delta:
-   ```
-   claudit: improve Claude Code configuration (score XX → YY)
-
-   - [List key changes]
-   ```
-5. **Push** with `git push -u origin claudit/improvements-YYYY-MM-DD-HHMM` (same branch name as step 2)
-6. **Create PR** via `gh pr create --base $CURRENT_BRANCH`:
-   - Title: `claudit: improve Claude Code configuration`
-   - Body: Concise summary with score delta, list of changes, and note that personal/global config was audited separately (if comprehensive)
-   - The `--base` flag ensures the PR targets the user's original branch, not the repo default — so the diff only contains claudit's changes
-7. **Add inline review comments** via `gh api` for each changed file. Use this JSON structure:
-
-   ```bash
-   gh api repos/{owner}/{repo}/pulls/{pr_number}/comments \
-     --method POST \
-     --field commit_id="$(git rev-parse HEAD)" \
-     --field path="path/to/file" \
-     --field line=N \
-     --field side="RIGHT" \
-     --field body="**What changed:** Brief description
-
-   **Why it matters:** 1-2 sentences on impact
-
-   **Claude Code feature:** Feature name
-   **Docs:** https://docs.anthropic.com/en/docs/claude-code/relevant-page
-   **Score impact:** +N pts Category"
-   ```
-
-   To determine the correct `line` value, run `git diff HEAD~1 -- path/to/file` and find line numbers within changed hunks. The `line` must be a line number in the new file version that falls within a diff hunk range. Target the most representative changed line per hunk. If line targeting fails (422 error), fall back to a general PR comment without line numbers using `gh pr comment`.
-
-   Add one comment per significant change. Keep comments concise and educational.
-
-8. Return the PR URL to the user.
-
-## Fallback
-
-If `gh` is not available, not authenticated, or PR creation fails:
-- Tell the user what happened
-- Fall back to "Keep as local edits"
-- Show a `git diff --stat` of what was changed
+A failed push or PR does not justify moving the isolated changes into consumer
+files without authorization. Report retained branch/worktree and the next action.

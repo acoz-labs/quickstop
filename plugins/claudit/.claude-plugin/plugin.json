@@ -1,11 +1,17 @@
 {
   "name": "claudit",
-  "version": "3.0.0",
-  "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task — building a skill, configuring an MCP, authoring CLAUDE.md — can read it instead of re-fetching docs.",
+  "version": "3.1.0",
+  "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
   "author": {
     "name": "quickstop",
     "url": "https://github.com/acostanzo/quickstop"
   },
   "license": "MIT",
-  "keywords": ["audit", "configuration", "optimization", "health-check", "best-practices"]
+  "keywords": [
+    "audit",
+    "configuration",
+    "optimization",
+    "health-check",
+    "best-practices"
+  ]
 }
