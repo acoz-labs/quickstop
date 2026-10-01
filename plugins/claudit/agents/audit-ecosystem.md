@@ -21,7 +21,11 @@ Inspect redacted MCP metadata and actual component paths. Validate transports:
 stdio command versus remote URL, optional args, environment and launch context.
 A command not found in an unrelated shell is not proof the actual server fails.
 Never execute MCP commands, hooks or plugin code. Configured count is not usage
-or context cost: account for tool search, deferred tools and alwaysLoad.
+or context cost: account for tool search, deferred tools and alwaysLoad. Missing
+alwaysLoad is a configured/default expectation, not proof of actual deferral.
+Runtime verification requires actual session observations accounting for tool-search
+thresholds, environment overrides and enabled state; without those, loading remains
+unverified. Do not label configuration-only expectations “verified clean”.
 
 Commands remain supported. A manifest is optional; name is required if present.
 Other directories/metadata are optional. Inspect every applicable install,

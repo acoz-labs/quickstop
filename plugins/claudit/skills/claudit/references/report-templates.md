@@ -35,6 +35,9 @@ failed agents remain explicit. A fresh cache is not semantic verification.
 
 Explain relevance and tradeoff, not just missing features. Context figures specify
 measured versus estimated, what loads and when, and what remains unknown.
+Label documented defaults/configured expectations separately from observed runtime
+behavior. In particular, unspecified alwaysLoad is not verified tool deferral;
+actual session evidence must account for tool search and environment overrides.
 Read-only audits end here without edit/decision prompts. For authorized selected
 fixes, show exact targets, delivery path, actual validation and observed before/
 after differences. A PR summary contains only sanitized project information.

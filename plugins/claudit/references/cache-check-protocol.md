@@ -25,6 +25,17 @@ States share one implementation:
 A fresh state certifies cache provenance/integrity, **not semantic correctness**.
 Each claim remains model synthesis that must be checked against its cited source.
 
+## Explicit no-write requests
+
+`status` never writes anything. If an invocation prohibits files/writes (including
+cache), use only read-only `status`/`knowledge` and existing record/source paths.
+Do not fetch or run cache-put/cache-fail, because those write. Do not redirect
+helper output to a file, use tee-to-file, create a temporary JSON aggregate, or
+save scratch/context summaries anywhere, including `/tmp`. Consume stdout as the
+tool response and pass relevant claims inline or existing per-domain paths.
+Retained evidence remains labeled with its actual state and limitations. If no
+usable evidence exists, report the gap instead of materializing a fallback file.
+
 ## Refresh one domain
 
 1. Run `fetch --host-version "<actual output>" <domain>`. It fetches the required
