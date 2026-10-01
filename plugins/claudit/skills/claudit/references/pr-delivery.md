@@ -24,6 +24,9 @@ explicitly covered authorization and is never eligible for a PR.
    --destination "<new external worktree path>" --branch "claudit/<unique-name>"
    "<selected shareable path>" ...`. It records HEAD, branch, index/worktree state,
    and authorized paths, creates an isolated worktree, and returns a receipt.
+   Existing destinations (including symlinks), branches and prior receipts are
+   refused before Git changes. A uniquely reserved receipt transitions through
+   `planned` to `prepared` or `failed`; only `prepared` can pass `verify-pr`.
    Other dirty/staged/untracked files in the consumer remain untouched. Already
    modified selected files are reported as excluded from the isolated baseline.
    Independently apply the selected fix to clean HEAD; retain the consumer file
@@ -52,6 +55,13 @@ explicitly covered authorization and is never eligible for a PR.
 7. Return actual PR URL and head. Preserve worktree/receipt on failure or while
    review needs them, stating the failed stage and recovery command. Inspect live
    remote/PR state before retrying so a transient response cannot duplicate a PR.
+   For preparation failures, read the retained receipt: `recovery` reports actual
+   branch/ref and worktree registration/destination state. Git can create a branch
+   before worktree creation fails. The helper retains it, never deletes refs or
+   overwrites a prior receipt on retry. A `planned` receipt after interruption is
+   not proof of completion; inspect its named branch/destination against live Git
+   state. Preserve partial work and use a new explicit destination/branch only
+   after resolving the retained attempt, rather than blindly rerunning the command.
    Clean up only task-created resources after confirming work is safely retained
    and no longer needed. Do not reset, stash/pop or switch the consumer branch.
 

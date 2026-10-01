@@ -575,6 +575,82 @@ class RuntimeTests(unittest.TestCase):
         after = {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
         self.assertEqual(after, before)
 
+    def test_prepare_preflight_preserves_refs_for_occupied_destinations_and_branches(self):
+        self.repo()
+        original_refs = self.git('show-ref')
+        destination = self.base / 'delivery'
+        destination.mkdir()
+        self.write(destination / 'retained.txt', 'existing work')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            self.prepare()
+        self.assertEqual(self.git('show-ref'), original_refs)
+        self.assertEqual((destination / 'retained.txt').read_text(), 'existing work')
+        self.assertFalse((self.base / 'delivery.claudit-receipt.json').exists())
+        broken = self.base / 'broken-destination'
+        broken.symlink_to(self.base / 'missing-target', target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            r.prepare_pr(self.project, broken, 'claudit/broken', ['CLAUDE.md'])
+        self.assertEqual(self.git('show-ref'), original_refs)
+        self.assertFalse((self.base / 'missing-target').exists())
+        self.git('branch', 'claudit/existing')
+        existing_refs = self.git('show-ref')
+        with self.assertRaisesRegex(ValueError, 'already registered'):
+            r.prepare_pr(self.project, self.base / 'unused', 'claudit/existing', ['CLAUDE.md'])
+        self.assertEqual(self.git('show-ref'), existing_refs)
+        self.assertFalse((self.base / 'unused.claudit-receipt.json').exists())
+
+    def test_post_branch_prepare_failure_retains_receipt_and_recovery_without_mutating_consumer(self):
+        self.repo()
+        before = r.consumer_snapshot(self.project)
+        receipt_path = self.base / 'delivery.claudit-receipt.json'
+        real_run = subprocess.run
+        def fail_after_branch(command, *args, **kwargs):
+            if command[3:5] == ['worktree', 'add']:
+                planned = r.read_json(receipt_path)
+                self.assertEqual(planned['state'], 'planned')
+                self.assertFalse(planned['recovery']['branch_exists'])
+                real_run(['git', '-C', str(self.project), 'branch', command[6], command[8]],
+                         check=True, capture_output=True)
+                raise subprocess.CalledProcessError(128, command, stderr=b'synthetic allocation failure')
+            return real_run(command, *args, **kwargs)
+        with patch.object(r.subprocess, 'run', side_effect=fail_after_branch):
+            with self.assertRaisesRegex(ValueError, 'retained branch/worktree recovery'):
+                self.prepare()
+        receipt = r.read_json(receipt_path)
+        self.assertEqual(receipt['state'], 'failed')
+        self.assertEqual(receipt['failure']['returncode'], 128)
+        self.assertTrue(receipt['recovery']['branch_exists'])
+        self.assertEqual(receipt['recovery']['branch_head'], self.git('rev-parse', 'HEAD'))
+        self.assertFalse(receipt['recovery']['worktree_registered'])
+        self.assertFalse(receipt['recovery']['destination_exists'])
+        self.assertEqual(r.consumer_snapshot(self.project), before)
+        self.assertEqual(self.git('rev-parse', 'claudit/test'), self.git('rev-parse', 'HEAD'))
+        with self.assertRaisesRegex(ValueError, 'incomplete or failed'):
+            r.verify_pr(receipt_path)
+        retained = receipt_path.read_bytes()
+        refs = self.git('show-ref')
+        with self.assertRaisesRegex(ValueError, 'Prior preparation receipt'):
+            self.prepare()
+        self.assertEqual(receipt_path.read_bytes(), retained)
+        self.assertEqual(self.git('show-ref'), refs)
+        self.assertEqual(r.consumer_snapshot(self.project), before)
+
+    def test_prepared_receipt_succeeds_and_planned_receipt_cannot_verify(self):
+        self.repo()
+        before = r.consumer_snapshot(self.project)
+        receipt = self.prepare()
+        self.assertEqual(receipt['state'], 'prepared')
+        self.assertTrue(receipt['recovery']['branch_exists'])
+        self.assertTrue(receipt['recovery']['worktree_registered'])
+        self.assertEqual(receipt['recovery']['registered_branch'], 'refs/heads/claudit/test')
+        self.assertEqual(r.verify_pr(receipt['receipt'])['status'], 'verified')
+        self.assertEqual(r.consumer_snapshot(self.project), before)
+        planned = r.read_json(receipt['receipt'])
+        planned['state'] = 'planned'
+        self.write(Path(receipt['receipt']), planned)
+        with self.assertRaisesRegex(ValueError, 'incomplete or failed'):
+            r.verify_pr(receipt['receipt'])
+
 
 if __name__ == '__main__':
     unittest.main()
