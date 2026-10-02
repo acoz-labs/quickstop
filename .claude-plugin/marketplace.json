@@ -26,13 +26,13 @@
     },
     {
       "name": "writing-for-humans",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "description": "The original Writing for Humans kit, packaged as a selectable Claude Code output style and two skills.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/acoz-labs/quickstop.git",
         "path": "plugins/claude-code/writing-for-humans",
-        "sha": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c"
+        "sha": "9754a2fa8cb67ee509bc61faac78df6ef17410cd"
       }
     }
   ]

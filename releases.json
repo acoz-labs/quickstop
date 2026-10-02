@@ -38,8 +38,8 @@
     {
       "name": "writing-for-humans",
       "harness": "claude-code",
-      "commit": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c",
-      "sha256": "3a798658a79ed5172423719ff1ba0522c949747733d1da87a25ecbee2cd85fe1",
+      "commit": "9754a2fa8cb67ee509bc61faac78df6ef17410cd",
+      "sha256": "abf6082b256d5508fc6567c7d3af87aad2d2a285f24446eeed0616196d890bf2",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claude-code/writing-for-humans",
@@ -47,15 +47,15 @@
       },
       "manifest": {
         "name": "writing-for-humans",
-        "version": "0.3.0",
+        "version": "0.3.1",
         "description": "Plain, direct Claude Code writing with context, evidence and an opinionated voice preset.",
         "license": "MIT"
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 141,
-        "artifact": "sha256:74e25e22381d2d94aed2442a1198a71c06ccf41216fcf82aec1c9f8e6c038908",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/141#issuecomment-5945817396"
+        "issue": 148,
+        "artifact": "sha256:2cfff52d6e5f567c1fdb27156f76a2d1ec3dbe003f226e8826e2854d561a1ec2",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/148#issuecomment-5954439158"
       }
     }
   ]
