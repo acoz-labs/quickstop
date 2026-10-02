@@ -4,8 +4,8 @@
     {
       "name": "claudit",
       "harness": "claude-code",
-      "commit": "d04bae5fdb35ae96a4885a5b2a1f4c9f32eeacf5",
-      "sha256": "03a0e8bc782a006060180dd442bceb666748522a5356a5a11bc6ccdc62b57c17",
+      "commit": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c",
+      "sha256": "6c2c15bd46018983323df2848baca369e9d290050d78b1c87ffea4da9b484ac8",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claudit",
@@ -13,7 +13,7 @@
       },
       "manifest": {
         "name": "claudit",
-        "version": "3.1.0",
+        "version": "3.2.3",
         "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
         "author": {
           "name": "quickstop",
@@ -30,16 +30,16 @@
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 138,
-        "artifact": "sha256:6d9eb80033574b518cb5b346c394425cc9625f4ba0d431d68756c2bc236e08da",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/138#issuecomment-5940176838"
+        "issue": 141,
+        "artifact": "sha256:74e25e22381d2d94aed2442a1198a71c06ccf41216fcf82aec1c9f8e6c038908",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/141#issuecomment-5945817396"
       }
     },
     {
       "name": "writing-for-humans",
       "harness": "claude-code",
-      "commit": "288b7a6fdda9b96c6e86b8267acce1f81fe871fd",
-      "sha256": "6696c5ff9dad4bc4088819202556439bce56d956a4bc1fe8a8b36d683a37ce66",
+      "commit": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c",
+      "sha256": "3a798658a79ed5172423719ff1ba0522c949747733d1da87a25ecbee2cd85fe1",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claude-code/writing-for-humans",
@@ -47,15 +47,15 @@
       },
       "manifest": {
         "name": "writing-for-humans",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "description": "Plain, direct Claude Code writing with context, evidence and an opinionated voice preset.",
         "license": "MIT"
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 129,
-        "artifact": "sha256:3a16f870d436852f27150054bd9cae16f9332d05debcb3ccf769435a29b28e12",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/129#issuecomment-5795512954"
+        "issue": 141,
+        "artifact": "sha256:74e25e22381d2d94aed2442a1198a71c06ccf41216fcf82aec1c9f8e6c038908",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/141#issuecomment-5945817396"
       }
     }
   ]
