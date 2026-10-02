@@ -13,6 +13,14 @@ nothing. `knowledge` with the same arguments adds retained content. Domains are
 `core-config`, `ecosystem`, `optimization`; omitted arguments or `all` selects all.
 Invalid names fail rather than silently widening a request.
 
+Both commands also include `topic_inventory`, a read-only cache-wide inventory
+of up to 100 retained supplemental pages with actual states and provenance.
+It is independent of baseline domain membership and freshness: retrieving only
+optimization can still reveal a retained output-styles page. Inventory truncation
+and unrecognized record names are explicit. Use targeted `coverage` and source
+reads for feature questions; inventory presence alone is not semantic coverage,
+and absence from a truncated inventory does not establish missing evidence.
+
 States share one implementation:
 
 - **missing**: no record.

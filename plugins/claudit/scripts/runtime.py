@@ -100,6 +100,37 @@ def coverage(root, host, topics, pages):
 
 
 
+def topic_inventory(root, host, limit=100):
+    """Expose retained supplemental provenance independently of baseline domains."""
+    directory = root / 'v2/topics'
+    pages, unrecognized = set(), []
+    if directory.is_dir():
+        for path in sorted(directory.glob('*.json')):
+            name = path.name
+            key = name[:-len('.attempt.json')] if name.endswith('.attempt.json') else path.stem
+            page = key.replace('__', '/')
+            try:
+                supplemental(page)
+            except ValueError:
+                unrecognized.append(name)
+                continue
+            pages.add(page)
+    items = []
+    for page in sorted(pages)[:limit]:
+        state = domain_state(root, supplemental(page), host, include_sources=True)
+        item = dict(state, page=page)
+        sources = item.pop('source_receipts', [])
+        if state.get('evidence_available'):
+            item['source'] = sources[0]
+            item['retained_evidence_only'] = state['state'] != 'fresh'
+        items.append(item)
+    return {'scope': 'cache-wide supplemental pages; independent of baseline domain freshness',
+            'topics': items, 'discovered': len(pages), 'omitted': max(0, len(pages) - limit),
+            'truncated': len(pages) > limit,
+            'unrecognized_records': unrecognized[:limit],
+            'unrecognized_records_truncated': len(unrecognized) > limit}
+
+
 def official_url(url):
     parsed = urllib.parse.urlsplit(url)
     if (parsed.scheme != 'https' or parsed.netloc != 'code.claude.com' or
@@ -253,7 +284,7 @@ def validate_record(record, domain):
         raise ValueError('Claim integrity mismatch')
 
 
-def domain_state(root, domain, host, instant=None):
+def domain_state(root, domain, host, instant=None, include_sources=False):
     instant = instant or now()
     path = root / 'v2' / f'{record_key(domain)}.json'
     result = {'domain': domain, 'state': 'missing', 'reasons': [], 'record': str(path), 'evidence_available': False}
@@ -279,6 +310,8 @@ def domain_state(root, domain, host, instant=None):
             result['reasons'].append('incomplete-source-coverage')
         if result['reasons']:
             result['state'] = 'stale'
+        if include_sources:
+            result['source_receipts'] = record['sources']
     except FileNotFoundError:
         if (root / f'{domain}.md').exists() or (root / 'manifest.json').exists():
             result.update(state='stale', reasons=['legacy-unverified-cache-preserved'])
@@ -994,6 +1027,9 @@ def main():
             result = [fetch(root, d, host) for d in domains]
         else:
             result = [domain_state(root, d, host) for d in domains]
+            inventory = topic_inventory(root, host)
+            for item in result:
+                item['topic_inventory'] = inventory
             if args.command == 'knowledge':
                 for item in result:
                     try:
