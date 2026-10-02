@@ -44,7 +44,7 @@ authorized PRs use a separate worktree and leave existing consumer edits intact.
 
 ## Requirements and current support
 
-Claudit 3.1.0 targets current Claude Code, reviewed with **2.1.287**. It uses native
+Claudit 3.2.0 targets current Claude Code, reviewed with **2.1.287**. It uses native
 skills and six Sonnet subagents, including `omitClaudeMd` (available since
 2.1.271). Older hosts are not validated by this release. Model aliases resolve
 through the host/account; no fixed model-version or speed guarantee is implied.
@@ -62,6 +62,11 @@ native Windows certification. Without an available runtime, Claudit can explain
 read-only findings but must report deterministic checks as unverified.
 
 ## What changed
+
+- Audits now check documentation coverage for the actual features under review,
+  even when the baseline cache is fresh. Missing pages, such as output styles,
+  are fetched and synthesized separately; fresh sources are reused. This is a
+  bounded, task-specific check, not an exhaustive crawl or runtime certification.
 
 - Discovery preserves scopes and unknowns, prioritizes critical files, respects
   configuration-directory overrides, extracts redacted MCP metadata and reports
@@ -100,7 +105,12 @@ sources independently for each host/domain.
 
 A fresh record can contain useful verified-source claims alongside explicit
 coverage limitations, such as unread sections or unknown account applicability.
-Those limitations stay visible in status, knowledge and audits. Missing required
+Those limitations stay visible in status, knowledge and audits. Audits inspect
+relevant retained sections and use `coverage` / `fetch-pages` to obtain missing
+pages. Supplemental page records under `v2/topics` retain independent provenance,
+failure state and history. A failed page leaves baseline knowledge intact; a
+fresh page still does not prove semantic completeness. Explicit no-network or
+no-cache-write requests retain the missing evidence as a reported limitation. Missing required
 sources or failed research still prevent a successful refresh. Each fetch also
 reserves its own synthesis output path to keep concurrent research separate.
 

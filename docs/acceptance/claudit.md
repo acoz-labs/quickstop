@@ -55,6 +55,15 @@ action, an agent's success claim or matching headings is not evidence it happene
   A successful bounded synthesis must preserve and display unread sections and
   account applicability limits. Verify that concurrent fetches have distinct
   synthesis files and that a shared temporary output is rejected at commit time.
+- Seed a fresh ecosystem cache without the dedicated output-styles page. Audit a
+  synthetic plugin with an output style and verify the orchestrator identifies
+  that topic gap, fetches only needed supplemental official pages, synthesizes
+  source-backed claims, and rereads coverage before reporting. A second audit
+  must reuse fresh supplemental evidence. Baseline records must remain unchanged.
+  Exercise an unread relevant section in a retained page: read it without fetching.
+  Repeat with no writes/no network and with a failed supplemental fetch; report
+  the unresolved topic, preserve last-good evidence and withhold complete grades.
+  Separate documented behavior from runtime-observed loading/context usage.
 - Run a read-only audit with existing decision records and personal configuration.
   Consumer files and decisions must remain unchanged. Record allowed plugin cache
   effects separately, and honor an explicit no-write request for those too.

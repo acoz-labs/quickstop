@@ -43,7 +43,13 @@ host capabilities; memory and model choices depend on task, not fashion.
 
 Read discovered files as needed; report unreadable/corrupt/missing distinctly.
 Follow source imports only within authorized scope and track cycles/coverage.
-Do not conceal omitted candidates or unassessed sources. Request a narrowly scoped
+Do not conceal omitted candidates or unassessed sources. When supplied evidence
+does not cover an applicable feature, return an explicit `evidence_requests` list
+with the official page/topic, question to resolve and affected finding/category.
+For example, request output-styles for selection/loading/inheritance claims.
+Source presence or a fresh domain does not prove the needed section was assessed.
+The orchestrator can fetch supplemental evidence; this agent must not fetch it.
+Keep unresolved categories partial/unknown. Request a narrowly scoped
 orchestrator read-only native validation if essential; do not claim it ran yourself.
 
 Return compact findings with category, stable issue type, scope, normalized target
