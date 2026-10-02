@@ -11,15 +11,18 @@ claude plugin marketplace add acoz-labs/quickstop
 claude plugin install writing-for-humans@quickstop
 ```
 
-Restart Claude Code to discover newly installed styles, then select:
+Claude Code reads style files when it starts, so start a new session after installing, then select:
 
 ```text
 /output-style writing-for-humans:writing-for-humans
 ```
 
-The native command saves the style selection for the current project. Use Claude Code's native settings if you deliberately want a user-wide default. Installing the plugin alone does not replace an existing style. Once selected, the style applies to ordinary replies without a writing command. It retains Claude Code's built-in coding instructions.
+The native command saves the selection to `.claude/settings.local.json`, so it applies to the current project on this machine. For a default across projects, set `outputStyle` in `~/.claude/settings.json`; a project's own setting takes precedence. Installing the plugin alone does not replace an existing style, because the style does not set `force-for-plugin`. Once selected, the style applies from your next message to ordinary replies without a writing command. It retains Claude Code's built-in coding instructions.
 
-Run `/output-style` to inspect the active selection. The plugin also supplies `writing-for-humans:writing-style` and `writing-for-humans:writing-audit`. The writing references can load when relevant; invoke the audit when you want to review writing left by a change. It follows your existing task authorization and repository rules.
+Run `/output-style` to inspect the active selection. The plugin also supplies 2 skills:
+
+- `writing-for-humans:writing-style` holds the fuller references for workflow artifacts, questions asked of a person, and the cold-reader check. Claude can load it when writing one of those.
+- `writing-for-humans:writing-audit` reviews the writing a change left behind. It runs only when you type `/writing-for-humans:writing-audit`, and Claude does not start it on its own, because it can edit drafts and PR descriptions. It follows your existing task authorization and repository rules.
 
 ## What the kit does
 
@@ -31,7 +34,7 @@ A cold-reader reference describes how a fresh reader can check a difficult quest
 
 ## Boundaries and customization
 
-This is a Claude Code writing aid. It does not guarantee factual accuracy or valid machine output. Preserve supplied facts and qualifications, and use caller-side validation when software consumes generated output. Output styles affect the main conversation and inherited forks; independent subagents have their own prompts. This plugin does not impose an orchestration architecture or claim universal subagent coverage.
+This is a Claude Code writing aid. It does not guarantee factual accuracy or valid machine output. Preserve supplied facts and qualifications, and use caller-side validation when software consumes generated output. Claude Code's documentation says output styles apply to the main conversation and to forks, which inherit the parent's system prompt, while other subagents run their own system prompt. This plugin does not impose an orchestration architecture or claim universal subagent coverage.
 
 Keep personal voice instructions and examples in your own configuration. Do not edit the installed plugin cache: updates can replace it. To make a separate custom style, use Claude Code's native user or project output-style support and give it a distinct name; you maintain that copy. See [adoption guidance](ADOPT.md).
 
@@ -39,7 +42,7 @@ No hooks, runtime dependencies, network service or global instruction installer 
 
 ## Update or remove
 
-Use `claude plugin update writing-for-humans@quickstop` for an advertised update, then restart to reload files. To stop using the style, choose another native style first, for example `/output-style default`. You can then disable or uninstall:
+Use `claude plugin update writing-for-humans@quickstop` for an advertised update, then start a new session so the updated style file is read. To stop using the style, choose another native style first, for example `/output-style default`. You can then disable or uninstall:
 
 ```sh
 claude plugin disable writing-for-humans@quickstop

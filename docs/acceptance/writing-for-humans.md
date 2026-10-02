@@ -14,6 +14,15 @@ Use a small, fixed set of independently synthetic writing examples covering an e
 
 Exercise the audit on a synthetic local draft with explicit local-only authorization. Inspect factual changes as well as tool calls and external publication/history boundaries. This is an advisory writing aid: record shared original-kit/model failures without claiming fact preservation, and block repeatable factual regressions introduced or worsened by the conversion. A shared failure does not become a passing factual result. Resolve uncertain conversion effects with a bounded comparison, not prompt tuning or an expanding benchmark. The package's own files, references, configuration behavior and authorization boundaries remain strict checks. A reviewer must inspect outcomes; discovery or instruction delivery alone is not a pass.
 
+From 0.3.0, also check the installed marketplace package with a fixed set of representative prompts written before the run, and keep each run's actual tool trace:
+
+- `${CLAUDE_SKILL_DIR}` and `${CLAUDE_PLUGIN_ROOT}` paths in both skills expand to readable package files.
+- `writing-audit`: a typed invocation runs it. A prompt asking for a writing audit, without the command, shows no automatic Skill call in the trace.
+- `writing-style`: record whether Claude invoked it for each fixed prompt, covering a workflow artifact, a question to a person, a commit message and a chat reply.
+- A fresh session starts with the selected style active. Record whether `/reload-plugins` alone picks up an installed or updated style.
+
+Automatic invocation is model behavior, not a guarantee. Repeat each automatic-invocation prompt a few times under the recorded host, model and effort, and report how often each outcome occurred. These results describe those prompts and settings only; do not generalize them into a triggering guarantee. A user-only skill that Claude never invokes is an expected result; a recorded automatic call to it is a failure.
+
 Select another style, disable and uninstall the package, and verify a fresh session has no active plugin style or skills while unrelated settings remain intact. Document retained prior conversation context and any stale explicit style selection instead of inventing restoration. Record tested host/model versions and modes; independent subagent coverage is not claimed.
 
 ## Artifact delivery
