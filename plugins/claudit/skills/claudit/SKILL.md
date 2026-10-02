@@ -25,13 +25,29 @@ Use the helper at `${CLAUDE_PLUGIN_ROOT}/scripts/runtime.py`; quote its absolute
 path and all arguments. It has no broad tool auto-approval grant. Host permissions
 still govern every tool, network fetch and write.
 
+## Required audit stages
+
+Treat discovery, retained-source reading, the read-only topic `coverage` planner,
+applicable audit agents, and evidence-based synthesis as required stages. No-network
+or no-cache-write constraints prohibit fetches/writes, **not these read-only
+stages**. Do not replace them with inline analysis to save tokens or cost. Read
+this skill's linked cache/discovery/report guidance before executing those stages.
+If the user separately forbids delegation, a required host capability is absent,
+or an actual budget/tool limit prevents a stage, report that stage and its scope
+as unassessed. Do not describe such a run as a completed full audit. Native host
+bookkeeping is distinct from agent-authored consumer, cache or scratch writes;
+never create scratch files to pass context under no-write instructions.
+
 ## 0. Map scope and coverage
 
 Run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/runtime.py" discover --cwd "<session cwd>"`.
 The output contains critical configuration first, then bounded component and
 instruction candidates. Preserve present/missing/unreadable/corrupt distinctions,
 scopes, candidate loading state and omitted files. Missing optional files are not
-failures. The current working directory matters even within a repository. Pass `--scope
+failures. If tool output is truncated, inspect the host-retained result or filter
+specific fields to stdout; never infer absence from a preview. Distinguish a
+missing cwd settings file from a claim that no settings exist elsewhere in the
+repository, and verify which paths the current host actually loads. The current working directory matters even within a repository. Pass `--scope
 project` for project-only, `--scope global` for global-only, or `--scope
 comprehensive` for an explicitly requested directory audit outside Git.
 
@@ -114,6 +130,15 @@ Read [scoring rubric](references/scoring-rubric.md) and
 configuration evidence, a current source and an applicable consequence. Separate
 confirmed defects, optional improvements and unresolved observations. Do not
 score unknown/unreadable areas as perfect or penalize absent optional features.
+Before reporting a confirmed defect, read the relevant retained official source
+section and check the observed file evidence; a cached summary or fresh receipt
+alone is insufficient. An unread source remains a gap. Check the report headings:
+unknowns and optional improvements must not appear under "Confirmed defects",
+even with a later caveat. If no finding satisfies the evidence/consequence test,
+write "No verified defects" there and put unresolved observations in their own
+section. Missing optional manifests/metadata are never defects merely because a
+more detailed reference page was not read.
+
 Before presenting **any numeric score or letter grade**, run the helper's read-only
 `score` command as specified in the rubric. Pass each category's actual evidence
 coverage: assessed with a supported numeric score, partial, unknown or N/A. Missing
@@ -147,6 +172,12 @@ environment overrides, enabled state and session behavior may change loading. Us
 because configuration matches a documented default.
 
 ### Read-only final-output check
+
+Confirm the report lists actual completed and skipped stages, source sections
+read, and unresolved topic requests. A successful planner checks provenance; it
+does not replace source reading or audit agents. Failed/skipped required analysis
+must remain partial/unknown in the helper inputs. Do not silently mark its scope
+assessed just because inline reasoning found no issue.
 
 For `--read-only`, “review only” or “no changes”, finish after the evidence report.
 Recommendations may describe possible changes, but the final response must contain
