@@ -79,6 +79,105 @@ class RuntimeTests(unittest.TestCase):
         self.git('add', 'CLAUDE.md', 'other.txt')
         self.git('commit', '-m', 'fixture')
 
+    def test_topic_coverage_fills_fresh_baseline_omission_without_replacing_it(self):
+        self.seed('ecosystem')
+        original = (self.cache / 'v2/ecosystem.json').read_bytes()
+        plan = r.coverage(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+        self.assertEqual(plan['missing_pages'], ['output-styles'])
+        self.assertEqual(plan['pages'][1]['source']['id'], 'skills')
+        self.assertEqual(r.domain_state(self.cache, 'ecosystem', '2.1.287')['state'], 'fresh')
+        bundle, research = self.bundle('topic:output-styles')
+        r.commit_cache(self.cache, bundle, research)
+        plan = r.coverage(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+        self.assertEqual(plan['missing_pages'], [])
+        self.assertEqual(plan['pages'][0]['source']['id'], 'output-styles')
+        self.assertEqual((self.cache / 'v2/ecosystem.json').read_bytes(), original)
+        with patch.object(r, 'fetch', side_effect=AssertionError('Unexpected network')):
+            result = r.fetch_pages(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+        self.assertEqual(result['reused_pages'], ['output-styles', 'skills'])
+        self.assertEqual(result['fetched'], [])
+
+    def test_topic_planner_is_read_only_and_bounded(self):
+        result = self.cli('coverage', '--host-version', '2.1.287', '--topic', 'output-styles')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['missing_pages'], ['output-styles'])
+        self.assertFalse(self.cache.exists())
+        for page in ('../settings', 'https://example.com', 'x?token=x', 'x#y', 'x_y', '/settings'):
+            with self.assertRaises(ValueError):
+                r.requested_pages([], [page])
+        with self.assertRaises(ValueError):
+            r.requested_pages([], [f'page-{i}' for i in range(9)])
+        with self.assertRaises(ValueError):
+            r.requested_pages([], [])
+        self.assertNotEqual(r.record_key('topic:plugins/components'), r.record_key('topic:plugins-components'))
+        self.assertEqual(r.requested_pages(['skills'], ['skills']), ['skills'])
+        self.assertFalse(self.cache.exists())
+
+    def test_topic_failure_is_isolated_and_last_good_keeps_provenance(self):
+        self.seed('ecosystem')
+        self.seed('topic:output-styles')
+        target = self.cache / 'v2/topics/output-styles.json'
+        before = target.read_bytes()
+        def denied(*args, **kwargs):
+            raise OSError('unavailable')
+        result = r.fetch(self.cache, 'topic:output-styles', '2.1.287', denied)
+        self.assertFalse(result['commit_allowed'])
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(r.domain_state(self.cache, 'ecosystem', '2.1.287')['state'], 'fresh')
+        plan = r.coverage(self.cache, '2.1.287', ['output-styles'], [])
+        self.assertEqual(plan['pages'][0]['state'], 'degraded')
+        self.assertEqual(plan['missing_pages'], ['output-styles'])
+        self.assertTrue(plan['pages'][0]['retained_evidence_only'])
+        self.assertIn('claims', plan['pages'][0])
+
+    def test_topic_coverage_handles_legacy_without_assuming_v2_record(self):
+        self.write(self.cache / 'manifest.json', {})
+        plan = r.coverage(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+        self.assertEqual(plan['missing_pages'], ['output-styles', 'skills'])
+        self.assertTrue(all('source' not in item for item in plan['pages']))
+        self.seed('ecosystem')
+        plan = r.coverage(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+        self.assertEqual(plan['missing_pages'], ['output-styles'])
+        self.assertEqual(plan['pages'][1]['source']['id'], 'skills')
+        self.assertNotIn('source', plan['pages'][0])
+
+    def test_topic_plan_exposes_stale_baseline_and_failed_supplement(self):
+        self.seed('ecosystem', '2.1.100')
+        page = r.coverage(self.cache, '2.1.287', ['skills'], [])['pages'][0]
+        self.assertEqual(page['state'], 'stale')
+        self.assertIn('host-version-changed', page['reasons'])
+        self.assertTrue(page['retained_evidence_only'])
+        self.assertEqual(page['source']['id'], 'skills')
+        self.seed('ecosystem')
+        r.fail(self.cache, 'topic:skills', 'supplemental read failed')
+        page = r.coverage(self.cache, '2.1.287', ['skills'], [])['pages'][0]
+        self.assertEqual(page['state'], 'fresh')
+        self.assertFalse(page['fetch_needed'])
+        self.assertEqual(page['failures'][0]['reason'], 'supplemental read failed')
+
+    def test_topic_receipts_expire_and_detect_changed_host_or_bytes(self):
+        self.seed('topic:output-styles')
+        self.assertEqual(r.coverage(self.cache, '2.1.288', ['output-styles'], [])['pages'][0]['state'], 'stale')
+        with patch.object(r, 'now', return_value=r.now() + r.TTL):
+            self.assertEqual(r.coverage(self.cache, '2.1.287', ['output-styles'], [])['pages'][0]['state'], 'stale')
+        record = r.read_json(self.cache / 'v2/topics/output-styles.json')
+        Path(record['sources'][0]['content_path']).write_text('changed')
+        self.assertEqual(r.coverage(self.cache, '2.1.287', ['output-styles'], [])['pages'][0]['state'], 'corrupt')
+
+    def test_official_redirect_validation_precedes_destination_request(self):
+        handler = r.OfficialRedirectHandler()
+        request = r.urllib.request.Request('https://code.claude.com/docs/en/output-styles.md')
+        for url in ('https://example.com/docs/en/output-styles.md',
+                    'https://code.claude.com.evil.test/docs/en/skills.md',
+                    'https://code.claude.com/docs/en/../secrets',
+                    'http://code.claude.com/docs/en/skills.md',
+                    'https://code.claude.com/docs/en/skills.md?token=secret'):
+            with self.assertRaises(ValueError):
+                handler.redirect_request(request, None, 302, 'redirect', {}, url)
+        redirected = handler.redirect_request(request, None, 302, 'redirect', {},
+                                               'https://code.claude.com/docs/en/output-styles')
+        self.assertEqual(redirected.full_url, 'https://code.claude.com/docs/en/output-styles')
+
     def test_status_cli_default_is_nonmutating_and_unknown_domain_fails(self):
         result = self.cli('status', '--host-version', '2.1.287 (Claude Code)')
         self.assertEqual(result.returncode, 0, result.stderr)

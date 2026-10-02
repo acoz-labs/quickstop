@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -21,7 +22,109 @@ DOMAINS = {
     'ecosystem': ('mcp', 'hooks', 'skills', 'sub-agents', 'plugins-reference', 'plugins/components', 'plugins/measure', 'plugins/mods/overview'),
     'optimization': ('model-config', 'cli-reference', 'best-practices', 'costs'),
 }
+TOPICS = {
+    'output-styles': ('output-styles',),
+    'skills': ('skills',),
+    'subagents': ('sub-agents',),
+    'hooks': ('hooks',),
+    'mcp': ('mcp',),
+    'plugins': ('plugins-reference', 'plugins/components'),
+    'permissions': ('permissions',),
+    'memory': ('memory',),
+    'settings': ('settings', 'settings-reference'),
+    'models': ('model-config',),
+    'costs': ('costs', 'plugins/measure'),
+}
+MAX_PAGES = 8
 TTL = dt.timedelta(days=7)
+
+
+def supplemental(page):
+    # Official documentation slugs only: no URLs, traversal, query or fragment.
+    if not isinstance(page, str) or not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*){0,3}', page):
+        raise ValueError('Expected an official documentation page slug')
+    return 'topic:' + page
+
+
+def required_pages(domain):
+    if domain in DOMAINS:
+        return DOMAINS[domain]
+    if domain.startswith('topic:') and supplemental(domain[6:]) == domain:
+        return (domain[6:],)
+    raise ValueError('Unknown research domain')
+
+
+def record_key(domain):
+    required_pages(domain)
+    return 'topics/' + domain[6:].replace('/', '__') if domain.startswith('topic:') else domain
+
+
+def requested_pages(topics, pages):
+    if any(topic not in TOPICS for topic in topics):
+        raise ValueError('Unknown documentation topic')
+    selected = list(dict.fromkeys([page for topic in topics for page in TOPICS[topic]] + list(pages)))
+    if not selected or len(selected) > MAX_PAGES:
+        raise ValueError(f'Select between 1 and {MAX_PAGES} documentation pages per invocation')
+    for page in selected:
+        supplemental(page)
+    return selected
+
+
+def coverage(root, host, topics, pages):
+    """Plan targeted reading without network, writes, or claims of semantic coverage."""
+    selected = requested_pages(topics, pages)
+    baseline = {domain: domain_state(root, domain, host) for domain in DOMAINS}
+    results = []
+    for page in selected:
+        candidates = [state for domain, state in baseline.items() if page in DOMAINS[domain]]
+        candidates.append(domain_state(root, supplemental(page), host))
+        usable = next((state for state in candidates if state['state'] == 'fresh'), None)
+        state = usable or next((candidate for candidate in candidates
+                                    if candidate.get('evidence_available')),
+                                   next((candidate for candidate in candidates if candidate['state'] != 'missing'), candidates[-1]))
+        item = {'page': page, 'state': state['state'], 'fetch_needed': usable is None,
+                'record': state['record'], 'reasons': state.get('reasons', []),
+                'limitations': state.get('limitations', [])}
+        failures = [{'record': candidate['record'], 'reason': candidate['last_failure']}
+                    for candidate in candidates if 'last_failure' in candidate]
+        if failures:
+            item['failures'] = failures
+        if state.get('evidence_available'):
+            item['retained_evidence_only'] = usable is None
+            record = read_json(state['record'])
+            item['source'] = next(source for source in record['sources'] if source['id'] == page)
+            item['claims'] = [claim for claim in record['claims'] if page in claim['source_ids']]
+        results.append(item)
+    return {'pages': results, 'missing_pages': [item['page'] for item in results if item['fetch_needed']],
+            'evidence_basis': 'Page provenance only; inspect relevant sections and limitations. Semantic and runtime coverage remain unverified.'}
+
+
+
+def official_url(url):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != 'https' or parsed.netloc != 'code.claude.com' or
+            parsed.query or parsed.fragment or not parsed.path.startswith('/docs/en/')):
+        raise ValueError('Expected public official documentation URL')
+    page = parsed.path[len('/docs/en/'):]
+    supplemental(page[:-3] if page.endswith('.md') else page)
+    return url
+
+
+class OfficialRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        official_url(newurl)  # Check before urllib contacts the redirect destination.
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def official_open(request, timeout):
+    official_url(request.full_url)
+    return urllib.request.build_opener(OfficialRedirectHandler()).open(request, timeout=timeout)
+
+
+def fetch_pages(root, host, topics, pages, opener=None):
+    plan = coverage(root, host, topics, pages)
+    return {'reused_pages': [item['page'] for item in plan['pages'] if not item['fetch_needed']],
+            'fetched': [fetch(root, supplemental(page), host, opener) for page in plan['missing_pages']]}
 
 
 def now():
@@ -126,13 +229,16 @@ def validate_record(record, domain):
         raise ValueError('Missing claims/sources')
     ids = set()
     for source in sources:
-        if not isinstance(source, dict) or not isinstance(source.get('url'), str) or not source['url'].startswith('https://code.claude.com/docs/en/'):
+        if not isinstance(source, dict) or not isinstance(source.get('url'), str):
             raise ValueError('Invalid official source')
+        official_url(source['url'])
         if not isinstance(source.get('id'), str) or not isinstance(source.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', source['sha256']):
             raise ValueError('Invalid source identity')
         parse_time(source.get('fetched_at'))
+        if source['id'] in ids:
+            raise ValueError('Duplicate source identity')
         ids.add(source['id'])
-    if ids != set(DOMAINS[domain]):
+    if ids != set(required_pages(domain)):
         raise ValueError('Missing source coverage')
     for claim in claims:
         if not isinstance(claim, dict) or not isinstance(claim.get('text'), str) or not claim['text'].strip() or not isinstance(claim.get('section'), str) or not claim['section']:
@@ -149,8 +255,8 @@ def validate_record(record, domain):
 
 def domain_state(root, domain, host, instant=None):
     instant = instant or now()
-    path = root / 'v2' / f'{domain}.json'
-    result = {'domain': domain, 'state': 'missing', 'reasons': [], 'record': str(path)}
+    path = root / 'v2' / f'{record_key(domain)}.json'
+    result = {'domain': domain, 'state': 'missing', 'reasons': [], 'record': str(path), 'evidence_available': False}
     try:
         record = read_json(path)
         validate_record(record, domain)
@@ -162,11 +268,12 @@ def domain_state(root, domain, host, instant=None):
             if digest(source_path.read_bytes()) != source['sha256']:
                 raise ValueError('Retained source integrity mismatch')
         fetched = parse_time(record['fetched_at'])
-        result.update(fetched_at=record['fetched_at'], host_version=record['host_version'], state='fresh',
+        result.update(fetched_at=record['fetched_at'], host_version=record['host_version'], state='fresh', evidence_available=True,
                       limitations=record.get('limitations', []))
         if record['host_version'] != host:
             result['reasons'].append('host-version-changed')
-        if instant - fetched >= TTL or fetched > instant + dt.timedelta(minutes=5):
+        source_times = [fetched] + [parse_time(source['fetched_at']) for source in record['sources']]
+        if any(instant - value >= TTL or value > instant + dt.timedelta(minutes=5) for value in source_times):
             result['reasons'].append('source-expired-or-future')
         if record.get('gaps'):
             result['reasons'].append('incomplete-source-coverage')
@@ -176,38 +283,40 @@ def domain_state(root, domain, host, instant=None):
         if (root / f'{domain}.md').exists() or (root / 'manifest.json').exists():
             result.update(state='stale', reasons=['legacy-unverified-cache-preserved'])
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        result.update(state='corrupt', reasons=['invalid-record-or-content-integrity'])
+        result.update(state='corrupt', evidence_available=False, reasons=['invalid-record-or-content-integrity'])
     try:
-        attempt = read_json(root / 'v2' / f'{domain}.attempt.json')
+        attempt = read_json(root / 'v2' / f'{record_key(domain)}.attempt.json')
         if attempt['status'] == 'failed' and ('fetched_at' not in result or
                 parse_time(attempt['at']) >= parse_time(result['fetched_at'])):
-            result.update(state='degraded', last_failure=attempt['reason'])
+            result.update(retained_state=result['state'], state='degraded', last_failure=attempt['reason'])
     except FileNotFoundError:
         pass
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        result.update(state='degraded', last_failure='unreadable attempt receipt')
+        result.update(retained_state=result['state'], state='degraded', last_failure='unreadable attempt receipt')
     return result
 
 
 def fail(root, domain, reason):
-    with locked(root / 'v2' / f'{domain}.lock'):
-        atomic(root / 'v2' / f'{domain}.attempt.json', {'status': 'failed', 'at': stamp(), 'reason': reason})
+    with locked(root / 'v2' / f'{record_key(domain)}.lock'):
+        atomic(root / 'v2' / f'{record_key(domain)}.attempt.json', {'status': 'failed', 'at': stamp(), 'reason': reason})
     return {'domain': domain, 'status': 'failed', 'last_good_preserved': True}
 
 
-def fetch(root, domain, host, opener=urllib.request.urlopen):
+def fetch(root, domain, host, opener=None):
     """Fetch source bytes before research; never turn old model memory into evidence."""
+    host = version(host)
+    required_pages(domain)
+    opener = opener or official_open
     started = stamp()
-    bundle_dir = root / 'v2' / 'research' / f'{domain}-{uuid.uuid4().hex}'
+    bundle_dir = root / 'v2' / 'research' / f'{record_key(domain).replace("/", "-")}-{uuid.uuid4().hex}'
     bundle_dir.mkdir(parents=True, mode=0o700)
     sources, errors = [], []
-    for page in DOMAINS[domain]:
+    for page in required_pages(domain):
         url = f'https://code.claude.com/docs/en/{page}.md'
         try:
-            with opener(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; Claudit/3.1)' }), timeout=30) as response:
+            with opener(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; Claudit/3.2)' }), timeout=30) as response:
                 final = response.geturl()
-                if not final.startswith('https://code.claude.com/docs/en/'):
-                    raise ValueError('unexpected redirect outside official docs')
+                official_url(final)
                 data = response.read(2_000_001)
                 if not data or len(data) > 2_000_000:
                     raise ValueError('empty or oversized source')
@@ -239,12 +348,14 @@ def commit_cache(root, bundle_path, research_path):
         raise ValueError('Use the exact research_output path returned by fetch for this bundle')
     bundle, research = read_json(bundle_path), read_json(research_path)
     domain = bundle['domain']
-    if domain not in DOMAINS or bundle['errors']:
+    required_pages(domain)
+    if bundle['errors']:
         raise ValueError('Partial fetch cannot replace last good research; report degraded evidence')
-    if now() - parse_time(bundle['fetched_at']) >= TTL:
+    fetched_at = parse_time(bundle['fetched_at'])
+    if now() - fetched_at >= TTL or fetched_at > now() + dt.timedelta(minutes=5):
         raise ValueError('Research bundle expired')
     sources = {s['id']: s for s in bundle['sources']}
-    if set(sources) != set(DOMAINS[domain]):
+    if set(sources) != set(required_pages(domain)):
         raise ValueError('Incomplete source receipt')
     for source in sources.values():
         source_path = Path(source['content_path']).resolve()
@@ -278,8 +389,9 @@ def commit_cache(root, bundle_path, research_path):
     record.update(claims=claims, gaps=[], limitations=limitations, content_sha256=digest(json.dumps(claims, sort_keys=True).encode()),
                   sources=[{k: s[k] for k in ('id', 'url', 'fetched_at', 'sha256', 'content_path')} for s in sources.values()],
                   evidence_basis='official bytes fetched; semantic synthesis is model-authored, not mechanically verified')
-    with locked(root / 'v2' / f'{domain}.lock'):
-        target = root / 'v2' / f'{domain}.json'
+    validate_record(record, domain)
+    with locked(root / 'v2' / f'{record_key(domain)}.lock'):
+        target = root / 'v2' / f'{record_key(domain)}.json'
         try:
             old = read_json(target)
             validate_record(old, domain)
@@ -290,11 +402,11 @@ def commit_cache(root, bundle_path, research_path):
         except (FileNotFoundError, ValueError, KeyError, TypeError):
             pass
         if target.exists():
-            backup = root / 'v2/history' / f'{domain}-{uuid.uuid4().hex}.json'
+            backup = root / 'v2/history' / f'{record_key(domain).replace("/", "-")}-{uuid.uuid4().hex}.json'
             backup.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             backup.write_bytes(target.read_bytes())
         atomic(target, record)
-        atomic(root / 'v2' / f'{domain}.attempt.json', {'status': 'success', 'at': stamp()})
+        atomic(root / 'v2' / f'{record_key(domain)}.attempt.json', {'status': 'success', 'at': stamp()})
     return {'status': 'committed', 'domain': domain, 'record': str(target)}
 
 
@@ -856,6 +968,12 @@ def main():
         p = sub.add_parser(name)
         p.add_argument('--host-version', required=True)
         p.add_argument('domains', nargs='*')
+    for name in ('coverage', 'fetch-pages'):
+        p = sub.add_parser(name)
+        p.add_argument('--host-version', required=True)
+        p.add_argument('--topic', action='append', default=[], choices=TOPICS)
+        p.add_argument('--page', action='append', default=[])
+    p = sub.add_parser('topic-fail'); p.add_argument('page'); p.add_argument('reason')
     p = sub.add_parser('score'); p.add_argument('--category', action='append', default=[])
     p = sub.add_parser('cache-put'); p.add_argument('bundle'); p.add_argument('research')
     p = sub.add_parser('cache-fail'); p.add_argument('domain', choices=DOMAINS); p.add_argument('reason')
@@ -882,6 +1000,13 @@ def main():
                         item['knowledge'] = read_json(item['record'])
                     except (OSError, ValueError):
                         item['knowledge'] = None
+    elif args.command in ('coverage', 'fetch-pages'):
+        host = version(args.host_version)
+        if args.command == 'coverage':
+            result = coverage(root, host, args.topic, args.page)
+        else:
+            result = fetch_pages(root, host, args.topic, args.page)
+    elif args.command == 'topic-fail': result = fail(root, supplemental(args.page), args.reason)
     elif args.command == 'score': result = score_categories(args.category)
     elif args.command == 'cache-put': result = commit_cache(root, args.bundle, args.research)
     elif args.command == 'cache-fail': result = fail(root, args.domain, args.reason)
