@@ -36,6 +36,22 @@ tool response and pass relevant claims inline or existing per-domain paths.
 Retained evidence remains labeled with its actual state and limitations. If no
 usable evidence exists, report the gap instead of materializing a fallback file.
 
+## Research result persistence
+
+For baseline and supplemental research, persist the research agent's returned
+JSON unchanged: preserve every claim, gap and limitation value. Serialization
+formatting may change; content may not. Do not shorten claims, remove returned
+gaps, move gaps into limitations, or otherwise rewrite the result to make
+`cache-put` succeed. Inspecting sources does not authorize changing that result.
+
+If the returned `gaps` list is nonempty, close this attempt with `cache-fail`
+for a baseline domain or `topic-fail` for a supplemental page while cache writes
+remain authorized. This applies even if a gap seems misclassified: retain the
+original result, report the classification uncertainty, and preserve last-good
+cache. Do not retry research, request a replacement synthesis or rewrite the JSON
+in the same invocation. If failure-receipt writes are blocked, report that fact
+without bypassing permissions; the attempt remains unsuccessful.
+
 ## Refresh one domain
 
 Before any baseline or supplemental fetch, check the user's network and write
@@ -148,7 +164,8 @@ When a required page needs fetching and network/cache writes are authorized:
    set `run_in_background: false`. The bundle's required source set is that page,
    not every page in the baseline domain. Read its sections and return the normal
    claims/gaps/limitations JSON with actual source IDs. No research-memory recall.
-3. Write the returned synthesis only to its issued `research_output`, then run
+3. Preserve the returned synthesis unchanged at its issued `research_output`;
+   apply the research-result persistence rule above before running
    `cache-put "<bundle>" "<research_output>"`. Source hashes and claim references
    are checked as for baseline research. Each page commits separately; one failed
    page must not erase another page or the baseline domain.

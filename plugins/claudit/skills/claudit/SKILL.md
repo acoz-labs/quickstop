@@ -107,6 +107,10 @@ evidence remains a limitation, never a fabricated verification pass.
 
 Before continuing to analysis or scoring, close every attempted supplemental
 fetch with a successful `cache-put` result or a retained `topic-fail` receipt.
+Persist each research agent's returned JSON unchanged. Never remove or rewrite
+claims or gaps, or move returned gaps into limitations, while persisting it.
+Even an apparently misclassified gap requires `topic-fail` for this attempt;
+report that uncertainty without retrying research in the same invocation.
 Nonempty research `gaps` require failure closure; merely withholding `cache-put`
 does not close the attempt. A fetch helper's existing failure receipt suffices.
 If receipt writes are prohibited, denied or unavailable, report that exact
