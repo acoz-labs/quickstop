@@ -61,7 +61,10 @@ action, an agent's success claim or matching headings is not evidence it happene
   source-backed claims, and rereads coverage before reporting. A second audit
   must reuse fresh supplemental evidence. Baseline records must remain unchanged.
   Exercise an unread relevant section in a retained page: read it without fetching.
-  Repeat with no writes/no network and with a failed supplemental fetch; report
+  Repeat with no writes/no network and with a failed supplemental fetch. Verify
+  the read-only planner and applicable audit agents still run, retained source
+  sections support every confirmed defect, and unresolved/optional findings never
+  appear under confirmed-defect headings. Report
   the unresolved topic, preserve last-good evidence and withhold complete grades.
   Separate documented behavior from runtime-observed loading/context usage.
 - Run a read-only audit with existing decision records and personal configuration.

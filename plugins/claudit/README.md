@@ -44,7 +44,7 @@ authorized PRs use a separate worktree and leave existing consumer edits intact.
 
 ## Requirements and current support
 
-Claudit 3.2.0 targets current Claude Code, reviewed with **2.1.287**. It uses native
+Claudit 3.2.1 targets current Claude Code, reviewed with **2.1.287**. It uses native
 skills and six Sonnet subagents, including `omitClaudeMd` (available since
 2.1.271). Older hosts are not validated by this release. Model aliases resolve
 through the host/account; no fixed model-version or speed guarantee is implied.
@@ -62,6 +62,10 @@ native Windows certification. Without an available runtime, Claudit can explain
 read-only findings but must report deterministic checks as unverified.
 
 ## What changed
+
+- Read-only and offline audits retain their required source-reading, coverage and
+  auditor stages. If a real constraint prevents a stage, the report identifies
+  the unassessed scope. Unresolved observations are kept out of confirmed defects.
 
 - Audits now check documentation coverage for the actual features under review,
   even when the baseline cache is fresh. Missing pages, such as output styles,
