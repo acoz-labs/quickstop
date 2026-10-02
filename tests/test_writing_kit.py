@@ -26,14 +26,23 @@ class WritingKitTests(unittest.TestCase):
 
     def test_skill_references_resolve_inside_installed_package(self):
         count = 0
+        roots = {'${CLAUDE_SKILL_DIR}/': None, '${CLAUDE_PLUGIN_ROOT}/': PACKAGE}
         for skill in (PACKAGE / 'skills').glob('*/SKILL.md'):
-            for relative in re.findall(r'`((?:\.\./|references/)[^`]+\.md)`', skill.read_text()):
-                target = (skill.parent / relative).resolve()
-                self.assertTrue(target.is_relative_to(PACKAGE.resolve()), relative)
-                self.assertTrue(target.is_file(), relative)
+            text = skill.read_text()
+            self.assertNotRegex(text, r'`\.\./', 'cross-directory paths must use a substitution variable')
+            for prefix, path in re.findall(r'`(\$\{CLAUDE_(?:SKILL_DIR|PLUGIN_ROOT)\}/)([^`]+\.md)`', text):
+                target = ((roots[prefix] or skill.parent) / path).resolve()
+                self.assertTrue(target.is_relative_to(PACKAGE.resolve()), path)
+                self.assertTrue(target.is_file(), path)
                 count += 1
-            self.assertNotIn('~/.claude/', skill.read_text())
-        self.assertGreaterEqual(count, 7)
+            self.assertNotIn('~/.claude/', text)
+        self.assertGreaterEqual(count, 9)
+
+    def test_audit_skill_is_user_invoked_and_style_skill_is_model_invocable(self):
+        def frontmatter(name):
+            return (PACKAGE / 'skills' / name / 'SKILL.md').read_text().split('---', 2)[1]
+        self.assertIn('disable-model-invocation: true', frontmatter('writing-audit'))
+        self.assertNotIn('disable-model-invocation', frontmatter('writing-style'))
 
     def test_catalog_has_only_claude_target_for_kit(self):
         catalog = json.loads((ROOT / 'catalog.json').read_text())
