@@ -35,9 +35,9 @@ Five things fail it, and they are the ones that actually happen:
 - **A cross-document pointer used as a noun.** "AC 3," "the linked ticket," and "the second criterion" are lookups, not explanations. Quote or restate what the source says.
 - **Stakes left unstated.** The reader can't tell what changes based on their answer, so they can't weigh it.
 
-**Citations move, they don't disappear.** Proof is valuable and stays. It just leaves the sentence carrying the meaning: the prose makes its point in plain words, and `file:line`, ticket ids, and quoted sources ride in a trailing parenthetical or a `<details>` block. Never as the subject of the sentence, never mid-clause.
+**Citations move, they don't disappear.** Proof is valuable and stays. It just leaves the sentence carrying the meaning: the prose makes its point in plain words, and `file:line`, ticket ids, and quoted sources ride in a trailing parenthetical or a supporting evidence section suited to the destination. Never as the subject of the sentence, never mid-clause.
 
-This is not a licence to pad. Say the thing in words, put the evidence behind it, and stop.
+This is not a licence to pad. Say the thing in words, keep its evidence accessible, and stop.
 
 **Two surfaces are exempt, because their reader demonstrably has the code open.** An in-code comment sits in the file it describes, and a review comment is anchored to the diff line it's about. Naming a nearby symbol there is precise, not obscure, and rewriting it into description would make both worse. Everything else assumes the reader has nothing but the words: artifacts, questions, chat, tickets, chat apps, PR descriptions, commit bodies.
 
@@ -94,7 +94,9 @@ These are the preset’s defaults for comments we author. Existing project requi
 
 ## Workflow artifacts
 
-- Any durable markdown a workflow produces for me to read (design docs, triage notes, decision records) is written for a 30-second scan, not for completeness: the verdict and what needs my attention up top, tables for repeating shape, verification depth collapsed in `<details>`, conclusions rather than journey.
+- Any durable Markdown a workflow produces for me to read (design docs, triage notes, decision records) opens with the verdict and what needs my attention. Make the gist easy to scan without sacrificing completeness needed to understand or evaluate it. Use tables for repeating shape and write conclusions rather than a transcript of the journey.
+- Keep conclusions, decisions, meaningful uncertainty, consequences and essential context visible. Keep short evidence simple and nearby. Put lengthy optional supporting evidence in plain Markdown sections, appendices or links by default, especially for ordinary documents or an unknown renderer. Do not fold every evidence section automatically.
+- Choose presentation for the destination. GitHub comments and PR descriptions may use `<details>` for lengthy optional supporting evidence. Elsewhere, use documented native collapsible blocks only when useful and supported. Do not invent syntax or assume Markdown supports raw HTML. Brevity and screen-size targets never justify hiding or deleting necessary context or evidence.
 
 ## Questions asked of me
 
