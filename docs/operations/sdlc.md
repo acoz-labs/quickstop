@@ -1,25 +1,54 @@
 # Software delivery
 
-Standard version: `2026.09.25.1`.
+Standard version: `2026.10.02.1`.
+
+GitHub Issues, the Project board, and in-repository documents are the
+coordination layer. Agent chat and local notes do not replace an issue, a
+Status move, or durable documentation.
 
 ## Authority and roles
 
 The product owner supplies desired outcomes and constraints. Once work is
-assigned, the maintainer and contributor are delegated authority to shape,
-implement, review, accept, merge, release and verify it within that scope.
-An explicit stopping point such as planning-only still applies. Routine design
-choices, review findings and failed acceptance are resolved internally, not
-returned to the owner for another approval. Escalate only a genuine deadlock
-requiring unavailable information, access or a change to an explicit constraint.
-Report the blocker, evidence, attempted remedies, choices and recommendation;
-continue unaffected work. Never weaken criteria or fabricate evidence to proceed.
+assigned, agents acting as maintainer or contributor own delivery inside that
+scope:
+
+- implementation;
+- independent review of the current head;
+- acceptance against the issue criteria and exact candidate;
+- merge;
+- release verification and receipts;
+- Project board Status moves, with the evidence that justifies the new state.
+
+An explicit stopping point such as planning-only still applies. Do not require
+product-owner approval for normal design choices, review findings, acceptance
+that failed and was then fixed, flake triage, automated review-bot noise
+(including Bugbot), or a happy-path release inside the assigned delivery task.
+Resolve those internally against the specification. Never weaken criteria or
+fabricate evidence to proceed.
+
+Escalate to the product owner only when agents cannot reasonably sign off:
+
+- an ambiguous product preference that no experiment or existing constraint settles;
+- missing access, secrets, or a capability the agents cannot obtain;
+- money or billing;
+- irreversible or high-blast operations: a shared-history force-push, a
+  production data migration, broadening an allowlist or other security boundary,
+  or deleting another person's work;
+- a genuine deadlock after remedies have been tried.
+
+Report the blocker, the evidence, the attempts, the choices, and a
+recommendation. Continue unaffected work. Owner approval is not the ordinary
+path through design, review, acceptance, or release.
 
 Maintainers author issues, Project updates, plans, READMEs and durable docs;
 contributors author code, tests, scripts and executable configuration. Code PRs
 are authored by the contributor and reviewed by a different authorized
 maintainer against the current head. Documentation commits may accompany code
-in the same PR with honest attribution. Account names, credentials, machine
-paths and personal execution instructions are not part of this shared standard.
+in the same PR with honest attribution. Separate GitHub accounts remain useful
+isolation for authorship and for who publishes a receipt. The quality gate is
+independent verification evidence. A rubber-stamp `APPROVE`, and a green CI
+run by itself, are not that gate. Account names, credentials, machine paths
+and personal execution instructions are not part of this shared standard.
 Another person can comply with their own tools and accounts.
 
 ## Documentation and planning
@@ -53,10 +82,12 @@ Mixed code/documentation changes follow the code workflow.
    Contributors address findings in the same PR and re-request review after
    revisions. Changes after approval require review of the new head. Required repository
    commands pass in a clean checkout. The maintainer independently runs them and
-   publishes current-head evidence; an available Actions runner is not required.
+   publishes current-head evidence. CI success alone is not the review verdict.
+   An available Actions runner is not required.
 5. Maintainer merges and continues through candidate acceptance and release.
    Rejected acceptance returns to implementation, followed by retest and review.
-   Do not ask the owner to approve normal transitions.
+   A repaired acceptance does not return to the product owner. Do not ask the
+   owner to approve normal transitions.
 
 A finished coding turn starts the handoff; it does not establish acceptance.
 Keep review findings, responses and current-head evidence on the PR. For assigned
@@ -71,10 +102,40 @@ Meaningful rendered changes require functional, accessibility and visual evidenc
 appropriate to their impact. Review the actual experience, not screenshots alone.
 Use docs/operations/ui-acceptance.md for evidence details where present.
 
+## Agent verification
+
+The author of a change does not verify it for merge or acceptance. A different
+authorized maintainer proves the current head, and at release the exact
+candidate, against the real artifact the user or operator receives. Compiling,
+a coverage percentage, a green CI check, or an `APPROVE` review state is not
+that proof and is not a merge verdict.
+
+Scale the proof to blast radius. A comment or documentation typo needs a read
+of the changed text and the applicable format check. A behavior change needs
+the repository's meaningful tests plus the scenario the issue names. A release,
+migration, permission change, or user-visible flow needs a live exercise of the
+retained artifact or deployed candidate, including the failure and recovery
+paths the change can actually hit. Record what ran, what was observed, and what
+was not covered.
+
+Where Cursor pstack skills are already installed, the verifier may use the
+prove-it-works, swarm, and poteto-mode playbooks to structure that proof.
+Those skills are optional local aids. This standard does not require installing
+them, and their absence is not a failed check. The obligation is the
+independent proof, not the tool that produced it.
+
+Separate GitHub identities keep authorship and receipt publication apart. They
+do not replace a fresh worktree or container, and switching accounts is not
+verification. Stacked-PR hosts such as Graphite, and unattended overnight
+merges, are not defaults. Merge stays on the reviewed current head together
+with its verification receipt. See `docs/operations/local-verification.md` for
+the receipt commands.
+
 ## Acceptance and release
 
 The maintainer performs acceptance separately from contributor tests, against the
-issue's criteria and exact candidate. Retain commit, immutable artifact identity,
+issue's criteria and exact candidate, under the agent verification rules above.
+Retain commit, immutable artifact identity,
 scenarios, results, reviewer and openable evidence. The code author cannot be the
 sole product acceptor. A maintainer or agent may dispatch acceptance and release
 workflows; workflow_dispatch does not imply mandatory human attendance.
@@ -87,7 +148,8 @@ acceptance. Exercise migrations, configuration, permissions and integrations in 
 isolated environment when the change requires it. Never use production data for
 destructive acceptance. Retain backup/recovery plans for irreversible migrations. Artifact: validate and nominate the
 artifact without fictional staging, accept and publish/verify. Non-deployable:
-reviewed merge and checks complete delivery when no release target exists.
+a reviewed merge plus its independent verification receipt completes delivery
+when no release target exists. CI success alone does not.
 Keep release-bearing issues open until their delivery profile is complete.
 Use a top-level `Refs #N` for those PRs; `Closes #N` only when merge completes work.
 
@@ -133,7 +195,9 @@ PR may still need a retained acceptance or release workspace until that work end
 
 `Inbox -> Ready -> In Progress -> Review -> Release -> Done`
 
-Blocked identifies a real unresolved dependency. Parked is deliberately deferred.
+The acting maintainer sets Status when the evidence for that state exists.
+Moving Status does not wait on product-owner confirmation. Blocked identifies
+a real unresolved dependency. Parked is deliberately deferred.
 Discovery and design are preparation activities, not compulsory separate states.
 Ready requires an executable issue, not a planning PR. Release includes candidate
 validation, acceptance and promotion. Failed review/acceptance returns to In
@@ -169,9 +233,12 @@ See `docs/operations/local-verification.md` for portable commands and release fl
 need code approval. Maintainers still validate documentation and correct scope.
 Local execution is the default. Optional Actions run only on explicitly enabled
 trusted self-hosted runners; never fall back silently to paid hosted compute.
-GitHub authenticates the receipt publisher, not the machine execution. Two account
-authorship is not host isolation; use a fresh worktree/container for independent
-verification and do not expose operator credentials to untrusted test code.
+GitHub authenticates the receipt publisher, not the machine execution. Separate
+GitHub accounts isolate authorship and receipt publication. That split is not
+host isolation and is not the quality gate: a rubber-stamp `APPROVE`, or a
+green CI run alone, is not a merge verdict. Use a fresh worktree or container
+for independent verification and do not expose operator credentials to
+untrusted test code.
 Use branch protection where supported; post-push audits detect rather than
 prevent unauthorized pushes. Record actual enforcement limitations honestly.
 Personal execution environments must verify Git authorship and authenticated
@@ -182,7 +249,9 @@ roles and no fallback to an unintended account.
 
 Historical approvals, exceptions and releases remain evidence. This standard
 supersedes prior mandatory owner gates and routine engineering self-review for
-new work. Existing PRs retain real authorship and receive an eligible independent
-review; never rewrite attribution. Preserve open issue/PR links and acceptance
+new work. Version `2026.10.02.1` keeps that delegation, names the only owner
+escalations, and requires independent proof of the real artifact. Existing PRs
+retain real authorship and receive an eligible independent review; never
+rewrite attribution. Preserve open issue/PR links and acceptance
 records while transitioning. A historical exception is not authority for a new
 candidate.

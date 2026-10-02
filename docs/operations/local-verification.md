@@ -25,8 +25,13 @@ bin/sdlc audit --repo OWNER/REPO --before PRE_MERGE_SHA --sha MERGED_SHA
 
 The actor is supplied by the caller's private execution policy, never hardcoded in
 the repository. Verify Git authorship and per-process credentials before writes.
-Do not use one global account switch for concurrent roles. A credential switch
-alone is not independent review or verification.
+Do not use one global account switch for concurrent roles. Separate GitHub
+accounts remain useful so authorship and receipt publication stay distinct.
+Switching accounts, submitting `APPROVE`, or observing a green CI run is not
+the quality gate. The gate is independent verification evidence: someone other
+than the author proves the exact head, and for release the retained artifact,
+then publishes the inspected receipt. A credential switch alone is not
+independent review or verification.
 
 The runner retains complete logs, command exit codes, commit and configuration
 identity, host platform, timestamps and artifact identity where applicable.

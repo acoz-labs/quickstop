@@ -92,6 +92,11 @@ class ReviewTests(unittest.TestCase):
 class ApplyTests(unittest.TestCase):
     def test_version_marker_is_managed(self):
         self.assertIn('SDLC_VERSION', sdlc.MANAGED)
+    def test_published_version_matches_contract_docs(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual((root / 'SDLC_VERSION').read_text().strip(), sdlc.VERSION)
+        for name in ('docs/operations/sdlc.md', 'docs/operations/repo-standard.md'):
+            self.assertIn('`' + sdlc.VERSION + '`', (root / name).read_text())
     def test_version_marker_propagates_and_drift_is_detected(self):
         with patch.object(sdlc,'VERSION','2026.09.18.3'):
             self.write_source('first')

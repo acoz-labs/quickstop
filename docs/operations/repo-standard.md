@@ -1,6 +1,6 @@
 # Managed repository standard
 
-SDLC template version: `2026.09.25.1`.
+SDLC template version: `2026.10.02.1`.
 
 The template owns the files enumerated in `.sdlc/managed.json`. Their hashes
 identify the installed content. `bin/sdlc check` verifies them.
@@ -35,7 +35,9 @@ No pilot, waves or optional lagging adoption. No unrelated production deployment
 
 Configuration declares `delivery_profile`, `verification_mode` and `validation`.
 The default mode is `local`: independent maintainer receipts satisfy the merge
-gate, regardless of runner availability. `required_checks` describes the optional
+gate, regardless of runner availability. Those receipts must show live proof
+against the candidate. A compile, a rubber-stamp review approval, or a green
+workflow run by itself is not the verdict. `required_checks` describes the optional
 Actions profile and is enforced only when `verification_mode` is `actions`.
 Service/artifact repos declare concrete `acceptance_criteria` and `release_criteria`
 with procedures in `docs/delivery.md`. Automated artifact checks may additionally
@@ -55,5 +57,10 @@ For an artifact whose source predates configuration adoption, the explicit
 `retained_candidates` transition is documented in
 `docs/operations/local-verification.md`. It binds a reviewed policy revision
 separately from original product bytes; it is not a general policy override.
-See `docs/operations/sdlc.md` for delegated authority, role separation and the
-three workflows. CI and workflow checks are evidence, not substitutes for review.
+See `docs/operations/sdlc.md` for delegated authority, role separation,
+agent verification and the three workflows. Separate GitHub accounts isolate
+who authors a change and who publishes a receipt. The merge and acceptance
+verdicts are that independent verification evidence. CI and workflow checks
+are evidence, not substitutes for review, and not a merge verdict by themselves.
+Stacked-PR hosts such as Graphite, and unattended overnight merges, are not
+organization defaults.

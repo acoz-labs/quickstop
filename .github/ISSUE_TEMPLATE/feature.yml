@@ -14,7 +14,7 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Observable behavior the maintainer will verify against the candidate.
+      description: Observable behavior an independent maintainer will prove against the real candidate. Product-owner sign-off is not a criterion.
     validations:
       required: true
   - type: textarea

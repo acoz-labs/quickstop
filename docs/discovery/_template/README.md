@@ -11,4 +11,5 @@ What is known, alternatives, selected direction and reasons.
 ## Delivery
 
 Selected issue(s), criteria, dependencies and next action. Record only genuine
-unresolved blockers; do not invent a human approval gate.
+unresolved blockers from the delivery contract's escalation list; do not invent
+a product-owner approval gate for ordinary conclusions.
