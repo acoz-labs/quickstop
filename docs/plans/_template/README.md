@@ -11,7 +11,9 @@ Describe the chosen approach, alternatives that matter, interfaces and risks.
 ## Verification and delivery
 
 Define criteria, tests, applicable candidate acceptance, release and rollback.
-The maintainer progresses authorized work through delivery without owner gates.
+The maintainer progresses authorized work through review, acceptance, release
+and Project Status without product-owner gates. Verification is independent
+of the author and proves the real artifact.
 
 ## Handoff
 
