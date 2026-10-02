@@ -66,10 +66,28 @@ annotations. Reads do not create, migrate or update records.
 
 Follow [cache protocol](../../references/cache-check-protocol.md), the same
 protocol used by `/claudit:knowledge`. Request the needed domains, usually all
-three for a full audit. This is an internal procedure, not a requirement that
+three for a full audit. Honor no-network and no-cache-write constraints before
+any refresh; unavailable fresh evidence remains a labeled gap. This is an internal
+procedure, not a requirement that
 nested slash-command invocation be available. Reuse fresh domain records;
-refresh stale/missing/corrupt/degraded domains once per invocation. An unavailable
-source remains a limitation, never a fabricated verification pass.
+refresh stale/missing/corrupt/degraded domains once per invocation. Then check
+**task-relevant topic coverage even when every domain is fresh**. From the scoped
+component map, user focus and retained limitations, identify the official pages
+needed to assess the actual features. Run the protocol's read-only `coverage`
+planner for those topics/pages. For example, a plugin containing output styles
+needs the dedicated output-styles page; the general plugin components page does
+not establish selection persistence or subagent inheritance.
+
+Read relevant sections of retained source bytes, not just cached summaries. Fetch
+missing or non-fresh supplemental pages through the bounded `fetch-pages` path
+when network/cache writes are allowed. Reuse fresh evidence; do not force-refresh
+all domains or crawl every manual. Pass supplemental source receipts, claims and
+remaining gaps to the auditors. A relevant unread section in an already retained
+page calls for a source read, not another download. Auditors may identify further
+specific evidence needs: resolve those within the same bounded topic budget before
+synthesis, without retrying failed or denied fetches. A source receipt establishes
+provenance, not semantic completeness or observed runtime behavior. Unavailable
+evidence remains a limitation, never a fabricated verification pass.
 
 ## 2. Delegate analysis
 

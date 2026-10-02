@@ -29,3 +29,8 @@ not establish semantic correctness or measured runtime behavior.
 Set `run_in_background: false` explicitly on each research Agent/Task dispatch.
 For a denied fetch call, follow the cache protocol's failure-logging/final-status
 path without retrying the denied action or requesting redundant approval.
+
+When the request includes a specific feature question, also follow the protocol's
+topic-coverage procedure. A fresh baseline domain can omit the dedicated page
+needed to answer it. Reuse or fetch only the relevant pages and return their
+actual provenance and remaining limits alongside the baseline states.
