@@ -156,6 +156,15 @@ When a required page needs fetching and network/cache writes are authorized:
    failure, use `topic-fail "<page>" "<sanitized reason>"`. For a fetch denied
    before execution, record that failure only if cache writes remain authorized.
    Do not retry denied/failed pages in the same invocation or route around a denial.
+   **Close every attempted page before continuing:** verify a successful
+   `cache-put` result or a retained failure receipt. Nonempty synthesis `gaps`
+   count as research failure and require `topic-fail` while cache writes remain
+   authorized; skipping the commit alone is insufficient. The fetch helper's
+   existing failure receipt needs no duplicate. If receipt writes are prohibited,
+   denied or unavailable, report the unclosed attempt and reason, preserve
+   last-good evidence, and continue only with explicit evidence gaps. Never
+   route around permissions to create a receipt or label an unclosed attempt
+   successful. Repeat this closure check before final scoring.
 5. Rerun `coverage` for the selected topics/pages. Pass applicable source paths,
    section-backed claims, actual states and limitations to the audit agents. Do
    not suppress unresolved evidence requests before scoring.

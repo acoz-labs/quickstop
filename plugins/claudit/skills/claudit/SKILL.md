@@ -105,6 +105,14 @@ synthesis, without retrying failed or denied fetches. A source receipt establish
 provenance, not semantic completeness or observed runtime behavior. Unavailable
 evidence remains a limitation, never a fabricated verification pass.
 
+Before continuing to analysis or scoring, close every attempted supplemental
+fetch with a successful `cache-put` result or a retained `topic-fail` receipt.
+Nonempty research `gaps` require failure closure; merely withholding `cache-put`
+does not close the attempt. A fetch helper's existing failure receipt suffices.
+If receipt writes are prohibited, denied or unavailable, report that exact
+unclosed attempt and its evidence gap; do not bypass the restriction or claim
+successful refresh. Check this closure again for evidence fetched during analysis.
+
 ## 2. Delegate analysis
 
 Use the host Agent tool (Task on older hosts) with native types:
