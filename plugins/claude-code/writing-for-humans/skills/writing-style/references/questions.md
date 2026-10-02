@@ -30,9 +30,9 @@ A short list. Each option says what it means in practice and what it gives up. I
 
 An option nobody would pick isn't an option, it's padding. Two real ones beat four where two are strawmen.
 
-### 4. The evidence, out of the way
+### 4. The evidence, accessible without obscuring the ask
 
-`file:line`, ticket ids, quoted criteria, precedent: all of it goes in a `<details>` block or a trailing parenthetical at the end. It's there to check, and it never sits in a sentence someone has to read to understand the ask.
+Keep the decision, meaningful uncertainty, consequences and context needed to evaluate the options visible. Keep short citations nearby in a trailing parenthetical or a plain evidence paragraph. Lengthy optional supporting evidence can go in plain Markdown sections, appendices or links, the default for ordinary documents and unknown renderers. GitHub comments and PR descriptions may use `<details>`; other destinations may use documented native collapsible blocks when useful and supported. Do not invent syntax, assume Markdown supports raw HTML, or fold every evidence section. Brevity never justifies hiding or deleting evidence needed for the decision.
 
 ## Worked example
 
@@ -53,9 +53,7 @@ The statement is precise and cited, but it makes the reader decode implementatio
 >
 > I recommend skipping incomplete entries with a clear report so valid donations can be listed without guessing the missing units.
 >
-> <details><summary>Evidence</summary>
-> `DonationFile.ts:41` accepts a blank quantity unit. `ShelfCount.ts:92` requires one. These file names and facts belong only to this fictional example.
-> </details>
+> Evidence: `DonationFile.ts:41` accepts a blank quantity unit. `ShelfCount.ts:92` requires one. These file names and facts belong only to this fictional example.
 
 Same facts, same citations, no lookups needed to understand the ask.
 

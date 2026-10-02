@@ -8,7 +8,7 @@ This exists because **the writer is the worst possible judge of whether their wr
 
 Consider it for a consequential or persistently unclear question that hands a human something to read and act on: open questions from an investigation, questions posed alongside a design artifact, risks that need a decision, and “needs your attention” items in a review.
 
-Scope it to the parts meant to be answered, not the whole artifact. Proof sections still follow every writing rule, but a misunderstanding there does not block an answer, so they do not need this particular check.
+Scope it to the parts meant to be answered, not the whole artifact. Include the visible context, meaningful uncertainty, consequences and evidence needed to evaluate the options. Optional verification sections need not be part of this check; if their contents are necessary to answer, bring that context into the visible question.
 
 Skip it when there is nothing to ask. A clean artifact with no open questions has nothing for the cold reader to fail.
 
@@ -30,7 +30,7 @@ Have it return `{questions: [{restated, lookups_needed: [], stakes_clear: bool, 
 ## Acting on it
 
 - **Restated incorrectly or vaguely.** Check the restatement against the draft. Correct a genuine ambiguity; the reader can also be mistaken.
-- **Any `lookups_needed`.** Replace the missing context with plain words and move the citation to `<details>`.
+- **Any `lookups_needed`.** Replace the missing context with plain words and keep its citation accessible. A short citation can stay nearby; lengthy optional evidence can use a plain Markdown section, appendix or link. GitHub comments and PR descriptions may use `<details>`; other destinations may use documented native collapsible blocks when useful and supported. For ordinary documents and unknown renderers, default to plain Markdown. Do not invent syntax, assume raw HTML support, or hide necessary context and evidence to meet a size target.
 - **`stakes_clear: false`.** Add what turns on the answer.
 - **Anything in `reread`.** Rewrite the sentence rather than defending it.
 

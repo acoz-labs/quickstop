@@ -37,7 +37,7 @@ packages. Record harness version and target package digest independently:
   confirm read-only requests and intended write/network/PR boundaries. Use no
   personal configuration or externally sent test PRs without scoped authorization.
 
-For Claudit, use [its Claude Code procedure](acceptance/claudit.md). For Writing for Humans, use [the kit conversion procedure](acceptance/writing-for-humans.md).
+For Claudit, use [its Claude Code procedure](acceptance/claudit.md). For Writing for Humans, use [its conversion and bounded follow-up procedures](acceptance/writing-for-humans.md).
 Both current plugin products target Claude Code; no Codex or Pi runtime acceptance
 is required for them. Pi acceptance includes dependency and extension behavior as well
 as its linked local-package lifecycle.

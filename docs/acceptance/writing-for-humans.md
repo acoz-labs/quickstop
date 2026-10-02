@@ -1,12 +1,20 @@
-# Writing for Humans kit acceptance
+# Writing for Humans acceptance
 
-This procedure applies to the Claude Code-only conversion of the original shared kit in issue129. The cross-platform experiment and its v1/v2/v3 research protocols are archived; their failed outcomes remain historical failures. This is a conversion and distribution check, not a claim of general superiority over modern models.
+The historical conversion procedure below applies to the Claude Code-only conversion of the original shared kit in issue129. The cross-platform experiment and its v1/v2/v3 research protocols are archived; their failed outcomes remain historical failures. This is a conversion and distribution check, not a claim of general superiority over modern models.
 
-## Conversion fidelity
+## Bounded follow-up releases
+
+For focused changes after conversion, retain the original comparison as historical evidence rather than repeating it. Define a fixed synthetic case set before running it and exercise the exact retained candidate bytes in an isolated native installation. Match the cases to the issue; inspect actual writing and tool traces, not just successful discovery. Record host, model, effort, inputs, package digest and observed limitations. This does not establish universal model compliance or improved automatic invocation.
+
+For destination-aware evidence placement, cover ordinary Markdown, an unknown renderer, a GitHub comment or PR description, a destination with a documented native collapse format supplied in the fixture, a consequential question, an already-clear short control, and a typed local writing audit. Check retained facts and citations, visible conclusions and decision context, accessible optional evidence, valid destination syntax and resolved package references. Do not require a collapse merely because a renderer supports one. Keep local audit authorization explicit and inspect external-action boundaries. Preserve the existing user-only audit invocation contract; do not turn acceptance into prompt tuning.
+
+Verify discovery, style selection and a fresh writing session. Disable and uninstall in the isolated configuration and compare unrelated settings before and after. Use the artifact delivery procedure below, including a fresh public marketplace writing smoke and retained previous-version recovery. Issue-specific findings remain findings; historical conversion failures are not new passes.
+
+## Historical conversion fidelity
 
 Independently compare the retained original kit with the package. Account for every material difference: native metadata and selection, preserved coding instructions, package-local references, explicit task/repository/authorization precedence, removed orchestration mandates, bounded optional cold-reader use, and independently invented public examples. Preserve the substantive context-independence and evidence-placement guidance and clearly label the opinionated voice. Keep original ZIPs and private configuration out of public artifacts.
 
-## Native use
+## Historical conversion native use
 
 Install retained exact package bytes in an isolated Claude configuration. Begin with another selected style and an unrelated setting; installation must preserve them. Verify discovery of the output style and both skills, then use the native selector and a fresh session to confirm the intended style is active. Verify coding instructions are preserved and all references resolve from the installed package. No lifecycle hooks or runtime dependencies should appear.
 
