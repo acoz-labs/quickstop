@@ -1,6 +1,6 @@
 {
   "name": "claudit",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
   "author": {
     "name": "quickstop",

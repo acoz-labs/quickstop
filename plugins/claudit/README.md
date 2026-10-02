@@ -44,7 +44,7 @@ authorized PRs use a separate worktree and leave existing consumer edits intact.
 
 ## Requirements and current support
 
-Claudit 3.2.1 targets current Claude Code, reviewed with **2.1.287**. It uses native
+Claudit 3.2.2 targets current Claude Code, reviewed with **2.1.287**. It uses native
 skills and six Sonnet subagents, including `omitClaudeMd` (available since
 2.1.271). Older hosts are not validated by this release. Model aliases resolve
 through the host/account; no fixed model-version or speed guarantee is implied.
@@ -62,6 +62,10 @@ native Windows certification. Without an available runtime, Claudit can explain
 read-only findings but must report deterministic checks as unverified.
 
 ## What changed
+
+- Research results retain the agent's returned claims, gaps and limitations
+  unchanged during persistence. A disputed gap classification still closes that
+  attempt as failed; it cannot be rewritten into a successful cache record.
 
 - Read-only and offline audits retain their required source-reading, coverage and
   auditor stages. If a real constraint prevents a stage, the report identifies
