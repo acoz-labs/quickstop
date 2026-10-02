@@ -113,6 +113,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(r.requested_pages(['skills'], ['skills']), ['skills'])
         self.assertFalse(self.cache.exists())
 
+    def test_constrained_topic_preflight_and_unknown_score_need_no_writes_or_network(self):
+        self.seed('ecosystem', '2.1.100')
+        self.write(self.project / 'output-styles/fixture.md', '# Fixture style')
+        before = {str(path): path.read_bytes() for path in self.base.rglob('*') if path.is_file()}
+        with patch.object(r, 'official_open', side_effect=AssertionError('Network prohibited')), \
+                patch.object(r, 'atomic', side_effect=AssertionError('Cache writes prohibited')):
+            plan = r.coverage(self.cache, '2.1.287', ['output-styles', 'skills'], [])
+            self.assertEqual(plan['missing_pages'], ['output-styles', 'skills'])
+            self.assertEqual(plan['pages'][0]['state'], 'missing')
+            retained = plan['pages'][1]
+            self.assertEqual(retained['state'], 'stale')
+            self.assertTrue(retained['retained_evidence_only'])
+            self.assertIn('# Actual source', Path(retained['source']['content_path']).read_text())
+            score = r.score_categories([f'{name}:unknown' for name in r.SCORE_WEIGHTS])
+            self.assertEqual(score['assessment'], 'incomplete')
+            self.assertNotIn('overall_score', score)
+            self.assertNotIn('grade', score)
+        after = {str(path): path.read_bytes() for path in self.base.rglob('*') if path.is_file()}
+        self.assertEqual(after, before)
+
     def test_topic_failure_is_isolated_and_last_good_keeps_provenance(self):
         self.seed('ecosystem')
         self.seed('topic:output-styles')
