@@ -79,6 +79,74 @@ class RuntimeTests(unittest.TestCase):
         self.git('add', 'CLAUDE.md', 'other.txt')
         self.git('commit', '-m', 'fixture')
 
+    def test_knowledge_and_status_expose_supplemental_provenance_without_changing_baselines(self):
+        self.seed('ecosystem')
+        self.seed('optimization')
+        self.seed('topic:output-styles')
+        before = {str(path): path.read_bytes() for path in self.base.rglob('*') if path.is_file()}
+        for command in ('knowledge', 'status'):
+            result = self.cli(command, '--host-version', '2.1.287', 'optimization', 'ecosystem')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            domains = json.loads(result.stdout)
+            self.assertEqual([item['state'] for item in domains], ['fresh', 'fresh'])
+            for item in domains:
+                inventory = item['topic_inventory']
+                self.assertIn('cache-wide', inventory['scope'])
+                self.assertFalse(inventory['truncated'])
+                topic = inventory['topics'][0]
+                self.assertEqual(topic['page'], 'output-styles')
+                self.assertEqual(topic['state'], 'fresh')
+                self.assertEqual(topic['host_version'], '2.1.287')
+                self.assertEqual(topic['source']['url'], 'https://code.claude.com/docs/en/output-styles.md')
+                self.assertEqual(topic['source']['sha256'], r.digest(Path(topic['source']['content_path']).read_bytes()))
+                self.assertIn('fetched_at', topic['source'])
+                self.assertNotIn('claims', topic)
+        with patch.object(r, 'official_open', side_effect=AssertionError('Network prohibited')), \
+                patch.object(r, 'atomic', side_effect=AssertionError('Writes prohibited')):
+            self.assertEqual(r.topic_inventory(self.cache, '2.1.287')['discovered'], 1)
+        after = {str(path): path.read_bytes() for path in self.base.rglob('*') if path.is_file()}
+        self.assertEqual(after, before)
+
+    def test_topic_inventory_uses_validated_snapshot_without_second_record_read(self):
+        self.seed('topic:output-styles')
+        record_path = self.cache / 'v2/topics/output-styles.json'
+        original_read = r.read_json
+        reads = []
+        def read_once(path):
+            value = original_read(path)
+            if Path(path) == record_path:
+                reads.append(path)
+                record_path.unlink()
+            return value
+        with patch.object(r, 'read_json', side_effect=read_once):
+            inventory = r.topic_inventory(self.cache, '2.1.287')
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(inventory['topics'][0]['source']['id'], 'output-styles')
+        self.assertEqual(inventory['topics'][0]['state'], 'fresh')
+
+    def test_topic_inventory_reports_corruption_failure_and_truncation(self):
+        self.seed('topic:output-styles')
+        r.fail(self.cache, 'topic:output-styles', 'research gap')
+        self.seed('topic:skills')
+        self.write(self.cache / 'v2/topics/skills.json', '{invalid JSON')
+        r.fail(self.cache, 'topic:hooks', 'fetch failed')
+        self.write(self.cache / 'v2/topics/not_a_slug.json', {})
+        inventory = r.topic_inventory(self.cache, '2.1.287')
+        topics = {item['page']: item for item in inventory['topics']}
+        self.assertEqual(topics['output-styles']['state'], 'degraded')
+        self.assertTrue(topics['output-styles']['retained_evidence_only'])
+        self.assertEqual(topics['output-styles']['last_failure'], 'research gap')
+        self.assertEqual(topics['skills']['state'], 'corrupt')
+        self.assertNotIn('source', topics['skills'])
+        self.assertEqual(topics['hooks']['state'], 'degraded')
+        self.assertNotIn('source', topics['hooks'])
+        self.assertEqual(inventory['unrecognized_records'], ['not_a_slug.json'])
+        bounded = r.topic_inventory(self.cache, '2.1.287', limit=1)
+        self.assertEqual([item['page'] for item in bounded['topics']], ['hooks'])
+        self.assertEqual(bounded['discovered'], 3)
+        self.assertEqual(bounded['omitted'], 2)
+        self.assertTrue(bounded['truncated'])
+
     def test_topic_coverage_fills_fresh_baseline_omission_without_replacing_it(self):
         self.seed('ecosystem')
         original = (self.cache / 'v2/ecosystem.json').read_bytes()
