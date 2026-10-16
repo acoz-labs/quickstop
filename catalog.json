@@ -5,6 +5,18 @@
   "description": "The acoz-labs unified marketplace for agentic plugins.",
   "plugins": [
     {
+      "name": "shipshape",
+      "description": "Optional Codex delivery roles and offline bounded handoff helpers.",
+      "category": "Productivity",
+      "targets": {
+        "codex": {
+          "format": "agent-plugin",
+          "path": "plugins/codex/shipshape",
+          "acceptance": "docs/acceptance/shipshape.md"
+        }
+      }
+    },
+    {
       "name": "claudit",
       "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
       "category": "Productivity",

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "shipshape",
+  "version": "0.1.0",
+  "description": "Bounded delivery guidance and offline contract, result, event and handoff helpers.",
+  "license": "MIT"
+}

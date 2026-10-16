@@ -4,6 +4,9 @@
 
 These invented scenarios illustrate adaptation choices. They are not accounts
 of customer projects or evidence of successful harness tests.
+Guide-only adoption remains valid in all three. The optional Codex package's
+contained synthetic runner exercises advisory checks and durable handoff only;
+it does not prove native loading, independent review or release acceptance.
 
 ## A small fix in a solo documentation project
 
