@@ -5,6 +5,11 @@ ceremonies. Steps can overlap or repeat as new information arrives. Use existing
 issues, pull requests and documentation to hold the information; do not create
 parallel records merely to match this guide.
 
+Guide-only adoption remains valid. The optional Codex package supplies role
+instructions and advisory checks, not a reviewer or release gate. A durable
+handoff records exact revisions, evidence, stopping point and next action outside
+the consumer checkout; it does not turn asserted role strings into proof.
+
 ## Define the useful result
 
 Identify who needs the change, what they should be able to do afterward, and the

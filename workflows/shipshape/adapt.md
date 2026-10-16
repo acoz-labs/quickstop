@@ -4,6 +4,10 @@
 
 The useful output is a small set of practices your project can actually follow.
 There is no requirement to adopt every section or to install a particular tool.
+Guide-only adoption remains valid. If using the optional Codex package, pin its
+version and retain stronger local rules. Configure an explicit operator-owned
+handoff root outside the consumer checkout; installing the package supplies no
+credentials, independent reviewer, service or authority to change permissions.
 
 ## Inspect before proposing changes
 
