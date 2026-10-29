@@ -4,8 +4,8 @@
     {
       "name": "claudit",
       "harness": "claude-code",
-      "commit": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c",
-      "sha256": "6c2c15bd46018983323df2848baca369e9d290050d78b1c87ffea4da9b484ac8",
+      "commit": "a4342d07ffe4aa5256dc8b908e7b3b8cf8a7eeb4",
+      "sha256": "fa1f6dffc9f250a9a8663594cc3d04dfa7ed86b19bef83d93f564e72744bf497",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claudit",
@@ -13,26 +13,26 @@
       },
       "manifest": {
         "name": "claudit",
-        "version": "3.2.3",
-        "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task \u2014 building a skill, configuring an MCP, authoring CLAUDE.md \u2014 can read it instead of re-fetching docs.",
+        "version": "4.0.0",
+        "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
         "author": {
           "name": "quickstop",
-          "url": "https://github.com/acostanzo/quickstop"
+          "url": "https://github.com/acoz-labs/quickstop"
         },
         "license": "MIT",
         "keywords": [
           "audit",
           "configuration",
           "optimization",
-          "health-check",
-          "best-practices"
+          "best-practices",
+          "grading"
         ]
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 141,
-        "artifact": "sha256:74e25e22381d2d94aed2442a1198a71c06ccf41216fcf82aec1c9f8e6c038908",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/141#issuecomment-5945817396"
+        "issue": 156,
+        "artifact": "sha256:cafe1b7521bd1bd3f70a670ff912a14fa780ec779794f3bd5a5640adf5689b67",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/156#issuecomment-6509299526"
       }
     },
     {

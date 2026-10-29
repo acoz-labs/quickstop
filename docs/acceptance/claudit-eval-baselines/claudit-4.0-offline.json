@@ -7,9 +7,9 @@
   "plugins": [
     "claudit@4.0.0"
   ],
-  "total_cost_usd": 0.48734730000000004,
-  "agent_plus_judge_cost_usd": 0.500697,
-  "duration_seconds": 217,
+  "total_cost_usd": 0.46333539999999995,
+  "agent_plus_judge_cost_usd": 0.476628,
+  "duration_seconds": 169,
   "partial": false,
   "cases": [
     {
@@ -21,15 +21,15 @@
       "structure_total": 4,
       "false_defects": 0,
       "false_defect_runs": 0,
-      "agent_cost_usd": 0.092152,
-      "judge_cost_usd": 0.002034,
-      "wall_seconds": 30.0,
+      "agent_cost_usd": 0.092477,
+      "judge_cost_usd": 0.00242,
+      "wall_seconds": 34.0,
       "errors": 0,
       "skipped_paid_graders": 0,
       "hit_rate": 1.0,
-      "agent_cost_usd_mean": 0.092152,
-      "judge_cost_usd_mean": 0.002034,
-      "wall_seconds_mean": 30.0
+      "agent_cost_usd_mean": 0.092477,
+      "judge_cost_usd_mean": 0.00242,
+      "wall_seconds_mean": 34.0
     },
     {
       "case": "f2-plugin-repo",
@@ -40,15 +40,15 @@
       "structure_total": 4,
       "false_defects": 0,
       "false_defect_runs": 0,
-      "agent_cost_usd": 0.125575,
-      "judge_cost_usd": 0.002373,
-      "wall_seconds": 46.0,
+      "agent_cost_usd": 0.092623,
+      "judge_cost_usd": 0.00175,
+      "wall_seconds": 28.0,
       "errors": 0,
       "skipped_paid_graders": 0,
       "hit_rate": 1.0,
-      "agent_cost_usd_mean": 0.125575,
-      "judge_cost_usd_mean": 0.002373,
-      "wall_seconds_mean": 46.0
+      "agent_cost_usd_mean": 0.092623,
+      "judge_cost_usd_mean": 0.00175,
+      "wall_seconds_mean": 28.0
     },
     {
       "case": "f3-misconfigured",
@@ -59,15 +59,15 @@
       "structure_total": 4,
       "false_defects": 0,
       "false_defect_runs": 0,
-      "agent_cost_usd": 0.10376,
-      "judge_cost_usd": 0.005175,
-      "wall_seconds": 55.0,
+      "agent_cost_usd": 0.114891,
+      "judge_cost_usd": 0.004992,
+      "wall_seconds": 44.0,
       "errors": 0,
       "skipped_paid_graders": 0,
       "hit_rate": 1.0,
-      "agent_cost_usd_mean": 0.10376,
-      "judge_cost_usd_mean": 0.005175,
-      "wall_seconds_mean": 55.0
+      "agent_cost_usd_mean": 0.114891,
+      "judge_cost_usd_mean": 0.004992,
+      "wall_seconds_mean": 44.0
     },
     {
       "case": "f4-well-configured",
@@ -78,15 +78,15 @@
       "structure_total": 4,
       "false_defects": 0,
       "false_defect_runs": 0,
-      "agent_cost_usd": 0.080747,
-      "judge_cost_usd": 0.002759,
-      "wall_seconds": 38.0,
+      "agent_cost_usd": 0.083448,
+      "judge_cost_usd": 0.003122,
+      "wall_seconds": 41.0,
       "errors": 0,
       "skipped_paid_graders": 0,
       "hit_rate": null,
-      "agent_cost_usd_mean": 0.080747,
-      "judge_cost_usd_mean": 0.002759,
-      "wall_seconds_mean": 38.0
+      "agent_cost_usd_mean": 0.083448,
+      "judge_cost_usd_mean": 0.003122,
+      "wall_seconds_mean": 41.0
     },
     {
       "case": "f5-bare",
@@ -97,15 +97,15 @@
       "structure_total": 4,
       "false_defects": 0,
       "false_defect_runs": 0,
-      "agent_cost_usd": 0.085114,
-      "judge_cost_usd": 0.001008,
-      "wall_seconds": 48.0,
+      "agent_cost_usd": 0.079896,
+      "judge_cost_usd": 0.001009,
+      "wall_seconds": 21.0,
       "errors": 0,
       "skipped_paid_graders": 0,
       "hit_rate": 1.0,
-      "agent_cost_usd_mean": 0.085114,
-      "judge_cost_usd_mean": 0.001008,
-      "wall_seconds_mean": 48.0
+      "agent_cost_usd_mean": 0.079896,
+      "judge_cost_usd_mean": 0.001009,
+      "wall_seconds_mean": 21.0
     }
   ],
   "totals": {
@@ -117,14 +117,14 @@
     "structure_total": 20,
     "false_defects": 0,
     "false_defect_runs": 0,
-    "agent_cost_usd": 0.487348,
-    "judge_cost_usd": 0.013349,
-    "wall_seconds": 217.0,
+    "agent_cost_usd": 0.463335,
+    "judge_cost_usd": 0.013293,
+    "wall_seconds": 168.0,
     "errors": 0,
     "skipped_paid_graders": 0,
     "hit_rate": 1.0,
-    "agent_cost_usd_mean": 0.09747,
-    "judge_cost_usd_mean": 0.00267,
-    "wall_seconds_mean": 43.4
+    "agent_cost_usd_mean": 0.092667,
+    "judge_cost_usd_mean": 0.002659,
+    "wall_seconds_mean": 33.6
   }
 }
