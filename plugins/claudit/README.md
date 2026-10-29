@@ -77,12 +77,12 @@ repeat a suggestion: that goes in `.claude/claudit-dismissed.json` in the projec
 
 ## Requirements
 
-Claude Code 2.1.312 (tested). `python3` 3.9 or later; without it Claudit reads the
+Tested with Claude Code 2.1.312. `python3` 3.9 or later; without it Claudit reads the
 files itself at lower confidence. Git for branch delivery and `gh` for pull requests.
 
 ## Upgrading from 3.x
 
-4.0 removes the `knowledge`, `refresh` and `status` skills, the research and the
+4.0 removes the `knowledge`, `refresh` and `status` skills, the three research and
 three audit agents, the docs cache and the decision store. Old files under
 `~/.cache/claudit` (or `CLAUDIT_CACHE_DIR`) are no longer read; delete them when you
 no longer need them. Project `.claude/claudit-decisions*.json` files are ignored.

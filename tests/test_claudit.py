@@ -14,6 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'plugins/claudit/skills/claudit/scripts/claudit.py'
 
+sys.dont_write_bytecode = True  # importing the helper here must not leave the cache the CLI test checks for
 spec = importlib.util.spec_from_file_location('claudit_helper', str(SCRIPT))
 cl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cl)
@@ -183,6 +184,72 @@ class Correctness(Project):
         self.assertEqual(self.finding(result, 'auto-mode:.claude/settings.json')['source'], cl.load_catalog()['docs']['settings-index'])
         self.write('.claude/settings.json', {'permissions': {'defaultMode': 'auto'}})
         self.assertIn('default-mode:.claude/settings.json', self.ids(self.scan()))
+
+    def test_default_mode_text_follows_claude_version(self):
+        self.write('.claude/settings.json', {'permissions': {'defaultMode': 'bypassPermissions'}})
+        old = self.finding(self.scan('2.1.200'), 'default-mode:.claude/settings.json')
+        self.assertEqual(old['severity'], 'high')
+        self.assertIn('2.1.200 applies it to everyone', old['evidence'])
+        self.assertNotIn('; ignored from', old['evidence'])
+        unknown = self.finding(self.scan('unknown'), 'default-mode:.claude/settings.json')
+        self.assertIn('ignored from project/local settings since 2.1.257', unknown['evidence'])
+
+    def test_wrong_typed_values_are_findings_not_crashes(self):
+        cases = [('.claude/settings.json', {'permissions': {'allow': 5}}, 'permissions.allow', 'permission-rules'),
+                 ('.claude/settings.json', {'hooks': {'Stop': [{'hooks': 5}]}}, 'hooks.Stop[0].hooks', 'check-hooks'),
+                 ('.claude-plugin/plugin.json', {'name': 'p', 'skills': 5}, 'skills', 'plugins')]
+        for rel, content, key, doc in cases:
+            with self.subTest(key=key):
+                self.write(rel, content)
+                code, result, _ = self.cli('scan', '--root', self.root, '--claude-version', '2.1.312')
+                self.assertEqual(code, 0)
+                f = self.finding(result, 'wrong-type:%s:%s' % (rel, key))
+                self.assertEqual((f['grade'], f['severity'], f['source']),
+                                 ('correctness', 'high', cl.load_catalog()['docs'][doc]))
+                self.assertIn('expected', f['evidence'])
+                os.remove(os.path.join(self.root, rel))
+
+    def test_manifest_skill_path_naming_one_skill(self):
+        self.write('.claude-plugin/plugin.json', {'name': 'p', 'skills': ['./extra/xlsx']})
+        self.write('extra/xlsx/SKILL.md', '---\nname: xlsx\ndescription: d\n---\n')
+        self.write('extra/xlsx/scripts/run.py', '')
+        result = self.scan()
+        self.assertFalse([i for i in self.ids(result) if i.startswith(('flat-skill', 'skill-missing'))], self.ids(result))
+        self.assertIn('extra/xlsx', result['inventory']['plugins'][0]['skill_dirs'])
+
+    def test_too_large_settings_is_not_invalid(self):
+        self.write('.claude/settings.json', json.dumps({'env': {'X': 'y' * (cl.MAX_READ + 10)}}))
+        result = self.scan()
+        f = self.finding(result, 'too-large:.claude/settings.json')
+        self.assertEqual(f['severity'], 'low')
+        self.assertFalse([i for i in self.ids(result) if i.startswith('invalid-json')])
+        self.assertEqual(result['inventory']['settings'][0]['state'], 'too-large')
+
+    def test_symlinked_claude_md_is_audited_once(self):
+        self.write('AGENTS.md', '# x\n\nSee `docs/missing.md`.\n@gone.md\n')
+        os.symlink('AGENTS.md', os.path.join(self.root, 'CLAUDE.md'))
+        result = self.scan()
+        self.assertEqual([i['path'] for i in result['inventory']['instructions']], ['CLAUDE.md'])
+        self.assertEqual(sorted(self.ids(result, 'correctness')),
+                         ['broken-import:CLAUDE.md:gone.md', 'stale-ref:CLAUDE.md:docs/missing.md'])
+
+    def test_fixture_instruction_files_are_not_audited(self):
+        self.write('CLAUDE.md', '# x\n')
+        self.write('tests/fixtures/broken/CLAUDE.md', '@missing.md\n')
+        self.write('pkg/CLAUDE.md', '# nested\n')
+        paths = [i['path'] for i in self.scan()['inventory']['instructions']]
+        self.assertEqual(paths, ['CLAUDE.md', 'pkg/CLAUDE.md'])
+
+    def test_skill_named_like_a_build_dir_is_checked(self):
+        self.write('.claude/skills/build/helper.sh', 'echo\n')
+        self.write('.claude/skills/dist/SKILL.md', '---\nname: dist\ndescription: d\n---\n')
+        self.write('.claude/skills/dist/node_modules/x/SKILL.md', '')
+        result = self.scan()
+        self.assertIn('skill-missing:.claude/skills/build', self.ids(result))
+        self.assertEqual([s['path'] for s in result['inventory']['skills']], ['.claude/skills/dist/SKILL.md'])
+        dirs = cl.Scan(self.root, False, {}, 'unknown').dirs
+        self.assertIn('.claude/skills/build', dirs)
+        self.assertNotIn('.claude/skills/dist/node_modules', dirs)
 
     def test_misplaced_hooks_and_mcp(self):
         self.write('.claude/hooks.json', {'hooks': {}})
@@ -382,14 +449,40 @@ class Coverage(Project):
         self.write('bin/notes', 'plain file\n')
         self.write('CLAUDE.md', '@docs/guide.md\n')
         self.write('docs/guide.md', 'Run `bin/sdlc check` and read `bin/notes`.\n')
-        self.write('AGENTS.md', 'Run `bin/release now`.\n')
+        self.write('bin/audit', '#!/bin/sh\n', 0o755)
+        self.write('AGENTS.md', 'Run `bin/release now` and `bin/audit`.\n')
         result = self.scan()
         checks = [(c['command'], c['args']) for c in result['signals']['check_commands']]
         self.assertEqual(checks, [('bin/sdlc', True)])
-        self.assertIn('Bash(bin/sdlc *)', self.finding(result, 'allowlist')['fix'])
+        fix = self.finding(result, 'allowlist')['fix']
+        self.assertEqual(json.loads(fix.split(': ', 1)[1]), {'permissions': {'allow': ['Bash(bin/sdlc check)']}})
         self.write('CLAUDE.md', '@docs/guide.md\n@AGENTS.md\n')
         checks = [c['command'] for c in self.scan()['signals']['check_commands']]
-        self.assertEqual(sorted(checks), ['bin/release', 'bin/sdlc'])
+        # Neither a release script nor one whose documented call names no check (it may run anything).
+        self.assertEqual(checks, ['bin/sdlc'])
+
+    def test_mentioned_scripts_get_exact_non_mutating_rules(self):
+        for name in ('sdlc', 'release', 'check-marketplace'):
+            self.write('bin/' + name, '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', 'Run `bin/sdlc check`, then `bin/sdlc apply` and `bin/release promote`.\n'
+                                'Compare with `bin/sdlc check BASE`.\n'
+                                'Also `bin/check-marketplace --base origin/main` and `bin/check-marketplace --write`.\n')
+        result = self.scan()
+        rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/sdlc check)', 'Bash(bin/check-marketplace --base origin/main)'])
+        self.assertFalse([r for r in rules if '*' in r or 'apply' in r or 'promote' in r or 'write' in r], rules)
+        self.assertNotIn('bin/release', [c['command'] for c in result['signals']['check_commands']])
+        self.write('.claude/settings.json', {'permissions': {'allow': [
+            'Bash(bin/sdlc check)', 'Bash(bin/check-marketplace --base origin/main)']}})
+        result = self.scan()
+        self.assertNotIn('allowlist', self.ids(result))
+        self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'met')
+
+    def test_check_script_with_mutating_flag_gets_no_wildcard(self):
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', 'Run `bin/ci` or `bin/ci --fast`; `bin/ci --write` updates snapshots.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/ci)', 'Bash(bin/ci --fast)'])
 
     def test_allowlist_snippet(self):
         self.write('package.json', {'scripts': {'test': 'jest', 'lint': 'eslint .'}})
@@ -400,7 +493,7 @@ class Coverage(Project):
         f = self.finding(result, 'allowlist')
         snippet = json.loads(f['fix'].split(': ', 1)[1])
         self.assertEqual(snippet, {'permissions': {'allow': [
-            'Bash(npm test)', 'Bash(npm test *)', 'Bash(bin/check-all)', 'Bash(bin/check-all *)']}})
+            'Bash(npm test)', 'Bash(npm test *)', 'Bash(bin/check-all --fast)']}})
         self.assertEqual(result['signals']['documented_checks'], ['npm test', 'bin/check-all'])
         self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'missing')
         self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(npm test:*)']}})
@@ -566,6 +659,38 @@ class Cli(Project):
         code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'x', '--reason', 'y')
         self.assertEqual(code, 2)
         self.assertEqual(Path(self.root, '.claude/claudit-dismissed.json').read_text(), '{bad')
+
+    def test_dismiss_never_follows_a_planted_temp_file(self):
+        outside = os.path.join(self.root, 'outside.txt')
+        self.write('outside.txt', 'keep\n')
+        os.makedirs(os.path.join(self.root, '.claude'))
+        os.symlink(outside, os.path.join(self.root, '.claude/claudit-dismissed.json.tmp'))
+        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        self.assertEqual((code, out['added']), (0, True))
+        self.assertEqual(Path(outside).read_text(), 'keep\n')
+        data = json.loads(Path(self.root, '.claude/claudit-dismissed.json').read_text())
+        self.assertEqual([d['id'] for d in data['dismissed']], ['lsp'])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, '.claude'))),
+                         ['claudit-dismissed.json', 'claudit-dismissed.json.tmp'])
+
+    def test_dismiss_refuses_symlinked_target_or_folder(self):
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        target = os.path.join(elsewhere.name, 'victim.json')
+        Path(target).write_text('{"version": 1, "dismissed": []}\n')
+        os.makedirs(os.path.join(self.root, '.claude'))
+        os.symlink(target, os.path.join(self.root, '.claude/claudit-dismissed.json'))
+        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        self.assertEqual(code, 2)
+        self.assertIn('refusing', out['error'])
+        self.assertEqual(Path(target).read_text(), '{"version": 1, "dismissed": []}\n')
+        shutil.rmtree(os.path.join(self.root, '.claude'))
+        os.symlink(elsewhere.name, os.path.join(self.root, '.claude'))
+        before = tree(elsewhere.name)
+        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        self.assertEqual(code, 2)
+        self.assertIn('refusing', out['error'])
+        self.assertEqual(tree(elsewhere.name), before)
 
     def test_new_pages(self):
         reviewed = cl.load_catalog()['reviewed_pages']

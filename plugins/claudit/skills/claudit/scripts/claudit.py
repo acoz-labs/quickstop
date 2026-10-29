@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 VERSION = '4.0.0'
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,10 +27,12 @@ SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '
 FIXTURE_DIRS = {'fixture', 'fixtures', '__fixtures__', 'testdata'}
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
+MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write', 'cascade', 'install', 'delete', 'rm'}
 SECRET_EXAMPLES = ('.env.example', '.env.sample', '.env.template')
 ROOT_INSTRUCTIONS = ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md')
 PROJECT_SETTINGS = ('.claude/settings.json', '.claude/settings.local.json')
 DISMISSED = '.claude/claudit-dismissed.json'
+DEFAULT_MODE_IGNORED = (2, 1, 257)
 NUMBERED = re.compile(r'^\s*\d+[.)]\s')
 FENCE = re.compile(r'^\s*(```|~~~)')
 PROCEDURE_WORDS = re.compile(r'release|deploy|runbook|procedure|playbook|rollout|onboarding|sdlc|delivery|review', re.I)
@@ -198,6 +201,20 @@ def deny_rule(entry):
     return 'Read(%s)' % pattern
 
 
+def mutating(command):
+    """True when any word of a command (path segments and flags included) is a mutating verb."""
+    return bool(set(re.split(r'[\s/=._:-]+', command.lower())) & MUTATING)
+
+
+def checking(command):
+    """True when a word of a command names a check, as in `bin/sdlc check`."""
+    return bool(set(re.split(r'[\s/=._:-]+', command.lower())) & set(CHECK_NAMES))
+
+
+def version_tuple(version):
+    return tuple(int(n) for n in version.split('.')) if re.fullmatch(r'\d+\.\d+\.\d+', version or '') else None
+
+
 def frontmatter_keys(text):
     if not text.startswith('---'):
         return set()
@@ -232,7 +249,7 @@ class Scan:
     def __init__(self, root, git, catalog, claude_version, user=False):
         self.root, self.git, self.catalog, self.user = root, git, catalog, user
         self.claude_version = claude_version
-        self.findings, self.limits, self.truncated = [], [], {}
+        self.findings, self.limits, self.truncated, self.exact = [], [], {}, {}
         self.no_matcher = set(catalog.get('no_matcher_events') or [])
         self.files, self.dirs = self.walk()
         self.fileset = set(self.files)
@@ -244,7 +261,8 @@ class Scan:
             rel = os.path.relpath(current, self.root).replace(os.sep, '/')
             rel = '' if rel == '.' else rel
             depth = rel.count('/') + 1 if rel else 0
-            subdirs[:] = sorted(d for d in subdirs if d not in SKIP_DIRS
+            in_skills = rel.split('/')[-1] == 'skills'  # skill names such as build/ are not build output
+            subdirs[:] = sorted(d for d in subdirs if (in_skills or d not in SKIP_DIRS)
                                 and not os.path.islink(os.path.join(current, d)))
             if depth >= MAX_DEPTH:
                 subdirs[:] = []
@@ -280,10 +298,12 @@ class Scan:
         return self.read(self.abs(rel), rel) if rel in self.fileset else None
 
     def load_json(self, rel, path=None):
-        """Return (state, data, raw) for a JSON file: ok, invalid-json, unreadable or missing."""
+        """Return (state, data, raw) for a JSON file: ok, invalid-json, too-large, unreadable or missing."""
         path = path or self.abs(rel)
         if not os.path.isfile(path):
             return 'missing', None, None
+        if os.path.getsize(path) > MAX_READ:
+            return 'too-large', None, None
         raw = self.read(path, rel)
         if raw is None:
             return 'unreadable', None, None
@@ -323,22 +343,45 @@ class Scan:
         if not any(f['id'] == fid for f in self.findings):
             self.findings.append(finding)
 
+    def typed(self, value, expected, path, key, doc, raw=None):
+        """True when value has the expected type; otherwise records a wrong-type finding."""
+        kinds = {'list': list, 'object': dict, 'string or list': (str, list)}
+        if value is None or isinstance(value, kinds[expected]):
+            return value is not None
+        self.add('wrong-type:%s:%s' % (path, key), 'correctness', 'high', 'Config value has the wrong type', path,
+                 '%s is %s, expected %s' % (key, type(value).__name__, expected),
+                 'Make %s a%s %s; Claude Code rejects or ignores a value of the wrong type.'
+                 % (key, 'n' if expected[0] == 'o' else '', expected), doc,
+                 line=line_of(raw, '"%s"' % key.split('.')[-1].split('[')[0]))
+        return False
+
+    def too_large(self, path, doc):
+        self.add('too-large:' + path, 'correctness', 'low', 'File too large to check', path,
+                 'over %d KiB; not parsed, so its contents were not checked' % (MAX_READ // 1024),
+                 'Check %s by hand, or shrink it.' % path, doc, confidence='medium')
+
     # -- inventory --------------------------------------------------------
     def instructions(self):
         """Instruction files, their @imports (recursively) and whether each is loaded."""
-        found = []
+        found, seen = [], set()
+
+        def keep(path, abs_path, kind):  # one entry per real file, under its first displayed name
+            if os.path.realpath(abs_path) not in seen:
+                seen.add(os.path.realpath(abs_path))
+                found.append({'path': path, 'abs': abs_path, 'kind': kind})
+
         for rel in ROOT_INSTRUCTIONS:
             if rel in self.fileset:
-                found.append({'path': rel, 'abs': self.abs(rel), 'kind': 'project'})
+                keep(rel, self.abs(rel), 'project')
         for rel in self.files:
-            if rel.endswith('/CLAUDE.md') and rel != '.claude/CLAUDE.md' and rel.count('/') <= 3:
-                found.append({'path': rel, 'abs': self.abs(rel), 'kind': 'nested'})
+            if rel.endswith('/CLAUDE.md') and rel != '.claude/CLAUDE.md' and rel.count('/') <= 3 \
+                    and not set(rel.split('/')[:-1]) & FIXTURE_DIRS:
+                keep(rel, self.abs(rel), 'nested')
         if self.user:
             config = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude')
             path = os.path.join(config, 'CLAUDE.md')
             if os.path.isfile(path):
-                found.append({'path': path, 'abs': path, 'kind': 'user'})
-        seen = {os.path.realpath(f['abs']) for f in found}
+                keep(path, path, 'user')
         imported = set()
         queue = list(found)
         while queue:
@@ -405,12 +448,14 @@ class Scan:
                     skills.add(base + 'skills')
                 if state == 'ok' and isinstance(data, dict):
                     declared = data.get('skills')
-                    for item in ([declared] if isinstance(declared, str) else declared or []):
-                        if isinstance(item, str):
-                            cand = os.path.normpath(base + strip_dot(item)).replace(os.sep, '/')
-                            if cand in self.dirs:
-                                skills.add(cand)
-                    for plugin in data.get('plugins') or []:
+                    if self.typed(declared, 'string or list', rel, 'skills', 'plugins'):
+                        for item in [declared] if isinstance(declared, str) else declared:
+                            if isinstance(item, str):
+                                cand = os.path.normpath(base + strip_dot(item)).replace(os.sep, '/')
+                                if cand in self.dirs:
+                                    skills.add(cand)
+                    plugins = data.get('plugins')
+                    for plugin in plugins if self.typed(plugins, 'list', rel, 'plugins', 'plugins') else []:
                         source = plugin.get('source') if isinstance(plugin, dict) else None
                         if isinstance(source, str) and source.startswith('./'):
                             cand = os.path.normpath(base + source[2:] + '/skills').replace(os.sep, '/')
@@ -422,7 +467,8 @@ class Scan:
 
     # -- signals ----------------------------------------------------------
     def check_commands(self, corpus, ci_text, loaded=()):
-        detected = []
+        """Check commands; sets self.exact to the only invocations to pre-approve where a wildcard is unsafe."""
+        detected, invocations, from_mention = [], {}, set()
 
         def add(command, source):
             if not any(c['command'] == command for c in detected):
@@ -463,7 +509,6 @@ class Scan:
                 or '[tool:pytest]' in (self.text('setup.cfg') or '')
             add(mentioned or ('pytest' if configured else 'python -m unittest'), python_markers[0])
         # Commands documented in instruction files.
-        args = set()
         for path, text in corpus.items():
             for snippet in code_snippets(text):
                 for part in split_commands(snippet):
@@ -479,13 +524,25 @@ class Scan:
                                 and os.access(self.abs(first), os.X_OK) and (
                                 re.search(r'test|check|lint|ci|verify', first.split('/')[-1]) or path in loaded):
                             base = first
+                            from_mention.add(base)
                         else:
                             continue
                         add(base, path)
-                    if strip_dot(part) != strip_dot(base):
-                        args.add(base)
-        for entry in detected:
-            entry['args'] = entry['command'] in args
+                    invocations.setdefault(base, []).append(part)
+        self.exact = {}
+        for entry in list(detected):
+            command = entry['command']
+            seen = invocations.get(command, [])
+            entry['args'] = any(p != strip_dot(command) for p in seen)
+            if command in from_mention or any(mutating(p) for p in seen):
+                # Scripts found only by mention, or with mutating subcommands documented, get exact rules.
+                safe = [] if command in from_mention else [command]
+                safe += [p for p in seen if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p)
+                         and (command not in from_mention or checking(p)) and p not in safe]
+                if not safe:
+                    detected.remove(entry)
+                    continue
+                self.exact[command] = safe
         return detected
 
     def mentioned(self, command, corpus_text):
@@ -523,9 +580,14 @@ class Scan:
                 self.add('invalid-json:' + path, 'correctness', 'high', 'Settings file is not valid JSON', path,
                          s['error'], 'Fix the JSON syntax; Claude Code ignores the whole file until it parses.', 'config-causes')
                 continue
-            perms = data.get('permissions') if isinstance(data.get('permissions'), dict) else {}
+            if s['state'] == 'too-large':
+                self.too_large(path, 'settings-index')
+                continue
+            perms = data.get('permissions') if self.typed(data.get('permissions'), 'object', path, 'permissions',
+                                                          'permission-rules', raw) else {}
             for kind in ('allow', 'deny', 'ask'):
-                for rule in perms.get(kind) or []:
+                rules = perms.get(kind)
+                for rule in rules if self.typed(rules, 'list', path, 'permissions.' + kind, 'permission-rules', raw) else []:
                     match = re.fullmatch(r'(Write|NotebookEdit|Glob)\((.+)\)', rule.strip(), re.S) if isinstance(rule, str) else None
                     if match:
                         tool = 'Read' if match.group(1) == 'Glob' else 'Edit'
@@ -536,9 +598,13 @@ class Scan:
                                  line=line_of(raw, json.dumps(rule)))
             if s['scope'] == 'project':
                 mode = perms.get('defaultMode')
+                version = version_tuple(self.claude_version)
                 if mode in ('bypassPermissions', 'auto'):
                     self.add('default-mode:' + path, 'correctness', 'high',
                              'defaultMode "%s" in project settings' % mode, path,
+                             ('permissions.defaultMode is "%s"; Claude Code %s applies it to everyone who opens the repo '
+                              '(ignored from project/local settings only since 2.1.257)' % (mode, self.claude_version))
+                             if version and version < DEFAULT_MODE_IGNORED else
                              'permissions.defaultMode is "%s"; ignored from project/local settings since 2.1.257; '
                              'before that bypass applied to everyone who opens the repo' % mode,
                              'Remove "defaultMode" from %s; users who want it set it in user settings '
@@ -552,9 +618,10 @@ class Scan:
                     self.add('mcp-location:' + path, 'correctness', 'medium', 'mcpServers in settings is not read', path,
                              'mcpServers key in %s' % path, 'Move the servers to a root .mcp.json '
                              '({"mcpServers": {...}}).', 'config-causes', line=line_of(raw, '"mcpServers"'))
-            hooks = data.get('hooks') if isinstance(data.get('hooks'), dict) else {}
+            hooks = data.get('hooks') if self.typed(data.get('hooks'), 'object', path, 'hooks', 'check-hooks', raw) else {}
             for event, groups in sorted(hooks.items()):
-                for group in groups if isinstance(groups, list) else []:
+                groups = groups if self.typed(groups, 'list', path, 'hooks.' + event, 'check-hooks', raw) else []
+                for index, group in enumerate(groups):
                     if not isinstance(group, dict):
                         continue
                     matcher = group.get('matcher')
@@ -571,9 +638,10 @@ class Scan:
                                  '%s matcher "%s" is silently ignored' % (event, matcher),
                                  'Remove the matcher; %s hooks run on every %s event.' % (event, event),
                                  'hooks-matchers', line=line_of(raw, '"%s"' % event))
-                    if s['scope'] != 'project':
+                    key = 'hooks.%s[%d].hooks' % (event, index)
+                    if not self.typed(group.get('hooks'), 'list', path, key, 'check-hooks', raw) or s['scope'] != 'project':
                         continue
-                    for hook in group.get('hooks') or []:
+                    for hook in group['hooks']:
                         command = hook.get('command') if isinstance(hook, dict) else None
                         for script in hook_scripts(command if isinstance(command, str) else ''):
                             if not self.exists(script):
@@ -589,6 +657,8 @@ class Scan:
                 if state == 'invalid-json':
                     self.add('invalid-json:' + rel, 'correctness', 'high', 'File is not valid JSON', rel, error,
                              'Fix the JSON syntax; Claude Code cannot load it.', 'config-causes')
+                elif state == 'too-large':
+                    self.too_large(rel, 'config-causes')
         if '.claudeignore' in self.fileset:
             entries = [e.strip() for e in (self.text('.claudeignore') or '').splitlines()
                        if e.strip() and not e.strip().startswith(('#', '!'))]
@@ -615,6 +685,8 @@ class Scan:
                 names = sorted(os.listdir(self.abs(base)))
             except OSError:
                 continue
+            if 'SKILL.md' in names:
+                continue  # a manifest path naming one skill directory, not a directory of skills
             for name in names:
                 rel = base + '/' + name
                 if os.path.isfile(self.abs(rel)) and name.endswith('.md') and name != 'README.md':
@@ -786,14 +858,18 @@ class Scan:
                      'Add a Commands section to %s listing: %s.' % (roots[0]['path'], ', '.join(
                          c['command'] for c in checks)), 'check-to-run', confidence='medium')
         targets = [c for c in checks if c['documented']] or checks
-        uncovered = [c for c in targets if not all(any(bash_rule_matches(r, probe) for r in allow) for probe in
-                                                   ([c['command']] + ([c['command'] + ' x'] if c['args'] else [])))]
+
+        def probes(c):  # exact invocations, or the command plus any arguments
+            return self.exact.get(c['command']) or [c['command']] + ([c['command'] + ' x'] if c['args'] else [])
+
+        uncovered = [c for c in targets if not all(any(bash_rule_matches(r, probe) for r in allow) for probe in probes(c))]
         if uncovered:
             rules = []
             for c in uncovered:
-                rules.append('Bash(%s)' % c['command'])
-                if c['args']:
-                    rules.append('Bash(%s *)' % c['command'])
+                if c['command'] in self.exact:
+                    rules += ['Bash(%s)' % p for p in self.exact[c['command']]]
+                else:
+                    rules += ['Bash(%s)' % c['command']] + (['Bash(%s *)' % c['command']] if c['args'] else [])
             self.add('allowlist', 'coverage', 'medium', 'Check commands are not pre-approved', '.claude/settings.json',
                      'no permissions.allow rule covers: ' + ', '.join(c['command'] for c in uncovered),
                      'Add to .claude/settings.json: ' + json.dumps({'permissions': {'allow': rules}}),
@@ -821,6 +897,7 @@ class Scan:
         if must_rules and not stop_hook:
             cmd = next((c['command'] for c in checks for r in must_rules if self.mentioned(c['command'], r['text'])),
                        (documented or [c['command'] for c in checks] or ['<your check command>'])[0])
+            cmd = (self.exact.get(cmd) or [cmd])[0]
             settings_json = json.dumps({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command':
                                         '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop-check.sh'}]}]}})
             script = ('#!/usr/bin/env bash\n# Block finishing until the check passes.\ninput=$(cat)\n'
@@ -994,6 +1071,10 @@ def rules_of(data, kind):
     return [r for r in rules if isinstance(r, str)] if isinstance(rules, list) else []
 
 
+def as_list(value):
+    return value if isinstance(value, list) else []
+
+
 def hook_scripts(command):
     """Project script paths a hook command runs."""
     found = []
@@ -1014,11 +1095,11 @@ def settings_entry(s):
                 matcher = group.get('matcher')
                 hooks.setdefault(event, []).append({
                     'matcher': matcher if isinstance(matcher, str) or matcher is None else json.dumps(matcher),
-                    'commands': [scrub(h['command'])[:200] for h in group.get('hooks') or []
+                    'commands': [scrub(h['command'])[:200] for h in as_list(group.get('hooks'))
                                  if isinstance(h, dict) and isinstance(h.get('command'), str)]})
     plugins = data.get('enabledPlugins')
     env = data.get('env')
-    summary = {kind: [r for r in perms.get(kind) or [] if isinstance(r, str)][:CAP] for kind in ('allow', 'deny', 'ask')}
+    summary = {kind: rules_of(data, kind)[:CAP] for kind in ('allow', 'deny', 'ask')}
     summary.update({'defaultMode': perms.get('defaultMode'), 'hooks': hooks,
                     'enabledPlugins': sorted(plugins)[:CAP] if isinstance(plugins, dict) else [],
                     'env': sorted(env)[:CAP] if isinstance(env, dict) else []})
@@ -1102,7 +1183,12 @@ def new_pages(pages, catalog):
 def dismiss(root, fid, reason):
     if not fid.strip() or not reason.strip():
         raise UsageError('--id and --reason must be non-empty')
-    path = os.path.join(root, '.claude', 'claudit-dismissed.json')
+    folder = os.path.join(root, '.claude')
+    path = os.path.join(folder, 'claudit-dismissed.json')
+    real_root = os.path.realpath(root)
+    if os.path.islink(folder) or os.path.islink(path) or (os.path.exists(path) and not os.path.isfile(path)) \
+            or os.path.dirname(os.path.realpath(path)) != os.path.join(real_root, '.claude'):
+        raise UsageError('refusing to write %s: it or .claude is a symlink or not inside the project' % DISMISSED)
     data = {'version': 1, 'dismissed': []}
     if os.path.exists(path):
         try:
@@ -1115,12 +1201,17 @@ def dismiss(root, fid, reason):
     added = not any(isinstance(e, dict) and e.get('id') == fid for e in data['dismissed'])
     if added:
         data['dismissed'].append({'id': fid, 'reason': reason, 'date': datetime.date.today().isoformat()})
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, indent=2)
-            handle.write('\n')
-        os.replace(tmp, path)
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix='.claudit-dismissed.', suffix='.tmp', dir=folder)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+                json.dump(data, handle, indent=2)
+                handle.write('\n')
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, path)
+        except OSError:
+            os.unlink(tmp)
+            raise
     return {'dismissed': fid, 'added': added, 'path': DISMISSED}
 
 
