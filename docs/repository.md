@@ -37,7 +37,8 @@ the pinned runtime, not the system default.
 checks and regression tests. `--base` additionally rejects changed plugin bytes
 without a strictly higher stable version. Supply the actual pre-change commit;
 an unavailable base is an error, never a reason to skip validation. All distributed
-files, including README changes, count as bytes. Generated listings derive
+files, including README changes, count as bytes. Python bytecode caches (`__pycache__/`,
+`*.pyc`) are local state and never count; `bin/ci` does not write them. Generated listings derive
 versions from the native manifests; separate target packages can release independently. Regenerate indexes with
 `bin/check-marketplace --write` after changing catalog or manifest metadata.
 
