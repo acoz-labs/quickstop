@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+"""Run the Claudit `claude plugin eval` suite on one arm, seed its research cache, or summarize a result."""
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit('claudit-eval requires Python 3.11+; put the pinned interpreter first in PATH')
+
+import argparse
+import datetime as dt
+import fnmatch
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+SUITE = ROOT / 'evals/claudit'
+DEFAULT_PLUGIN = ROOT / 'plugins/claudit'
+PROMPT_KEY = '    prompt: '
+CANONICAL_PROMPT = PROMPT_KEY + "Review this project's Claude Code setup and tell me what to improve."
+STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
+                 'description': 'Empty plugin for the no-plugin eval arms.'}
+ARMS = ('plain', 'doctor', 'claudit')
+DEFAULT_JUDGE = 'claude-haiku-5-5'
+SEED_TOOLS = ('Bash', 'Read', 'Grep', 'Glob', 'Task', 'Agent')
+# Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
+NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
+
+
+class Failure(Exception):
+    pass
+
+
+def positive_cost(value):
+    cost = float(value)
+    if not cost > 0:
+        raise argparse.ArgumentTypeError('cost ceiling must be greater than 0')
+    return cost
+
+
+def positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError('must be at least 1')
+    return number
+
+
+def copy_python(target):
+    if os.environ.get(NO_PYTHON_COPY) == '1':
+        return Path(sys.executable)
+
+    def ignore(directory, names):
+        if Path(directory).name == 'site-packages':
+            return set(names)
+        return {name for name in names if name == '__pycache__'}
+
+    # Sandboxed Bash cannot read the host install, so runs use a copy.
+    shutil.copytree(sys.base_prefix, target, symlinks=True, ignore=ignore)
+    python = target / 'bin/python3'
+    if not python.exists():
+        raise Failure(f'copied interpreter has no bin/python3 (base prefix {sys.base_prefix})')
+    return python
+
+
+def copy_plugin(source, target):
+    source = Path(source).resolve()
+    if not (source / '.claude-plugin/plugin.json').is_file():
+        raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {source}')
+    links = [path for path in source.rglob('*') if path.is_symlink()]
+    if links:
+        raise Failure(f'plugin contains symlinks: {links[0].relative_to(source)}')
+    shutil.copytree(source, target)
+
+
+def write_stub(target):
+    manifest = target / '.claude-plugin/plugin.json'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps(STUB_MANIFEST, indent=2) + '\n')
+
+
+def prompt_line(arm, invoke):
+    if arm == 'plain':
+        return CANONICAL_PROMPT
+    if arm == 'doctor':
+        return PROMPT_KEY + '/doctor'
+    # A JSON string is a valid YAML double-quoted scalar.
+    return PROMPT_KEY + json.dumps(invoke)
+
+
+def copy_suite(suite, target, arm, invoke):
+    shutil.copytree(suite, target, ignore=lambda directory, names: {
+        name for name in names
+        if name == '__pycache__' or (Path(directory) == suite and name in ('results', 'seed-home'))})
+    cases = sorted(target.glob('cases/*/case.yaml'))
+    if not cases:
+        raise Failure(f'no cases found under {suite}/cases')
+    replacement = prompt_line(arm, invoke)
+    for case in cases:
+        lines = case.read_text().split('\n')
+        hits = [index for index, line in enumerate(lines) if line == CANONICAL_PROMPT]
+        if len(hits) != 1:
+            raise Failure(f'{case.parent.name}/case.yaml: expected the canonical prompt line exactly once, found {len(hits)}')
+        lines[hits[0]] = replacement
+        case.write_text('\n'.join(lines))
+    return [case.parent.name for case in cases]
+
+
+def run_scaffold(scaffold, workspace, home, path):
+    env = {'PATH': path, 'HOME': str(home)}
+    result = subprocess.run(['bash', str(scaffold), str(workspace / 'fixture')], cwd=workspace / 'cwd',
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if result.returncode:
+        raise Failure(f'scaffold failed during seed validation: {result.stderr.strip()}')
+
+
+def cache_status(python, runtime, cache, host_version, path):
+    env = dict(os.environ, CLAUDIT_CACHE_DIR=str(cache), PATH=path)
+    result = subprocess.run([str(python), str(runtime), 'status', '--host-version', host_version],
+                            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if result.returncode:
+        raise Failure(f'runtime.py status failed: {result.stderr.strip()}')
+    return {item['domain']: item['state'] for item in json.loads(result.stdout)}
+
+
+def print_states(states):
+    for domain, state in states.items():
+        print(f'  {domain}: {state}')
+
+
+def claude_version():
+    try:
+        result = subprocess.run(['claude', '--version'], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise Failure('claude is not on PATH') from exc
+    if result.returncode:
+        raise Failure(f'claude --version failed: {result.stderr.strip()}')
+    return result.stdout.strip()
+
+
+def validate_seed(scratch, python, path):
+    """Relocate a copy of the seed exactly as an eval run will, then require every domain fresh."""
+    with tempfile.TemporaryDirectory(prefix='claudit-seed-check-') as temp:
+        temp = Path(temp)
+        for name in ('home', 'cwd', 'fixture'):
+            (temp / name).mkdir()
+        run_scaffold(scratch / 'plugin/evals/scaffold.sh', temp, temp / 'home', path)
+        states = cache_status(python, scratch / 'plugin/scripts/runtime.py', temp / 'home/.cache/claudit',
+                              claude_version(), path)
+    print('Seed cache domain states after relocation:')
+    print_states(states)
+    if any(state != 'fresh' for state in states.values()):
+        raise Failure('seed cache is not fresh in every domain; rebuild it with `bin/claudit-eval seed`')
+
+
+def default_output(arm):
+    stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return SUITE / 'results' / f'{stamp}-{arm}'
+
+
+def eval_command(plugin, args, out):
+    command = ['claude', 'plugin', 'eval', str(plugin), '--model', args.model, '--judge-model', args.judge_model,
+               '--max-cost-usd', str(args.max_cost_usd), '--runs', str(args.runs), '--trust-plugin', '--scaffold',
+               '--no-publish', '--ablation', 'none', '--threshold', '0', '--allow-tools', 'Bash',
+               '--json', str(out / 'result.json'), '--output-dir', str(out)]
+    if args.case:
+        command += ['--case', args.case]
+    if args.keep_temp:
+        command.append('--keep-temp')
+    return command
+
+
+def run(args):
+    if args.arm != 'claudit' and (args.seed_cache or args.plugin):
+        raise Failure('--plugin and --seed-cache apply only to the claudit arm')
+    suite = SUITE.resolve()
+    out = Path(args.output_dir).resolve() if args.output_dir else default_output(args.arm)
+    scratch = Path(tempfile.mkdtemp(prefix='claudit-eval-')).resolve()
+    keep = args.keep_scratch
+    try:
+        plugin = scratch / 'plugin'
+        if args.arm == 'claudit':
+            copy_plugin(args.plugin or DEFAULT_PLUGIN, plugin)
+        else:
+            write_stub(plugin)
+        # Sandboxed Bash can read the plugin under test, not its siblings, so the interpreter goes inside it.
+        python = copy_python(plugin / '.eval-python')
+        path = f'{python.parent}{os.pathsep}{os.environ.get("PATH", "")}'
+        cases = copy_suite(suite, plugin / 'evals', args.arm, args.invoke)
+        if args.arm == 'claudit' and args.seed_cache:
+            seed = Path(args.seed_cache).resolve()
+            if not (seed / 'v2').is_dir():
+                raise Failure(f'seed cache has no v2/ records: {seed}')
+            cache = plugin / 'evals/seed-home/.cache/claudit'
+            shutil.copytree(seed, cache)
+            (cache / '.seed-root').write_text(str(seed))
+            if args.dry_run:
+                print('Dry run: seed cache copied but not validated (validation needs claude --version).')
+            else:
+                validate_seed(scratch, python, path)
+        elif args.arm == 'claudit':
+            print('Warning: no --seed-cache; Claudit will run with no research cache and cannot fetch one in the sandbox.',
+                  file=sys.stderr)
+        if args.case and not any(fnmatch.fnmatchcase(name, args.case) for name in cases):
+            print(f'Warning: --case {args.case!r} matches none of: {", ".join(cases)}', file=sys.stderr)
+        command = eval_command(plugin, args, out)
+        print(f'Scratch: {scratch}')
+        print(f'Command: {shlex.join(command)}')
+        if args.dry_run:
+            keep = True
+            return 0
+        out.mkdir(parents=True, exist_ok=True)
+        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=path)).returncode
+        result = out / 'result.json'
+        if result.is_file():
+            summary = summarize_files([result], args.arm, args.model, args.judge_model)
+            (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+            print(markdown(summary))
+            print(f'Summary: {out / "summary.json"}')
+        else:
+            print(f'No result.json was written to {out}', file=sys.stderr)
+        if code == 2:
+            print('Cost ceiling reached (--max-cost-usd): the eval stopped early and its results are PARTIAL.',
+                  file=sys.stderr)
+        elif code:
+            print(f'claude plugin eval exited with status {code}', file=sys.stderr)
+        return code
+    finally:
+        if not keep:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def git(cwd, *args):
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_AUTHOR_DATE='2026-01-01T00:00:00Z', GIT_COMMITTER_DATE='2026-01-01T00:00:00Z')
+    subprocess.run(['git', *args], cwd=cwd, env=env, check=True, stdin=subprocess.DEVNULL, capture_output=True)
+
+
+def seed(args):
+    target = Path(args.out).resolve()
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise Failure(f'refusing to seed into a non-empty path: {target}')
+    version = claude_version()
+    scratch = Path(tempfile.mkdtemp(prefix='claudit-seed-')).resolve()
+    try:
+        plugin = scratch / 'plugin'
+        copy_plugin(args.plugin or DEFAULT_PLUGIN, plugin)
+        repo = scratch / 'repo'
+        repo.mkdir()
+        git(repo, '-c', 'init.defaultBranch=main', 'init', '-q')
+        git(repo, 'config', 'user.name', 'Eval')
+        git(repo, 'config', 'user.email', 'eval@example.invalid')
+        git(repo, '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'Seed workspace')
+        target.mkdir(parents=True, exist_ok=True)
+        path = f'{Path(sys.executable).parent}{os.pathsep}{os.environ.get("PATH", "")}'
+        command = ['claude', '-p', '/claudit:refresh all', '--plugin-dir', str(plugin),
+                   '--setting-sources', 'project,local', '--strict-mcp-config', '--model', args.model,
+                   '--max-budget-usd', str(args.max_cost_usd), '--output-format', 'json',
+                   '--permission-mode', 'dontAsk', '--allowedTools', *SEED_TOOLS,
+                   # Research outputs are written with the Write tool; allow it only inside the cache.
+                   f'Edit(/{target}/**)']
+        print(f'Command: {shlex.join(command)}')
+        result = subprocess.run(command, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                env=dict(os.environ, CLAUDIT_CACHE_DIR=str(target), PATH=path))
+        try:
+            output = json.loads(result.stdout)
+        except ValueError as exc:
+            raise Failure(f'claude -p did not return JSON (exit {result.returncode}): {result.stderr.strip()}') from exc
+        receipt = {'cost_usd': output.get('total_cost_usd'), 'duration_ms': output.get('duration_ms'),
+                   'model': args.model, 'claude_version': version, 'is_error': output.get('is_error')}
+        (target.parent / 'seed-run.json').write_text(json.dumps(receipt, indent=2) + '\n')
+        print(json.dumps(receipt, indent=2))
+        if output.get('result'):
+            print(output['result'])
+        states = cache_status(sys.executable, plugin / 'scripts/runtime.py', target, version, path)
+        print('Seed cache domain states:')
+        print_states(states)
+        if result.returncode or output.get('is_error') or any(state != 'fresh' for state in states.values()):
+            raise Failure('seeding did not produce a fresh cache in every domain')
+        return 0
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+
+def mean(total, count):
+    return round(total / count, 6) if count else 0
+
+
+def case_summary(case):
+    runs = case.get('arms', {}).get('with', []) or []
+    row = {'case': case.get('name'), 'runs': len(runs), 'findings_hit': 0, 'findings_total': 0,
+           'structure_passed': 0, 'structure_total': 0, 'false_defects': 0,
+           'agent_cost_usd': 0.0, 'judge_cost_usd': 0.0, 'wall_seconds': 0.0, 'errors': 0, 'skipped_paid_graders': 0}
+    for item in runs:
+        row['agent_cost_usd'] += number(item.get('costUsd'))
+        row['judge_cost_usd'] += number(item.get('judgeCostUsd'))
+        row['wall_seconds'] += number(item.get('durationSeconds'))
+        row['errors'] += bool(item.get('error'))
+        skipped = item.get('skippedPaidGraders')
+        row['skipped_paid_graders'] += len(skipped) if isinstance(skipped, list) else number(skipped)
+        for grader in item.get('graders', []) or []:
+            # Unscored graders (e.g. skipped paid judges) are reported via skipped_paid_graders, not as misses.
+            if grader.get('scored') is False:
+                continue
+            name, passed = str(grader.get('name', '')), grader.get('passed') is True
+            if name.startswith('finding-'):
+                row['findings_total'] += 1
+                row['findings_hit'] += passed
+            elif name.startswith('structure-'):
+                row['structure_total'] += 1
+                row['structure_passed'] += passed
+            elif name.startswith('no-invented-'):
+                row['false_defects'] += not passed
+    return finish(row)
+
+
+def finish(row):
+    row['hit_rate'] = round(row['findings_hit'] / row['findings_total'], 4) if row['findings_total'] else None
+    for key in ('agent_cost_usd', 'judge_cost_usd', 'wall_seconds'):
+        row[key] = round(row[key], 6)
+        row[key + '_mean'] = mean(row[key], row['runs'])
+    return row
+
+
+def summarize(result, arm=None, model=None, judge_model=None):
+    suite = result.get('suite') if isinstance(result.get('suite'), dict) else {}
+    rows = [case_summary(case) for case in result.get('cases', []) or []]
+    totals = {'case': 'TOTAL'}
+    for key in ('runs', 'findings_hit', 'findings_total', 'structure_passed', 'structure_total', 'false_defects',
+                'agent_cost_usd', 'judge_cost_usd', 'wall_seconds', 'errors', 'skipped_paid_graders'):
+        totals[key] = sum(row[key] for row in rows)
+    totals = finish(totals)
+    return {'arm': arm,
+            'claude_version': result.get('claudeVersion'),
+            'model': model or result.get('model') or suite.get('model'),
+            'judge_model': judge_model or result.get('judgeModel') or suite.get('judgeModel'),
+            'total_cost_usd': result.get('costUsd'),
+            'agent_plus_judge_cost_usd': round(totals['agent_cost_usd'] + totals['judge_cost_usd'], 6),
+            'duration_seconds': result.get('durationSeconds'),
+            'partial': result.get('partial'),
+            'cases': rows, 'totals': totals}
+
+
+def load_result(path):
+    try:
+        result = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        raise Failure(f'cannot read eval result {path}: {exc}') from exc
+    if not isinstance(result, dict):
+        raise Failure(f'eval result is not a JSON object: {path}')
+    return result
+
+
+def merge_results(results):
+    """Combine passes of one arm: runs of a case with the same name are pooled."""
+    if len(results) == 1:
+        return results[0]
+    versions = sorted({str(result.get('claudeVersion')) for result in results})
+    merged = {'claudeVersion': ', '.join(versions),
+              'costUsd': round(sum(number(result.get('costUsd')) for result in results), 6),
+              'durationSeconds': sum(number(result.get('durationSeconds')) for result in results),
+              'partial': any(result.get('partial') for result in results), 'cases': []}
+    cases = {}
+    for result in results:
+        for case in result.get('cases', []) or []:
+            if case.get('name') not in cases:
+                cases[case.get('name')] = {'name': case.get('name'), 'arms': {'with': []}}
+                merged['cases'].append(cases[case.get('name')])
+            cases[case.get('name')]['arms']['with'] += case.get('arms', {}).get('with', []) or []
+    return merged
+
+
+def summarize_files(paths, arm=None, model=None, judge_model=None):
+    return summarize(merge_results([load_result(path) for path in paths]), arm, model, judge_model)
+
+
+def markdown(summary):
+    def cost(value):
+        return f'{value:.4f}'
+
+    header = ('| Case | Runs | Findings | Hit rate | Structure | False defects | Agent $ (mean) | Judge $ (mean) '
+              '| Wall s (mean) | Errors | Skipped paid |')
+    lines = [f"Arm: {summary['arm'] or '-'} | model: {summary['model'] or '-'} | judge: {summary['judge_model'] or '-'} "
+             f"| claude {summary['claude_version'] or '-'} | total ${summary['total_cost_usd']} "
+             f"(agent+judge ${summary['agent_plus_judge_cost_usd']}) | partial: {summary['partial']}",
+             '', header, '|' + '---|' * (header.count('|') - 1)]
+    for row in [*summary['cases'], summary['totals']]:
+        rate = '-' if row['hit_rate'] is None else f"{row['hit_rate']:.0%}"
+        lines.append(f"| {row['case']} | {row['runs']} | {row['findings_hit']}/{row['findings_total']} | {rate} "
+                     f"| {row['structure_passed']}/{row['structure_total']} | {row['false_defects']} "
+                     f"| {cost(row['agent_cost_usd'])} ({cost(row['agent_cost_usd_mean'])}) "
+                     f"| {cost(row['judge_cost_usd'])} ({cost(row['judge_cost_usd_mean'])}) "
+                     f"| {row['wall_seconds']:.1f} ({row['wall_seconds_mean']:.1f}) | {row['errors']} "
+                     f"| {row['skipped_paid_graders']} |")
+    return '\n'.join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('run', help='run the suite on one arm in a scratch plugin dir')
+    p.add_argument('--arm', choices=ARMS, required=True)
+    p.add_argument('--model', required=True)
+    p.add_argument('--max-cost-usd', type=positive_cost, required=True)
+    p.add_argument('--judge-model', default=DEFAULT_JUDGE)
+    p.add_argument('--runs', type=positive_int, default=1)
+    p.add_argument('--case', help='case name glob passed to claude plugin eval')
+    p.add_argument('--plugin', help='plugin under test (claudit arm only; default plugins/claudit)')
+    p.add_argument('--invoke', default='/claudit:claudit --read-only', help='claudit arm prompt')
+    p.add_argument('--seed-cache', help='research cache from `seed` (claudit arm only)')
+    p.add_argument('--output-dir', help='default evals/claudit/results/<UTC timestamp>-<arm>')
+    p.add_argument('--keep-scratch', action='store_true')
+    p.add_argument('--keep-temp', action='store_true', help="keep each run's temp dir and trace (claude plugin eval --keep-temp)")
+    p.add_argument('--dry-run', action='store_true', help='assemble the scratch, print the command, do not run')
+    p = sub.add_parser('seed', help='build a fresh Claudit research cache outside the eval sandbox')
+    p.add_argument('--model', required=True)
+    p.add_argument('--max-cost-usd', type=positive_cost, required=True)
+    p.add_argument('--out', required=True)
+    p.add_argument('--plugin')
+    p = sub.add_parser('summarize', help='summarize claude plugin eval --json results (several pool one arm)')
+    p.add_argument('result', nargs='+')
+    p.add_argument('--arm')
+    args = parser.parse_args()
+    try:
+        if args.command == 'run':
+            return run(args)
+        if args.command == 'seed':
+            return seed(args)
+        summary = summarize_files(args.result, args.arm)
+        print(json.dumps(summary, indent=2))
+        print(markdown(summary))
+        return 0
+    except (Failure, OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
+        print(f'claudit-eval: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

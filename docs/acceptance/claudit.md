@@ -22,6 +22,16 @@ with direct isolated Claude Code sessions for actual settings and installation
 behavior. Graders must inspect actual outputs and file/tool effects; a requested
 action, an agent's success claim or matching headings is not evidence it happened.
 
+## Eval suite and baselines
+
+[`evals/claudit/`](../../evals/claudit/README.md) is Claudit's `claude plugin eval`
+release gate: five synthetic fixtures with planted findings, run by
+`bin/claudit-eval` with a pinned model and `--max-cost-usd`. It isn't a per-PR
+check. A release compares its numbers with the recorded
+[baselines](claudit-eval-baselines.md) using the same model, judge and run count.
+The suite ships in the repository rather than in the plugin; #156 decides
+whether it moves.
+
 ## Required scenarios
 
 - Install the retained marketplace package and verify all four skills and six

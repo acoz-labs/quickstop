@@ -1,0 +1,11 @@
+{
+  "name": "changelog-helper",
+  "version": "1.3.0",
+  "description": "Draft Keep a Changelog entries from the commits since the last tag.",
+  "author": {
+    "name": "Example Maintainers",
+    "email": "maintainers@example.invalid"
+  },
+  "license": "MIT",
+  "keywords": ["changelog", "release"]
+}

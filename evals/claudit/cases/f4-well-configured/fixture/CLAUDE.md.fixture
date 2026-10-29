@@ -1,0 +1,31 @@
+# slugsmith
+
+Small, dependency-free ESM library that turns titles into URL slugs. Published
+to npm; `src/` is the whole public surface (`files` in `package.json`).
+
+## Commands
+
+- `npm test` runs the suite (`node --test`). Run one file with
+  `npm test -- test/slug.test.js`.
+- `npm run lint` checks tabs, trailing whitespace and stray `console.log`.
+- Node 20+ is required.
+
+A Stop hook runs `npm test` when you finish a turn and asks you to keep going
+if it fails. Fix the failure; don't disable the hook.
+
+## Conventions
+
+@docs/conventions.md
+
+## Gotchas
+
+- Explicit rules in `src/rules.js` run before accent stripping, so `ö` becomes
+  `oe`, not `o`. Changing that order changes existing slugs.
+- Slugs are part of users' URLs. Any change to existing output is a breaking
+  change and needs a major version bump.
+- Never read or edit `.env`; it holds the npm publish token. Use
+  `.env.example` for the variable names.
+
+## Personal settings
+
+Put machine-specific notes in `CLAUDE.local.md`, which is gitignored.

@@ -1,0 +1,5 @@
+[project]
+name = "tallyho"
+version = "0.4.2"
+description = "Tally votes and report a winner."
+requires-python = ">=3.9"

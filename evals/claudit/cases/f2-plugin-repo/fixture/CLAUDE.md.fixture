@@ -1,0 +1,11 @@
+# changelog-helper
+
+This repo ships the `changelog-helper` Claude Code plugin. The manifest is
+`.claude-plugin/plugin.json`; the only skill is `skills/changelog-entry/`.
+
+- Test: `python3 -m unittest discover -s tests`
+- Bump `version` in `.claude-plugin/plugin.json` for any user-visible change.
+- Keep the skill's script standard-library only.
+- For how the skill, script and marketplace entry fit together, see
+  docs/architecture.md before changing any of them.
+- Changelog style rules are in docs/style.md.

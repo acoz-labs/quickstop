@@ -1,0 +1,241 @@
+# invoicer
+
+This file describes the invoicer codebase for Claude. Read all of it before
+making any change.
+
+## Commands
+
+- Run the tests with `npm test`.
+- Run the linter with `npm run lint`.
+- Node 20 or later is required. The package is ESM only (`"type": "module"`).
+
+## Overview
+
+invoicer is a small library for building invoices. It has five source files
+in `src/`: `money.js`, `tax.js`, `invoice.js`, `render.js` and `index.js`.
+There is one test file, `test/invoice.test.js`, and one lint script,
+`scripts/lint.js`. The package entry point is `src/index.js`.
+
+## Project layout
+
+- `src/` contains the source code.
+- `src/money.js` contains money helpers.
+- `src/tax.js` contains tax helpers.
+- `src/invoice.js` contains invoice helpers.
+- `src/render.js` contains rendering helpers.
+- `src/index.js` re-exports everything.
+- `test/` contains the tests.
+- `test/invoice.test.js` contains all of the tests.
+- `scripts/` contains the lint script.
+- `scripts/lint.js` is the lint script.
+- `package.json` is the package manifest.
+- `README.md` is the readme.
+
+## src/money.js
+
+This file contains the money helpers. It has three exported functions:
+`toCents`, `fromCents` and `formatCents`. There is a comment at the top of the
+file that says all amounts are integer cents.
+
+### toCents(amount)
+
+- Takes one argument, `amount`.
+- Checks that `amount` is a number using `typeof amount !== "number"`.
+- Checks that `amount` is finite using `Number.isFinite(amount)`.
+- If either check fails, throws a `TypeError`.
+- The error message is `not a finite number: ` followed by the amount.
+- Otherwise multiplies `amount` by 100.
+- Rounds the result with `Math.round`.
+- Returns the rounded value.
+- Example: `toCents(9.99)` returns `999`.
+
+### fromCents(cents)
+
+- Takes one argument, `cents`.
+- Divides `cents` by 100.
+- Returns the result.
+- It does not round.
+- It does not validate its input.
+- Example: `fromCents(999)` returns `9.99`.
+
+### formatCents(cents, currency = "EUR")
+
+- Takes two arguments, `cents` and `currency`.
+- `currency` defaults to `"EUR"`.
+- Computes `sign`, which is `"-"` when `cents` is negative and `""` otherwise.
+- Computes `abs`, the absolute value of `cents`, with `Math.abs`.
+- Computes `whole` as `Math.floor(abs / 100)`.
+- Converts `whole` to a string.
+- Inserts commas every three digits with a regular expression.
+- The regular expression is `/\B(?=(\d{3})+(?!\d))/g`.
+- Computes `frac` as `abs % 100`.
+- Pads `frac` to two characters with `padStart(2, "0")`.
+- Returns `sign`, `whole`, a dot, `frac`, a space and `currency`.
+- Example: `formatCents(123456789)` returns `"1,234,567.89 EUR"`.
+- Example: `formatCents(-5, "USD")` returns `"-0.05 USD"`.
+
+## src/tax.js
+
+This file contains the tax helpers. It has one exported constant, `RATES`, and
+two exported functions, `rateFor` and `taxCents`. There is a comment at the top
+of the file that says tax rates are basis points.
+
+### RATES
+
+- `RATES` is an object.
+- It has three keys: `standard`, `reduced` and `zero`.
+- `standard` is `2000`, which is 20%.
+- `reduced` is `700`, which is 7%.
+- `zero` is `0`, which is 0%.
+- The values are basis points. One basis point is 0.01%.
+
+### rateFor(category)
+
+- Takes one argument, `category`.
+- Checks whether `category` is a key of `RATES` using the `in` operator.
+- If it is not, throws a `RangeError`.
+- The error message is `unknown tax category: ` followed by the category.
+- Otherwise returns `RATES[category]`.
+- Example: `rateFor("reduced")` returns `700`.
+
+### taxCents(netCents, category)
+
+- Takes two arguments, `netCents` and `category`.
+- Calls `rateFor(category)` to get the rate.
+- Multiplies `netCents` by the rate.
+- Divides the result by `10000`.
+- Rounds the result with `Math.round`.
+- Returns the rounded value.
+- Example: `taxCents(1000, "standard")` returns `200`.
+- Example: `taxCents(1005, "reduced")` returns `70`.
+- If the category is unknown, the `RangeError` from `rateFor` propagates.
+
+## src/invoice.js
+
+This file contains the invoice helpers. It imports `toCents` from
+`./money.js` and `taxCents` from `./tax.js`. It has four exported functions:
+`lineItem`, `lineNet`, `totals` and `createInvoice`.
+
+### lineItem(description, quantity, unitPrice, category = "standard")
+
+- Takes four arguments.
+- `category` defaults to `"standard"`.
+- If `description` is falsy, throws an `Error` with the message
+  `description is required`.
+- If `quantity` is not an integer, throws a `RangeError`.
+- If `quantity` is zero or negative, throws a `RangeError`.
+- The `RangeError` message is `quantity must be a positive integer`.
+- Converts `unitPrice` to cents with `toCents`.
+- Returns an object with four fields: `description`, `quantity`, `unitCents`
+  and `category`.
+
+### lineNet(item)
+
+- Takes one argument, `item`.
+- Multiplies `item.quantity` by `item.unitCents`.
+- Returns the result.
+- It does not include tax.
+
+### totals(items, discountCents = 0)
+
+- Takes two arguments, `items` and `discountCents`.
+- `discountCents` defaults to `0`.
+- Computes `net` by summing `lineNet` over all items with `reduce`.
+- If `discountCents` is greater than `net`, throws a `RangeError` with the
+  message `discount exceeds net total`.
+- Computes `factor`, which is `0` when `net` is `0`.
+- Otherwise `factor` is `(net - discountCents) / net`.
+- Computes `tax` by summing, over all items, `taxCents` of the line net
+  multiplied by `factor` and rounded with `Math.round`, using the item's
+  category.
+- Computes `discountedNet` as `net - discountCents`.
+- Returns an object with five fields: `net`, `discount`, `discountedNet`,
+  `tax` and `gross`.
+- `gross` is `discountedNet + tax`.
+- There is a comment that says the discount is applied pro rata before tax,
+  per line.
+
+### createInvoice({ number, customer, items, discountCents = 0, currency = "EUR" })
+
+- Takes one argument, an object.
+- The object has five fields: `number`, `customer`, `items`, `discountCents`
+  and `currency`.
+- `discountCents` defaults to `0`.
+- `currency` defaults to `"EUR"`.
+- Checks `number` against the regular expression `/^INV-\d{4}-\d{4}$/`.
+- If it does not match, throws an `Error`.
+- The error message says the invoice number must look like `INV-2024-0001`.
+- Calls `totals(items, discountCents)`.
+- Returns an object with `number`, `customer`, `items`, `currency` and all of
+  the fields returned by `totals`.
+
+## src/render.js
+
+This file contains the rendering helpers. It imports `formatCents` from
+`./money.js` and `lineNet` from `./invoice.js`. It defines a constant `WIDTH`,
+a private function `row` and one exported function, `renderInvoice`.
+
+### WIDTH
+
+- `WIDTH` is `60`.
+- It is the width of a rendered invoice in characters.
+
+### row(left, right)
+
+- Takes two arguments, `left` and `right`.
+- Is not exported.
+- Computes `gap` as `WIDTH - left.length - right.length`.
+- `gap` is at least `1`, using `Math.max`.
+- Returns `left`, then `gap` spaces, then `right`.
+
+### renderInvoice(invoice)
+
+- Takes one argument, `invoice`.
+- Defines a helper `money` that calls `formatCents` with the invoice currency.
+- Starts with three lines: `Invoice ` and the number, `Bill to: ` and the
+  customer, and a line of `WIDTH` dashes.
+- Adds one row per item with the quantity, ` x `, the description and the line
+  net formatted as money.
+- Adds another line of `WIDTH` dashes.
+- Adds a `Net` row.
+- Adds a `Discount` row only if there is a discount. The discount is shown as
+  a negative amount.
+- Adds a `Tax` row.
+- Adds a `Total` row with the gross amount.
+- Joins the lines with newlines.
+- Adds a trailing newline.
+- Returns the string.
+
+## src/index.js
+
+- Re-exports `toCents`, `fromCents` and `formatCents` from `./money.js`.
+- Re-exports `RATES`, `rateFor` and `taxCents` from `./tax.js`.
+- Re-exports `lineItem`, `lineNet`, `totals` and `createInvoice` from
+  `./invoice.js`.
+- Re-exports `renderInvoice` from `./render.js`.
+
+## test/invoice.test.js
+
+- Imports `test` from `node:test`.
+- Imports `assert` from `node:assert/strict`.
+- Imports the functions under test from `../src/index.js`.
+- Has four tests.
+- The first test checks `formatCents`.
+- The second test checks `taxCents`.
+- The third test checks `totals`.
+- The fourth test checks `createInvoice` and `renderInvoice`.
+
+## scripts/lint.js
+
+- Reads every `.js` file in `src/` and `test/`.
+- Reports lines that contain a tab.
+- Reports lines that end with whitespace.
+- Reports lines in `src/` that contain `console.log`.
+- Exits with `1` if it found any problems and `0` otherwise.
+
+## Rules
+
+- Never store money as a float. Convert with `toCents` at the boundary.
+- Do not add runtime dependencies; the library is dependency-free on purpose.
+- When you change a tax rate, add a test with the new rate first.
+- Use the release-notes skill when asked for release notes.

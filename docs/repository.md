@@ -65,6 +65,7 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - `docs/catalog.md`: generated support/version table.
 - `docs/pi-packages.md`: generated individual Pi install commands.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.
+- `evals/`: model-run eval suites outside plugin bytes; `bin/claudit-eval` runs Claudit's.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
 
