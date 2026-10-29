@@ -13,6 +13,17 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / 'plugins/codex/shipshape/scripts/shipshape.py'
+_TEMPDIR = tempfile.tempdir
+
+
+def setUpModule():
+    # handoff write requires a canonical anchor; macOS's default TMPDIR goes through
+    # the /var -> /private/var symlink, so fixtures use the resolved temporary root.
+    tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+
+
+def tearDownModule():
+    tempfile.tempdir = _TEMPDIR
 
 
 class ShipshapeTests(unittest.TestCase):
@@ -1154,3 +1165,16 @@ class GitInspectionTests(ShipshapeTests):
                     helper["contract_check"](root, c, observed)
                 self.assertEqual(before, [(root / ".git" / name).read_bytes() for name in ("config", "index")])
                 (root / ".git/config").write_bytes(original)
+
+
+class SymlinkedTempdirTests(unittest.TestCase):
+    def test_handoff_fixtures_pass_under_symlinked_tmpdir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / 'real'
+            real.mkdir()
+            link = Path(directory) / 'link'
+            link.symlink_to(real, target_is_directory=True)
+            env = {**os.environ, 'TMPDIR': str(link)}
+            actual = subprocess.run([sys.executable, '-m', 'unittest', 'test_shipshape.ShipshapeTests.test_durable_handoff'],
+                                    cwd=Path(__file__).parent, env=env, capture_output=True, text=True)
+            self.assertEqual(actual.returncode, 0, actual.stdout + actual.stderr)
