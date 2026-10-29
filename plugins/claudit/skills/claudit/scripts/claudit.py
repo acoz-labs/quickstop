@@ -206,11 +206,12 @@ def deny_rule(entry):
 
 
 def command_words(command):
-    """Lower-case words of a command: its name, flags (`--fix` of `--fix=src/`) and non-path arguments."""
+    """Lower-case words of a command: its name, flags and their non-path values, and non-path arguments."""
     words = set()
     for i, token in enumerate(command.lower().replace('"', ' ').replace("'", ' ').split()):
         if i and token.startswith('-'):
-            token = token.split('=', 1)[0]
+            flag, _, value = token.partition('=')
+            token = flag if '/' in value else token  # --fix=src/ checks fix; --mode=apply checks apply too
         elif i and '/' in token:
             continue  # a path such as tests/fix_parser.py
         words.update(w for w in re.split(r'[/=._:-]+', token) if w)
@@ -497,6 +498,7 @@ class Scan:
         for rel in self.files:
             parts = rel.split('/')
             if len(parts) == 2 and parts[0] in ('bin', 'script', 'scripts') and parts[1].split('.')[0] in CHECK_NAMES \
+                    and not re.search(r'\s', parts[1]) \
                     and os.access(self.abs(rel), os.X_OK):
                 add(rel, rel)
         makefile = self.text('Makefile') or ''

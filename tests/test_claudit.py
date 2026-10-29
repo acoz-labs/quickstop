@@ -560,14 +560,41 @@ class Coverage(Project):
         self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test tests/fix_parser.py)'])
         self.assertTrue(cl.mutating('bin/fix-all') and cl.mutating('npm run lint:fix'))
         self.assertTrue(cl.mutating('bin/lint --fix=src/') and cl.mutating('make test "deploy"'))
+        for call in ('bin/test --mode=publish', 'bin/sdlc check --mode=apply', 'make test --file=release.mk',
+                     'bin/db migrate'):
+            self.assertTrue(cl.mutating(call), call)
+        self.assertFalse(cl.mutating('bin/test --shard=1/2') or cl.mutating('bin/test --mode=fast'))
+
+    def test_mutating_flag_values_are_not_suggested(self):
+        self.write('bin/sdlc', '#!/bin/sh\n', 0o755)
+        self.write('bin/test', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', 'Always run `bin/sdlc check --mode=apply` before you finish.\n'
+                                'Run `bin/test --mode=publish` or `bin/test --mode=fast`.\n')
+        result = self.scan()
+        rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test --mode=fast)'])
+        hook = self.finding(result, 'stop-hook')['fix']
+        self.assertNotIn('apply', hook)
+        self.assertNotIn('publish', hook)
+
+    def test_script_names_with_spaces_are_not_check_commands(self):
+        self.write('bin/test.a b', '#!/bin/sh\n', 0o755)
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.assertEqual([c['command'] for c in self.scan()['signals']['check_commands']], ['bin/ci'])
 
     def test_suggested_calls_are_plain(self):
         self.write('bin/test', '#!/bin/sh\n', 0o755)
         self.write('CLAUDE.md', '```sh\nbin/test check `touch pwned`\nbin/test a & b\nbin/test "x"\n'
+                                'bin/test $HOME\nbin/test *.py\nbin/test a | b\nbin/test a; b\nbin/test {a,b}\nbin/test (a)\n'
                                 'bin/test --shard=1/2\n```\nAlways run `bin/test` before you finish.\n')
         result = self.scan()
         rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
-        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test --shard=1/2)'])
+        # `a | b` and `a; b` are split into separate calls, so `bin/test a` is a call of its own.
+        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test a)', 'Bash(bin/test --shard=1/2)'])
+        for call in ('bin/test $HOME', 'bin/test *.py', 'bin/test a | b', 'bin/test a; b', 'bin/test {a,b}',
+                     'bin/test (a)', 'bin/test `x`', 'bin/test a & b', 'bin/test "x"', "bin/test 'x'", 'bin/test > out'):
+            self.assertIsNone(cl.PLAIN_CALL.fullmatch(call), call)
+        self.assertTrue(cl.PLAIN_CALL.fullmatch('bin/check-marketplace --base origin/main'))
 
     def test_repeated_documented_call_gives_one_rule(self):
         self.write('bin/sdlc', '#!/bin/sh\n', 0o755)
