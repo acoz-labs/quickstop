@@ -36,6 +36,9 @@ are edited by this change.
 
 ## Claudit findings for the next planning conversation
 
+Claudit 4.0 (#156) replaced the components below; the 3.2.3 assessment is in #154.
+This section records the 3.0.0 onboarding view.
+
 Claudit 3.0.0 contains four skills, six agents, shared cache/decision-memory
 protocols and skill-specific references. These are product behavior, unlike the
 removed repository authoring tools. All files under `plugins/claudit/` are

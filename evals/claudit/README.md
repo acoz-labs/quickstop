@@ -30,8 +30,7 @@ a confidence. Those are Claudit 4.0 targets.
 
 Fixtures store dotfiles as `dot-*` and instruction files as `*.fixture` so this
 repository carries no live Claude Code configuration. `scaffold.sh` maps the
-names back, commits the fixture in each run's empty workspace and, when the
-runner supplies one, seeds Claudit's research cache into the run's home.
+names back, commits the fixture in each run's empty workspace.
 
 ## Arms
 
@@ -50,12 +49,13 @@ configuration and workspace. Always pin the model and pass a cost ceiling:
 
 ```sh
 export PATH="$(mise where python@3.11.15)/bin:$PATH"
-bin/claudit-eval seed --model claude-sonnet-5-5 --max-cost-usd 5 --out "$TMPDIR/claudit-seed/cache"
-bin/claudit-eval run --arm claudit --model claude-sonnet-5-5 --max-cost-usd 12 \
-  --seed-cache "$TMPDIR/claudit-seed/cache"
+bin/claudit-eval run --arm claudit --model claude-sonnet-5-5 --max-cost-usd 12
+bin/claudit-eval run --arm claudit --web-fetch --model claude-sonnet-5-5 --max-cost-usd 12
 bin/claudit-eval run --arm plain --model claude-sonnet-5-5 --max-cost-usd 5
 bin/claudit-eval run --arm doctor --model claude-sonnet-5-5 --max-cost-usd 5
 ```
+
+The 4.0 gate runs the claudit arm twice, with and without `--web-fetch`.
 
 `run` writes `result.json` (full results, including local trace paths) and
 `summary.json` (path-free metrics) under `evals/claudit/results/<timestamp>-<arm>/`
@@ -68,21 +68,18 @@ ceiling stopped the eval and the results are partial.
 
 ## Sandbox limits
 
-Inside `claude plugin eval`, Bash runs in an OS sandbox. It can't reach
-`code.claude.com`, and it can read only the plugin under test and the run's own
-home and workspace, not the host's Python install. So the runner copies the
-running interpreter into the scratch plugin (`.eval-python/`) and puts it first
-in PATH, and Claudit 3.x can't refresh its research cache during a run.
-`seed` builds that cache once, outside the sandbox: it runs `/claudit:refresh all`
-with `claude -p` from a throwaway repository, using `--setting-sources
-project,local`, `--strict-mcp-config` and an isolated `CLAUDIT_CACHE_DIR`. Its
-permission rules allow Bash only for `claude --version` and the helper commands a
-refresh uses (`python3 <plugin>/scripts/runtime.py status|knowledge|fetch|fetch-pages|coverage|cache-put|cache-fail|topic-fail ...`),
-and the Write tool only inside the cache. The helper runs unsandboxed and writes
-only the cache. `run --seed-cache` checks that every domain is
-fresh after relocation, then copies the cache into each run. A plugin that reads
-documentation live (the 4.0 design) will hit the same network limit. #156 has to
-account for it.
+Inside `claude plugin eval`, Bash runs in an OS sandbox. It can't reach the
+network, and it can read only the plugin under test and the run's own home and
+workspace, not the host's Python install. So the runner copies the running
+interpreter into the scratch plugin (`.eval-python/`) and puts it first in PATH.
+
+Claudit 4.0 reads documentation live with WebFetch. `--web-fetch` (off by
+default) allows that on any arm. It adds `WebFetch(domain:code.claude.com)` to
+`--allow-tools` and `WebFetch` to `allowed_tools` in each copied `case.yaml`.
+Both are needed. With them, WebFetch to `code.claude.com` works inside
+`claude plugin eval` 2.1.312. Bash still can't reach the network. Without the
+flag, a run has no way to read documentation. `summary.json` records
+`web_fetch`, and `summarize` refuses to pool results that differ in it.
 
 The judge (default `claude-haiku-5-5`, `--judge-model`) reads only the final
 report. Hit rates are model-judged and vary between runs; compare arms with the

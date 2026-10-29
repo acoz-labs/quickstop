@@ -6,18 +6,17 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
-import types
 import unittest
-import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'bin/claudit-eval'
 SCAFFOLD = ROOT / 'evals/claudit/scaffold.sh'
-PLUGIN = ROOT / 'plugins/claudit'
+TOOLS = '    allowed_tools: [Read, Glob, Grep, Skill, Task, Agent, Bash]'
 CANONICAL = "    prompt: Review this project's Claude Code setup and tell me what to improve."
 GRADER_KEYS = {'type', 'weight', 'pattern', 'flags', 'match', 'target', 'focus', 'arm', 'criteria'}
 
@@ -99,33 +98,6 @@ class ScaffoldTests(Temp):
                 self.assertIn(f"segment '{name}'", result.stderr)
                 self.assertEqual(list(workspace.iterdir()), [])
 
-    def test_relocates_seed_cache_into_home(self):
-        suite = self.base / 'suite'
-        suite.mkdir()
-        shutil.copy2(SCAFFOLD, suite / 'scaffold.sh')
-        old = '/old/seed/root'
-        cache = suite / 'seed-home/.cache/claudit'
-        record = {'claims': [{'text': 't'}], 'sources': [
-            {'id': 'settings', 'content_path': f'{old}/v2/research/b/settings.md'},
-            {'id': 'other', 'content_path': '/elsewhere/kept.md'}]}
-        self.write(cache / 'v2/x.json', json.dumps(record))
-        self.write(cache / 'v2/topics/t.json', json.dumps({'sources': [{'content_path': f'{old}/v2/research/t.md'}]}))
-        self.write(cache / 'v2/research/b/settings.md', '# Settings\n')
-        self.write(cache / '.seed-root', old)
-        fixture = self.base / 'fixture'
-        self.write(fixture / 'README.md')
-        _, home = self.scaffold(fixture, suite / 'scaffold.sh')
-        new = (home / '.cache/claudit').resolve()
-        self.assertFalse((new / '.seed-root').exists())
-        moved = json.loads((new / 'v2/x.json').read_text())
-        self.assertEqual(moved['sources'][0]['content_path'], f'{new}/v2/research/b/settings.md')
-        self.assertEqual(moved['sources'][1]['content_path'], '/elsewhere/kept.md')
-        self.assertEqual(moved['claims'], record['claims'])
-        topic = json.loads((new / 'v2/topics/t.json').read_text())
-        self.assertEqual(topic['sources'][0]['content_path'], f'{new}/v2/research/t.md')
-        self.assertTrue((new / 'v2/research/b/settings.md').is_file())
-
-
 class RunTests(Temp):
     """Dry runs against a synthetic suite in a copied repo layout, so results never land in the checkout."""
 
@@ -143,9 +115,14 @@ class RunTests(Temp):
             (case / 'fixture').mkdir(parents=True)
             (case / 'fixture/README.md').write_text('hi\n')
             (case / 'case.yaml').write_text(f'name: {name}\ncontext:\n    scaffold_script: scaffold.sh\n'
-                                            f'execution:\n{CANONICAL}\n    max_turns: 5\n')
+                                            f'execution:\n{CANONICAL}\n{TOOLS}\n    max_turns: 5\n')
         self.tmp = self.base / 'tmp'
         self.tmp.mkdir()
+        self.plugin = self.base / 'synthetic-plugin'
+        (self.plugin / '.claude-plugin').mkdir(parents=True)
+        (self.plugin / '.claude-plugin/plugin.json').write_text('{"name": "synthetic", "version": "1.0.0"}\n')
+        (self.plugin / 'skills/demo').mkdir(parents=True)
+        (self.plugin / 'skills/demo/SKILL.md').write_text('---\nname: demo\n---\nDemo.\n')
 
     def run_cli(self, *args):
         env = dict(os.environ, TMPDIR=str(self.tmp), CLAUDIT_EVAL_NO_PYTHON_COPY='1')
@@ -165,6 +142,10 @@ class RunTests(Temp):
         return {path.parent.name: [line for line in path.read_text().split('\n') if 'prompt:' in line]
                 for path in (scratch / 'plugin/evals/cases').glob('*/case.yaml')}
 
+    def tools(self, scratch):
+        return {path.parent.name: [line for line in path.read_text().split('\n') if 'allowed_tools:' in line]
+                for path in (scratch / 'plugin/evals/cases').glob('*/case.yaml')}
+
     def assert_common(self, scratch, command):
         for flag in ('--model claude-test', '--max-cost-usd 1.5', '--trust-plugin', '--scaffold', '--no-publish',
                      '--ablation none', '--judge-model claude-haiku-5-5', '--allow-tools Bash', '--threshold 0'):
@@ -175,28 +156,47 @@ class RunTests(Temp):
         self.assertEqual(sorted(p.name for p in (self.repo / 'evals/claudit/results').iterdir()), ['old'])
 
     def test_claudit_arm_copies_plugin_byte_for_byte(self):
-        scratch, command, result = self.dry_run('claudit', '--plugin', str(PLUGIN), '--case', 'alpha')
+        scratch, command, result = self.dry_run('claudit', '--plugin', str(self.plugin), '--case', 'alpha')
         plugin = tree(scratch / 'plugin')
         evals = {k: v for k, v in plugin.items() if k.startswith('evals/')}
-        self.assertEqual({k: v for k, v in plugin.items() if not k.startswith('evals/')}, tree(PLUGIN))
+        self.assertEqual({k: v for k, v in plugin.items() if not k.startswith('evals/')}, tree(self.plugin))
         self.assertTrue(evals)
         self.assertEqual(self.prompts(scratch), {name: ['    prompt: "/claudit:claudit --read-only"']
                                                  for name in ('alpha', 'beta')})
         self.assertIn('--case alpha', command)
-        self.assertIn('no research cache', result.stderr)
+        self.assertNotIn('WebFetch', command)
+        self.assertEqual(self.tools(scratch), {name: [TOOLS] for name in ('alpha', 'beta')})
         self.assert_common(scratch, command)
 
-    def test_claudit_arm_quotes_custom_invoke_and_copies_seed(self):
-        seed = self.base / 'seed'
-        (seed / 'v2').mkdir(parents=True)
-        (seed / 'v2/core-config.json').write_text('{}')
-        scratch, command, _ = self.dry_run('claudit', '--plugin', str(PLUGIN), '--invoke', '/claudit:claudit "x": y',
-                                           '--seed-cache', str(seed))
+    def test_claudit_arm_quotes_custom_invoke(self):
+        scratch, command, _ = self.dry_run('claudit', '--plugin', str(self.plugin), '--invoke', '/claudit:claudit "x": y')
         self.assertEqual(self.prompts(scratch)['alpha'], ['    prompt: "/claudit:claudit \\"x\\": y"'])
-        cache = scratch / 'plugin/evals/seed-home/.cache/claudit'
-        self.assertEqual((cache / '.seed-root').read_text(), str(seed.resolve()))
-        self.assertTrue((cache / 'v2/core-config.json').is_file())
         self.assert_common(scratch, command)
+
+    def test_web_fetch_grants_the_tool_on_every_arm(self):
+        for arm in ('plain', 'doctor', 'claudit'):
+            with self.subTest(arm=arm):
+                extra = ('--plugin', str(self.plugin)) if arm == 'claudit' else ()
+                scratch, command, _ = self.dry_run(arm, '--web-fetch', *extra)
+                words = shlex.split(command)
+                grant = words.index('--allow-tools')
+                self.assertEqual(words[grant + 1:grant + 3], ['Bash', 'WebFetch(domain:code.claude.com)'])
+                self.assertTrue(words[grant + 3].startswith('--'), words[grant + 3])
+                self.assertEqual(self.tools(scratch), {name: [TOOLS[:-1] + ', WebFetch]'] for name in ('alpha', 'beta')})
+                self.assert_common(scratch, command)
+
+    def test_no_web_fetch_by_default(self):
+        scratch, command, _ = self.dry_run('plain')
+        self.assertNotIn('WebFetch', command)
+        self.assertEqual(self.tools(scratch), {name: [TOOLS] for name in ('alpha', 'beta')})
+
+    def test_web_fetch_refuses_a_case_without_the_tools_line(self):
+        (self.repo / 'evals/claudit/cases/beta/case.yaml').write_text(f'execution:\n{CANONICAL}\n')
+        result = self.run_cli('run', '--arm', 'plain', '--model', 'm', '--max-cost-usd', '1', '--dry-run', '--web-fetch')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('beta/case.yaml', result.stderr)
+        self.assertIn('allowed_tools', result.stderr)
+        self.assertEqual(list(self.tmp.iterdir()), [])
 
     def test_no_plugin_arms_use_stub_manifest(self):
         for arm, prompt in (('plain', CANONICAL), ('doctor', '    prompt: /doctor')):
@@ -207,7 +207,6 @@ class RunTests(Temp):
                 self.assertEqual(json.loads((scratch / 'plugin/.claude-plugin/plugin.json').read_text()),
                                  ce.STUB_MANIFEST)
                 self.assertEqual(self.prompts(scratch), {'alpha': [prompt], 'beta': [prompt]})
-                self.assertFalse((scratch / 'plugin/evals/seed-home').exists())
                 self.assert_common(scratch, command)
 
     def test_requires_model_and_positive_cost(self):
@@ -221,7 +220,7 @@ class RunTests(Temp):
 
     def test_plugin_with_own_evals_uses_the_suite(self):
         plugin = self.base / 'own-evals'
-        shutil.copytree(PLUGIN, plugin)
+        shutil.copytree(self.plugin, plugin)
         (plugin / 'evals/cases/bundled').mkdir(parents=True)
         (plugin / 'evals/bundled.txt').write_text('mine\n')
         scratch, command, result = self.dry_run('claudit', '--plugin', str(plugin))
@@ -255,9 +254,9 @@ class RunTests(Temp):
                 self.assertIn('beta/case.yaml', result.stderr)
         self.assertEqual(list(self.tmp.iterdir()), [])
 
-    def test_refuses_seed_or_plugin_on_no_plugin_arm_and_symlinked_plugin(self):
+    def test_refuses_plugin_on_no_plugin_arm_and_symlinked_plugin(self):
         result = self.run_cli('run', '--arm', 'doctor', '--model', 'm', '--max-cost-usd', '1', '--dry-run',
-                              '--seed-cache', str(self.base))
+                              '--plugin', str(self.plugin))
         self.assertEqual(result.returncode, 1)
         plugin = self.base / 'linked'
         (plugin / '.claude-plugin').mkdir(parents=True)
@@ -268,48 +267,6 @@ class RunTests(Temp):
         self.assertEqual(result.returncode, 1)
         self.assertIn('symlinks', result.stderr)
         self.assertEqual(list(self.tmp.iterdir()), [])
-
-
-class SeedValidationTests(Temp):
-    def test_stale_or_empty_seed_is_rejected_after_relocation(self):
-        scratch = self.base / 'scratch'
-        shutil.copytree(PLUGIN, scratch / 'plugin')
-        (scratch / 'plugin/evals').mkdir()
-        shutil.copy2(SCAFFOLD, scratch / 'plugin/evals/scaffold.sh')
-        cache = scratch / 'plugin/evals/seed-home/.cache/claudit'
-        (cache / 'v2').mkdir(parents=True)
-        (cache / '.seed-root').write_text('/old/root')
-        path = f'{Path(sys.executable).parent}{os.pathsep}/usr/bin:/bin'
-        original = ce.claude_version
-        ce.claude_version = lambda: '2.1.312 (Claude Code)'
-        self.addCleanup(setattr, ce, 'claude_version', original)
-        with self.assertRaisesRegex(ce.Failure, 'not fresh'):
-            with unittest.mock.patch('sys.stdout'):
-                ce.validate_seed(scratch, Path(sys.executable), path)
-
-
-class SeedCommandTests(Temp):
-    def test_scopes_bash_to_the_helper_and_writes_to_the_cache(self):
-        plugin, target = self.base / 'plugin', self.base / 'cache'
-        args = types.SimpleNamespace(model='m', max_cost_usd=2.0)
-        command = ce.seed_command(plugin, target, args)
-        runtime = str((plugin / 'scripts/runtime.py').resolve())
-        self.assertNotIn('Bash', command)
-        rules = [item for item in command if item.startswith('Bash(')]
-        self.assertEqual(rules[0], 'Bash(claude --version)')
-        for helper in ('status', 'fetch', 'cache-put', 'cache-fail', 'topic-fail'):
-            self.assertIn(f'Bash(python3 {runtime} {helper}:*)', rules)
-            self.assertIn(f'Bash(python3 "{runtime}" {helper}:*)', rules)
-        for refused in ('decision-save', 'prepare-pr', 'discover', 'verify-pr', 'identity'):
-            self.assertFalse([rule for rule in rules if f' {refused}' in rule], refused)
-        self.assertFalse([rule for rule in rules if rule.endswith(('runtime.py:*)', 'runtime.py":*)'))])
-        self.assertIn(f'Edit(/{target}/**)', command)
-        self.assertNotIn('Write', ' '.join(command[command.index('--allowedTools'):]))
-        prompt = command[command.index('--append-system-prompt') + 1]
-        self.assertIn(f'python3 "{runtime}"', prompt)
-        for tool in ('Read', 'Grep', 'Glob', 'Task', 'Agent'):
-            self.assertIn(tool, command)
-
 
 
 def run_record(cost, judge, seconds, graders, error=None, skipped=()):
@@ -415,8 +372,8 @@ class CountingTests(unittest.TestCase):
         self.assertEqual((row['errors'], row['skipped_paid_graders']), (1, 1))
 
 
-def identified(model, plugin_version='4.0.0'):
-    return dict(RESULT, suite={'dir': '/abs', 'modelOverride': model, 'judgeModel': 'claude-haiku-5-5',
+def identified(model, plugin_version='4.0.0', web_fetch=None):
+    return dict(RESULT, webFetch=web_fetch, suite={'dir': '/abs', 'modelOverride': model, 'judgeModel': 'claude-haiku-5-5',
                                'plugins': [{'name': 'claudit', 'version': plugin_version, 'path': '/abs/claudit'}]})
 
 
@@ -438,6 +395,21 @@ class PoolingTests(unittest.TestCase):
                     ce.merge_results([identified('sonnet'), other])
         with self.assertRaisesRegex(ce.Failure, 'model'):
             ce.summarize(identified('sonnet'), model='opus')
+
+    def test_summary_records_web_fetch_and_refuses_mixing(self):
+        on, off = identified('sonnet', web_fetch=True), identified('sonnet', web_fetch=False)
+        summary = ce.summarize(ce.merge_results([on, on]), 'claudit')
+        self.assertIs(summary['web_fetch'], True)
+        self.assertIn('web fetch: on', ce.markdown(summary))
+        self.assertIn('web fetch: off', ce.markdown(ce.summarize(off)))
+        self.assertIn('web fetch: -', ce.markdown(ce.summarize(identified('sonnet'))))
+        self.assertIs(ce.summarize(identified('sonnet'), web_fetch=True)['web_fetch'], True)
+        with self.assertRaisesRegex(ce.Failure, 'web_fetch'):
+            ce.merge_results([on, off])
+        with self.assertRaisesRegex(ce.Failure, 'web_fetch'):
+            ce.merge_results([on, identified('sonnet')])
+        with self.assertRaisesRegex(ce.Failure, 'web_fetch'):
+            ce.summarize(off, web_fetch=True)
 
 
 def frontmatter(path):
