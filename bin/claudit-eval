@@ -9,6 +9,7 @@ import argparse
 import datetime as dt
 import fnmatch
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -25,7 +26,9 @@ STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
                  'description': 'Empty plugin for the no-plugin eval arms.'}
 ARMS = ('plain', 'doctor', 'claudit')
 DEFAULT_JUDGE = 'claude-haiku-5-5'
-SEED_TOOLS = ('Bash', 'Read', 'Grep', 'Glob', 'Task', 'Agent')
+SEED_TOOLS = ('Bash(claude --version)', 'Read', 'Grep', 'Glob', 'Task', 'Agent')
+SECRET_ENV = ('*TOKEN*', '*SECRET*', '*PASSWORD*', '*_KEY', 'GH_*', 'GITHUB_*')
+STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent')
 # Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
 NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
 
@@ -36,7 +39,7 @@ class Failure(Exception):
 
 def positive_cost(value):
     cost = float(value)
-    if not cost > 0:
+    if not (math.isfinite(cost) and cost > 0):
         raise argparse.ArgumentTypeError('cost ceiling must be greater than 0')
     return cost
 
@@ -183,6 +186,9 @@ def run(args):
         plugin = scratch / 'plugin'
         if args.arm == 'claudit':
             copy_plugin(args.plugin or DEFAULT_PLUGIN, plugin)
+            if (plugin / 'evals').exists():
+                shutil.rmtree(plugin / 'evals')
+                print("Notice: the plugin's bundled evals/ were replaced by the Claudit suite and not used.")
         else:
             write_stub(plugin)
         # Sandboxed Bash can read the plugin under test, not its siblings, so the interpreter goes inside it.
@@ -221,6 +227,7 @@ def run(args):
             print(f'Summary: {out / "summary.json"}')
         else:
             print(f'No result.json was written to {out}', file=sys.stderr)
+            code = code or 1
         if code == 2:
             print('Cost ceiling reached (--max-cost-usd): the eval stopped early and its results are PARTIAL.',
                   file=sys.stderr)
@@ -236,6 +243,25 @@ def git(cwd, *args):
     env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                GIT_AUTHOR_DATE='2026-01-01T00:00:00Z', GIT_COMMITTER_DATE='2026-01-01T00:00:00Z')
     subprocess.run(['git', *args], cwd=cwd, env=env, check=True, stdin=subprocess.DEVNULL, capture_output=True)
+
+
+def seed_command(plugin, target, args):
+    runtime = str((Path(plugin) / 'scripts/runtime.py').resolve())
+    prompt = (f'Bash is limited to `claude --version` and `python3 "{runtime}" ...` helper calls, '
+              'so use Read, Glob and Grep to inspect files.')
+    return ['claude', '-p', '/claudit:refresh all', '--plugin-dir', str(plugin),
+            '--setting-sources', 'project,local', '--strict-mcp-config', '--model', args.model,
+            '--max-budget-usd', str(args.max_cost_usd), '--output-format', 'json',
+            '--append-system-prompt', prompt, '--permission-mode', 'dontAsk', '--allowedTools', *SEED_TOOLS,
+            f'Bash(python3 {runtime}:*)', f'Bash(python3 "{runtime}":*)',
+            # Research outputs are written with the Write tool; allow it only inside the cache.
+            f'Edit(/{target}/**)']
+
+
+def seed_env(target, path):
+    env = {name: value for name, value in os.environ.items()
+           if not any(fnmatch.fnmatchcase(name.upper(), pattern) for pattern in SECRET_ENV)}
+    return dict(env, CLAUDIT_CACHE_DIR=str(target), PATH=path)
 
 
 def seed(args):
@@ -255,23 +281,19 @@ def seed(args):
         git(repo, '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'Seed workspace')
         target.mkdir(parents=True, exist_ok=True)
         path = f'{Path(sys.executable).parent}{os.pathsep}{os.environ.get("PATH", "")}'
-        command = ['claude', '-p', '/claudit:refresh all', '--plugin-dir', str(plugin),
-                   '--setting-sources', 'project,local', '--strict-mcp-config', '--model', args.model,
-                   '--max-budget-usd', str(args.max_cost_usd), '--output-format', 'json',
-                   '--permission-mode', 'dontAsk', '--allowedTools', *SEED_TOOLS,
-                   # Research outputs are written with the Write tool; allow it only inside the cache.
-                   f'Edit(/{target}/**)']
+        command = seed_command(plugin, target, args)
         print(f'Command: {shlex.join(command)}')
         result = subprocess.run(command, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                env=dict(os.environ, CLAUDIT_CACHE_DIR=str(target), PATH=path))
+                                env=seed_env(target, path))
         try:
             output = json.loads(result.stdout)
         except ValueError as exc:
             raise Failure(f'claude -p did not return JSON (exit {result.returncode}): {result.stderr.strip()}') from exc
         receipt = {'cost_usd': output.get('total_cost_usd'), 'duration_ms': output.get('duration_ms'),
                    'model': args.model, 'claude_version': version, 'is_error': output.get('is_error')}
-        (target.parent / 'seed-run.json').write_text(json.dumps(receipt, indent=2) + '\n')
         print(json.dumps(receipt, indent=2))
+        if args.receipt:
+            Path(args.receipt).write_text(json.dumps(receipt, indent=2) + '\n')
         if output.get('result'):
             print(output['result'])
         states = cache_status(sys.executable, plugin / 'scripts/runtime.py', target, version, path)
@@ -292,10 +314,28 @@ def mean(total, count):
     return round(total / count, 6) if count else 0
 
 
+def defined_graders(case, runs):
+    names = [grader.get('name') for grader in case.get('graders') or [] if isinstance(grader, dict)]
+    names = [str(name) for name in names if name]
+    if not names:
+        names = sorted({str(grader.get('name', '')) for item in runs for grader in item.get('graders') or []})
+    return names
+
+
+def false_defects(failed):
+    # Targeted failures are distinct defects; a lone catch-all failure is one more. A lower bound.
+    targeted = len(failed - {'no-invented-defects'})
+    return targeted or int('no-invented-defects' in failed)
+
+
 def case_summary(case):
     runs = case.get('arms', {}).get('with', []) or []
-    row = {'case': case.get('name'), 'runs': len(runs), 'findings_hit': 0, 'findings_total': 0,
-           'structure_passed': 0, 'structure_total': 0, 'false_defects': 0,
+    names = defined_graders(case, runs)
+    findings = {name for name in names if name.startswith('finding-')}
+    structure = {name for name in names if name.startswith('structure-')}
+    row = {'case': case.get('name'), 'runs': len(runs), 'findings_hit': 0,
+           'findings_total': len(findings) * len(runs), 'structure_passed': 0,
+           'structure_total': len(structure) * len(runs), 'false_defects': 0, 'false_defect_runs': 0,
            'agent_cost_usd': 0.0, 'judge_cost_usd': 0.0, 'wall_seconds': 0.0, 'errors': 0, 'skipped_paid_graders': 0}
     for item in runs:
         row['agent_cost_usd'] += number(item.get('costUsd'))
@@ -304,19 +344,16 @@ def case_summary(case):
         row['errors'] += bool(item.get('error'))
         skipped = item.get('skippedPaidGraders')
         row['skipped_paid_graders'] += len(skipped) if isinstance(skipped, list) else number(skipped)
-        for grader in item.get('graders', []) or []:
-            # Unscored graders (e.g. skipped paid judges) are reported via skipped_paid_graders, not as misses.
-            if grader.get('scored') is False:
-                continue
-            name, passed = str(grader.get('name', '')), grader.get('passed') is True
-            if name.startswith('finding-'):
-                row['findings_total'] += 1
-                row['findings_hit'] += passed
-            elif name.startswith('structure-'):
-                row['structure_total'] += 1
-                row['structure_passed'] += passed
-            elif name.startswith('no-invented-'):
-                row['false_defects'] += not passed
+        # Unscored graders stay in the denominator as misses; they are also counted in skipped_paid_graders.
+        passed = {str(grader.get('name', '')) for grader in item.get('graders') or []
+                  if grader.get('scored') is not False and grader.get('passed') is True}
+        failed = {str(grader.get('name', '')) for grader in item.get('graders') or []
+                  if grader.get('scored') is not False and grader.get('passed') is not True
+                  and str(grader.get('name', '')).startswith('no-invented-')}
+        row['findings_hit'] += len(findings & passed)
+        row['structure_passed'] += len(structure & passed)
+        row['false_defects'] += false_defects(failed)
+        row['false_defect_runs'] += bool(failed)
     return finish(row)
 
 
@@ -328,18 +365,30 @@ def finish(row):
     return row
 
 
-def summarize(result, arm=None, model=None, judge_model=None):
+def identity(result):
     suite = result.get('suite') if isinstance(result.get('suite'), dict) else {}
+    plugins = suite.get('plugins') if isinstance(suite.get('plugins'), list) else []
+    return {'claude_version': result.get('claudeVersion'),
+            'model': suite.get('modelOverride') or result.get('model') or suite.get('model'),
+            'judge_model': suite.get('judgeModel') or result.get('judgeModel'),
+            'plugins': sorted(f"{item.get('name')}@{item.get('version')}" for item in plugins
+                              if isinstance(item, dict))}
+
+
+def summarize(result, arm=None, model=None, judge_model=None):
+    ident = identity(result)
+    for key, given in (('model', model), ('judge_model', judge_model)):
+        if given and ident[key] and given != ident[key]:
+            raise Failure(f'{key} {given!r} does not match the result ({ident[key]!r})')
+        ident[key] = ident[key] or given
     rows = [case_summary(case) for case in result.get('cases', []) or []]
     totals = {'case': 'TOTAL'}
     for key in ('runs', 'findings_hit', 'findings_total', 'structure_passed', 'structure_total', 'false_defects',
-                'agent_cost_usd', 'judge_cost_usd', 'wall_seconds', 'errors', 'skipped_paid_graders'):
+                'false_defect_runs', 'agent_cost_usd', 'judge_cost_usd', 'wall_seconds', 'errors',
+                'skipped_paid_graders'):
         totals[key] = sum(row[key] for row in rows)
     totals = finish(totals)
-    return {'arm': arm,
-            'claude_version': result.get('claudeVersion'),
-            'model': model or result.get('model') or suite.get('model'),
-            'judge_model': judge_model or result.get('judgeModel') or suite.get('judgeModel'),
+    return {'arm': arm, **ident,
             'total_cost_usd': result.get('costUsd'),
             'agent_plus_judge_cost_usd': round(totals['agent_cost_usd'] + totals['judge_cost_usd'], 6),
             'duration_seconds': result.get('durationSeconds'),
@@ -361,16 +410,21 @@ def merge_results(results):
     """Combine passes of one arm: runs of a case with the same name are pooled."""
     if len(results) == 1:
         return results[0]
-    versions = sorted({str(result.get('claudeVersion')) for result in results})
-    merged = {'claudeVersion': ', '.join(versions),
-              'costUsd': round(sum(number(result.get('costUsd')) for result in results), 6),
-              'durationSeconds': sum(number(result.get('durationSeconds')) for result in results),
-              'partial': any(result.get('partial') for result in results), 'cases': []}
+    idents = [identity(result) for result in results]
+    for key in ('model', 'judge_model', 'claude_version', 'plugins'):
+        values = {json.dumps(ident[key]) for ident in idents}
+        if len(values) > 1:
+            raise Failure(f'cannot pool results with different {key}: {", ".join(sorted(values))}')
+    merged = {key: results[0].get(key) for key in ('claudeVersion', 'model', 'judgeModel', 'suite')}
+    merged.update(costUsd=round(sum(number(result.get('costUsd')) for result in results), 6),
+                  durationSeconds=sum(number(result.get('durationSeconds')) for result in results),
+                  partial=any(result.get('partial') for result in results), cases=[])
     cases = {}
     for result in results:
         for case in result.get('cases', []) or []:
             if case.get('name') not in cases:
-                cases[case.get('name')] = {'name': case.get('name'), 'arms': {'with': []}}
+                cases[case.get('name')] = {'name': case.get('name'), 'graders': case.get('graders') or [],
+                                           'arms': {'with': []}}
                 merged['cases'].append(cases[case.get('name')])
             cases[case.get('name')]['arms']['with'] += case.get('arms', {}).get('with', []) or []
     return merged
@@ -384,16 +438,17 @@ def markdown(summary):
     def cost(value):
         return f'{value:.4f}'
 
-    header = ('| Case | Runs | Findings | Hit rate | Structure | False defects | Agent $ (mean) | Judge $ (mean) '
+    header = ('| Case | Runs | Findings | Hit rate | Structure | False defects (runs) | Agent $ (mean) '
+              '| Judge $ (mean) '
               '| Wall s (mean) | Errors | Skipped paid |')
     lines = [f"Arm: {summary['arm'] or '-'} | model: {summary['model'] or '-'} | judge: {summary['judge_model'] or '-'} "
-             f"| claude {summary['claude_version'] or '-'} | total ${summary['total_cost_usd']} "
+             f"| plugins: {', '.join(summary['plugins']) or '-'} | claude {summary['claude_version'] or '-'} | total ${summary['total_cost_usd']} "
              f"(agent+judge ${summary['agent_plus_judge_cost_usd']}) | partial: {summary['partial']}",
              '', header, '|' + '---|' * (header.count('|') - 1)]
     for row in [*summary['cases'], summary['totals']]:
         rate = '-' if row['hit_rate'] is None else f"{row['hit_rate']:.0%}"
         lines.append(f"| {row['case']} | {row['runs']} | {row['findings_hit']}/{row['findings_total']} | {rate} "
-                     f"| {row['structure_passed']}/{row['structure_total']} | {row['false_defects']} "
+                     f"| {row['structure_passed']}/{row['structure_total']} | {row['false_defects']} ({row['false_defect_runs']}) "
                      f"| {cost(row['agent_cost_usd'])} ({cost(row['agent_cost_usd_mean'])}) "
                      f"| {cost(row['judge_cost_usd'])} ({cost(row['judge_cost_usd_mean'])}) "
                      f"| {row['wall_seconds']:.1f} ({row['wall_seconds_mean']:.1f}) | {row['errors']} "
@@ -423,6 +478,7 @@ def main():
     p.add_argument('--max-cost-usd', type=positive_cost, required=True)
     p.add_argument('--out', required=True)
     p.add_argument('--plugin')
+    p.add_argument('--receipt', help='also write the run receipt JSON to this file')
     p = sub.add_parser('summarize', help='summarize claude plugin eval --json results (several pool one arm)')
     p.add_argument('result', nargs='+')
     p.add_argument('--arm')

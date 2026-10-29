@@ -12,16 +12,23 @@ for issue #155 on 2026-10-29. Claudit 4.0 (#156) is gated against these numbers.
   pooled with `bin/claudit-eval summarize`.
 - Claudit 3.2.3 (`plugins/claudit` at this commit, unchanged) invoked as
   `/claudit:claudit --read-only`, with a research cache seeded once by
-  `bin/claudit-eval seed` (all three domains fresh; $1.33, 223 s). The sandbox
+  `bin/claudit-eval seed` (all three domains fresh; $1.33, 223 s). That seed ran
+  with Bash unrestricted. The scoped-permission seed now in the runner was
+  verified afterwards (all domains fresh; $0.99, 186 s). The sandbox
   blocks Claudit's own fetches, so every run used that seeded cache.
 - Costs are at list prices as reported by Claude Code. Agent cost excludes the
   judge; the judge column is separate.
+- F4 false defects per run: the number of failed targeted `no-invented-*` graders,
+  or 1 when only the catch-all `no-invented-defects` failed. That's a lower bound
+  on distinct invented defects. Hit-rate denominators are planted findings × runs.
+- The path-free pooled summaries are in [claudit-eval-baselines/](claudit-eval-baselines/).
+  Regenerate them with `bin/claudit-eval summarize <pass-1 result.json> <pass-2 result.json>`.
 
 ## Results (3 runs per case)
 
 | Arm | Planted findings hit | F4 false defects | Structure graders | Agent $ (per run) | Judge $ | Wall s (per run) |
 |---|---|---|---|---|---|---|
-| Plain prompt, no plugin | 25/42 (60%) | 4 | 0/60 | 1.19 (0.079) | 0.040 | 704 (46.9) |
+| Plain prompt, no plugin | 25/42 (60%) | 2 (in 2 runs) | 0/60 | 1.19 (0.079) | 0.040 | 704 (46.9) |
 | `/doctor`, no plugin | 10/42 (24%) | 0 | 0/60 | 2.42 (0.162) | 0.040 | 767 (51.1) |
 | Claudit 3.2.3 | 17/42 (40%) | 0 | 0/60 | 7.19 (0.480) | 0.057 | 1786 (119.1) |
 
@@ -37,7 +44,7 @@ Claudit 4.0 targets.
 | `f1-agent-run` | 7/9 | 0/9 | 0/9 |
 | `f2-plugin-repo` | 4/9 | 3/9 | 3/9 |
 | `f3-misconfigured` | 9/18 | 7/18 | 13/18 |
-| `f4-well-configured` (false defects) | 4 | 0 | 0 |
+| `f4-well-configured` (false defects) | 2 | 0 | 0 |
 | `f5-bare` | 5/6 | 0/6 | 1/6 |
 
 ### Per grader (passes out of 3)
@@ -64,8 +71,8 @@ Claudit 4.0 targets.
 
 ## Reading
 
-Claudit 3.2.3 is the most precise arm on defects (F3, no false defects), but it
-finds almost none of the Coverage holes (F1, F5, F2's missing plugin checks): it
+Claudit 3.2.3 finds the most planted defects on F3 and invents none on F4
+(as does `/doctor`), but it finds almost none of the Coverage holes (F1, F5, F2's missing plugin checks): it
 audits what is configured, not what the project needs. The plain prompt finds
 more holes but invents defects on the well-configured fixture. Nothing finds the
 `Write(...)` rule or a missing `claude plugin eval`. #156 sets Claudit 4.0's gate
@@ -76,8 +83,8 @@ Compare only runs with the same model, judge and run count.
 
 ## Spend
 
-Total for #155 at list prices: about $14.7. The pooled arms above cost $10.94
+Total for #155 at list prices: about $15.7. The pooled arms above cost $10.94
 (agent plus judge: plain $1.23, `/doctor` $2.46, Claudit $7.25). The successful
-seed cost $1.33. Two failed seed attempts (permission denials) cost $1.25. F1
+seed cost $1.33, and the scoped-permission seed check $0.99. Two failed seed attempts (permission denials) cost $1.25. F1
 pipeline debugging cost $0.86, sandbox probes $0.03, and one stopped `/doctor` run
 whose results aren't used cost an estimated $0.3.

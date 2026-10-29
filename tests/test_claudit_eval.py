@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 
@@ -84,6 +85,19 @@ class ScaffoldTests(Temp):
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(list(workspace.iterdir()), [])
+
+    def test_rejects_segments_that_map_to_dot_paths_before_copying(self):
+        for name in ('dot-', 'dot-.', 'dot-.fixture'):
+            with self.subTest(name=name):
+                fixture, workspace = self.base / name / 'fixture', self.base / name / 'workspace'
+                self.write(fixture / 'README.md')
+                self.write(fixture / 'sub' / name / 'x.txt')
+                workspace.mkdir()
+                result = subprocess.run(['bash', str(SCAFFOLD), str(fixture)], cwd=workspace,
+                                        env=minimal_env(self.base), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 65)
+                self.assertIn(f"segment '{name}'", result.stderr)
+                self.assertEqual(list(workspace.iterdir()), [])
 
     def test_relocates_seed_cache_into_home(self):
         suite = self.base / 'suite'
@@ -198,11 +212,38 @@ class RunTests(Temp):
 
     def test_requires_model_and_positive_cost(self):
         for args in (('--max-cost-usd', '1'), ('--model', 'm'), ('--model', 'm', '--max-cost-usd', '0'),
-                     ('--model', 'm', '--max-cost-usd', '-1')):
+                     ('--model', 'm', '--max-cost-usd', '-1'), ('--model', 'm', '--max-cost-usd', 'inf'),
+                     ('--model', 'm', '--max-cost-usd', 'nan')):
             with self.subTest(args=args):
                 result = self.run_cli('run', '--arm', 'plain', '--dry-run', *args)
                 self.assertEqual(result.returncode, 2)
         self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_plugin_with_own_evals_uses_the_suite(self):
+        plugin = self.base / 'own-evals'
+        shutil.copytree(PLUGIN, plugin)
+        (plugin / 'evals/cases/bundled').mkdir(parents=True)
+        (plugin / 'evals/bundled.txt').write_text('mine\n')
+        scratch, command, result = self.dry_run('claudit', '--plugin', str(plugin))
+        self.assertIn('bundled evals/ were replaced', result.stdout)
+        self.assertFalse((scratch / 'plugin/evals/bundled.txt').exists())
+        self.assertEqual(sorted(self.prompts(scratch)), ['alpha', 'beta'])
+        self.assert_common(scratch, command)
+
+    def test_run_fails_when_no_result_is_written(self):
+        fake = self.base / 'fake-bin'
+        fake.mkdir()
+        for code, expected in (('0', 1), ('3', 3)):
+            with self.subTest(code=code):
+                (fake / 'claude').write_text(f'#!/bin/sh\nexit {code}\n')
+                (fake / 'claude').chmod(0o755)
+                env = dict(os.environ, TMPDIR=str(self.tmp), CLAUDIT_EVAL_NO_PYTHON_COPY='1',
+                           PATH=f'{fake}{os.pathsep}{os.environ.get("PATH", "")}')
+                result = subprocess.run([sys.executable, str(self.repo / 'bin/claudit-eval'), 'run', '--arm', 'plain',
+                                         '--model', 'm', '--max-cost-usd', '1', '--output-dir', str(self.base / 'out')],
+                                        env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertIn('No result.json', result.stderr)
 
     def test_refuses_duplicate_or_missing_prompt_line(self):
         case = self.repo / 'evals/claudit/cases/beta/case.yaml'
@@ -247,6 +288,33 @@ class SeedValidationTests(Temp):
                 ce.validate_seed(scratch, Path(sys.executable), path)
 
 
+class SeedCommandTests(Temp):
+    def test_scopes_bash_to_the_helper_and_writes_to_the_cache(self):
+        plugin, target = self.base / 'plugin', self.base / 'cache'
+        args = types.SimpleNamespace(model='m', max_cost_usd=2.0)
+        command = ce.seed_command(plugin, target, args)
+        runtime = str((plugin / 'scripts/runtime.py').resolve())
+        self.assertNotIn('Bash', command)
+        self.assertEqual([item for item in command if item.startswith('Bash(')],
+                         ['Bash(claude --version)', f'Bash(python3 {runtime}:*)', f'Bash(python3 "{runtime}":*)'])
+        self.assertIn(f'Edit(/{target}/**)', command)
+        self.assertNotIn('Write', ' '.join(command[command.index('--allowedTools'):]))
+        prompt = command[command.index('--append-system-prompt') + 1]
+        self.assertIn(f'python3 "{runtime}"', prompt)
+        for tool in ('Read', 'Grep', 'Glob', 'Task', 'Agent'):
+            self.assertIn(tool, command)
+
+    def test_env_drops_secrets_and_keeps_login_basics(self):
+        fake = {'FOO_TOKEN': 'x', 'MY_SECRET_THING': 'x', 'DB_PASSWORD': 'x', 'SOME_API_KEY': 'x', 'GH_HOST': 'x',
+                'GITHUB_ACTIONS': 'x', 'HOME': str(self.base), 'LANG': 'C', 'KEYBOARD': 'ok'}
+        with unittest.mock.patch.dict(os.environ, fake):
+            env = ce.seed_env(self.base / 'cache', '/p')
+        self.assertFalse({'FOO_TOKEN', 'MY_SECRET_THING', 'DB_PASSWORD', 'SOME_API_KEY', 'GH_HOST',
+                          'GITHUB_ACTIONS'} & set(env))
+        self.assertEqual((env['HOME'], env['LANG'], env['KEYBOARD'], env['PATH'], env['CLAUDIT_CACHE_DIR']),
+                         (str(self.base), 'C', 'ok', '/p', str(self.base / 'cache')))
+
+
 def run_record(cost, judge, seconds, graders, error=None, skipped=()):
     return {'score': 0.5, 'passed': True, 'turns': 3, 'costUsd': cost, 'judgeCostUsd': judge,
             'durationSeconds': seconds, 'startedAt': '2026-10-29T00:00:00Z', 'error': error,
@@ -285,17 +353,17 @@ class SummaryTests(Temp):
         self.assertAlmostEqual(f1['agent_cost_usd_mean'], 0.5)
         self.assertAlmostEqual(f1['judge_cost_usd'], 0.2)
         self.assertAlmostEqual(f1['wall_seconds_mean'], 40.0)
-        self.assertEqual((f2['findings_total'], f2['hit_rate'], f2['structure_passed']), (0, None, 1))
+        self.assertEqual((f2['findings_total'], f2['hit_rate'], f2['structure_passed']), (1, 0.0, 1))
         totals = summary['totals']
-        self.assertEqual((totals['runs'], totals['findings_hit'], totals['findings_total'], totals['false_defects']),
-                         (3, 3, 4, 1))
+        self.assertEqual((totals['runs'], totals['findings_hit'], totals['findings_total'], totals['false_defects'],
+                          totals['false_defect_runs']), (3, 3, 5, 1, 1))
         self.assertAlmostEqual(summary['agent_plus_judge_cost_usd'], 1.3)
         self.assertEqual((summary['total_cost_usd'], summary['claude_version'], summary['model'],
                           summary['judge_model'], summary['partial'], summary['duration_seconds']),
                          (1.25, '2.1.312', 'm', 'j', False, 100.0))
         self.assertNotIn('/', json.dumps(summary))
         table = ce.markdown(summary)
-        self.assertIn('| f1 | 2 | 3/4 | 75% | 1/2 | 1 |', table)
+        self.assertIn('| f1 | 2 | 3/4 | 75% | 1/2 | 1 (1) |', table)
         self.assertIn('| TOTAL | 3 |', table)
 
     def test_cli_reads_result_file(self):
@@ -314,9 +382,62 @@ class SummaryTests(Temp):
         summary = ce.summarize(ce.merge_results([RESULT, RESULT]))
         self.assertEqual([row['case'] for row in summary['cases']], [row['case'] for row in ce.summarize(RESULT)['cases']])
         self.assertEqual((summary['totals']['runs'], summary['totals']['findings_hit'], summary['totals']['findings_total']),
-                         (6, 6, 8))
+                         (6, 6, 10))
         self.assertEqual((summary['total_cost_usd'], summary['duration_seconds'], summary['claude_version']),
                          (2.5, 200.0, '2.1.312'))
+
+
+def case_with(graders, *runs):
+    return {'name': 'c', 'graders': [{'name': name} for name in graders], 'arms': {'with': list(runs)}}
+
+
+def passes(**graders):
+    return run_record(0.1, 0.0, 1, [(name.replace('_', '-'), passed, True) for name, passed in graders.items()])
+
+
+class CountingTests(unittest.TestCase):
+    def test_false_defects_do_not_double_count_the_catch_all(self):
+        both = passes(no_invented_defects=False, no_invented_import=False, no_invented_stop_matcher=True)
+        alone = passes(no_invented_defects=False, no_invented_import=True)
+        two = passes(no_invented_defects=False, no_invented_import=False, no_invented_stop_matcher=False)
+        clean = passes(no_invented_defects=True, no_invented_import=True)
+        for record, expected in ((both, 1), (alone, 1), (two, 2), (clean, 0)):
+            with self.subTest(expected=expected):
+                row = ce.case_summary(case_with([], record))
+                self.assertEqual((row['false_defects'], row['false_defect_runs']), (expected, int(expected > 0)))
+        row = ce.case_summary(case_with([], both, alone, two, clean))
+        self.assertEqual((row['false_defects'], row['false_defect_runs']), (4, 3))
+
+    def test_errored_and_unscored_runs_stay_in_the_denominator(self):
+        good = run_record(0.1, 0.0, 1, [('finding-a', True, True), ('finding-b', True, True),
+                                        ('finding-c', True, False), ('structure-x', True, True)], skipped=('finding-c',))
+        errored = run_record(0.0, 0.0, 1, [], error='crashed')
+        row = ce.case_summary(case_with(['finding-a', 'finding-b', 'finding-c', 'structure-x'], good, errored))
+        self.assertEqual((row['findings_hit'], row['findings_total'], row['hit_rate']), (2, 6, 0.3333))
+        self.assertEqual((row['structure_passed'], row['structure_total']), (1, 2))
+        self.assertEqual((row['errors'], row['skipped_paid_graders']), (1, 1))
+
+
+def identified(model, plugin_version='4.0.0'):
+    return dict(RESULT, suite={'dir': '/abs', 'modelOverride': model, 'judgeModel': 'claude-haiku-5-5',
+                               'plugins': [{'name': 'claudit', 'version': plugin_version, 'path': '/abs/claudit'}]})
+
+
+class PoolingTests(unittest.TestCase):
+    def test_pooled_summary_carries_model_judge_and_plugin(self):
+        summary = ce.summarize(ce.merge_results([identified('sonnet'), identified('sonnet')]), 'claudit', 'sonnet')
+        self.assertEqual((summary['model'], summary['judge_model'], summary['plugins'], summary['claude_version']),
+                         ('sonnet', 'claude-haiku-5-5', ['claudit@4.0.0'], '2.1.312'))
+        self.assertNotIn('/', json.dumps(summary))
+        self.assertIn('plugins: claudit@4.0.0', ce.markdown(summary))
+
+    def test_refuses_to_pool_or_label_mismatched_results(self):
+        for other in (identified('opus'), identified('sonnet', '4.0.1'), dict(identified('sonnet'), claudeVersion='9')):
+            with self.subTest(other=other['suite'], version=other['claudeVersion']):
+                with self.assertRaises(ce.Failure):
+                    ce.merge_results([identified('sonnet'), other])
+        with self.assertRaisesRegex(ce.Failure, 'model'):
+            ce.summarize(identified('sonnet'), model='opus')
 
 
 def frontmatter(path):
@@ -347,7 +468,9 @@ class SuiteStructureTests(unittest.TestCase):
                     self.assertNotIn(path.name, ('CLAUDE.md', 'AGENTS.md'), f'live instruction file: {path}')
                     self.assertFalse(path.is_symlink(), path)
                 graders = sorted((case / 'graders').glob('*.md'))
-                self.assertTrue(graders)
+                self.assertLessEqual(set(ce.STRUCTURE), {grader.stem for grader in graders})
+                if case.name.startswith('f4-'):
+                    self.assertIn('no-invented-defects', {grader.stem for grader in graders})
                 for grader in graders:
                     self.assertTrue(grader.stem.startswith(('finding-', 'structure-', 'no-invented-')), grader.name)
                     keys = frontmatter(grader)

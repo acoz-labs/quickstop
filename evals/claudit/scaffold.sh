@@ -25,10 +25,16 @@ map_segment() {
 }
 
 map_path() {
-  local part out= parts
+  local part mapped out= parts
   IFS=/ read -r -a parts <<< "$1"
   for part in "${parts[@]}"; do
-    out="${out:+$out/}$(map_segment "$part")"
+    mapped=$(map_segment "$part")
+    case "$mapped" in
+      '' | . | ..)
+        echo "scaffold: fixture path '$1' maps segment '$part' to '$mapped'" >&2
+        return 1 ;;
+    esac
+    out="${out:+$out/}$mapped"
   done
   printf '%s' "$out"
 }
@@ -38,16 +44,22 @@ if [ -n "$(find "$fixture" -type l -print -quit)" ]; then
   exit 65
 fi
 
+# Map and validate every path before copying anything.
+sources=() targets=()
 while IFS= read -r -d '' path; do
-  relative=${path#"$fixture"/}
-  target="$workspace/$(map_path "$relative")"
-  if [ -d "$path" ]; then
-    mkdir -p "$target"
-  else
-    mkdir -p "$(dirname "$target")"
-    cp -p "$path" "$target"
-  fi
+  mapped=$(map_path "${path#"$fixture"/}") || exit 65
+  sources+=("$path")
+  targets+=("$workspace/$mapped")
 done < <(find "$fixture" -mindepth 1 -print0)
+
+for ((i = 0; i < ${#sources[@]}; i++)); do
+  if [ -d "${sources[i]}" ]; then
+    mkdir -p "${targets[i]}"
+  else
+    mkdir -p "$(dirname "${targets[i]}")"
+    cp -p "${sources[i]}" "${targets[i]}"
+  fi
+done
 
 # Operator git configuration (hooks, signing, templates) must not leak in.
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
