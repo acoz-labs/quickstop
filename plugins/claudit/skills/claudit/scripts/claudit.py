@@ -27,7 +27,8 @@ SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '
 FIXTURE_DIRS = {'fixture', 'fixtures', '__fixtures__', 'testdata'}
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
-MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write', 'cascade', 'install', 'delete', 'rm'}
+MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write', 'cascade', 'install', 'delete', 'rm',
+            'fix'}
 SECRET_EXAMPLES = ('.env.example', '.env.sample', '.env.template')
 ROOT_INSTRUCTIONS = ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md')
 PROJECT_SETTINGS = ('.claude/settings.json', '.claude/settings.local.json')
@@ -261,8 +262,12 @@ class Scan:
             rel = os.path.relpath(current, self.root).replace(os.sep, '/')
             rel = '' if rel == '.' else rel
             depth = rel.count('/') + 1 if rel else 0
-            in_skills = rel.split('/')[-1] == 'skills'  # skill names such as build/ are not build output
-            subdirs[:] = sorted(d for d in subdirs if (in_skills or d not in SKIP_DIRS)
+            in_skills = rel.split('/')[-1] == 'skills'
+
+            def skill_like(d):  # skill names such as build/ are not build output; node_modules/, .git/ never are
+                return in_skills and re.fullmatch(r'[a-z0-9][a-z0-9-]*', d) and (
+                    d not in ('vendor', 'venv') or os.path.isfile(os.path.join(current, d, 'SKILL.md')))
+            subdirs[:] = sorted(d for d in subdirs if (d not in SKIP_DIRS or skill_like(d))
                                 and not os.path.islink(os.path.join(current, d)))
             if depth >= MAX_DEPTH:
                 subdirs[:] = []
@@ -343,13 +348,13 @@ class Scan:
         if not any(f['id'] == fid for f in self.findings):
             self.findings.append(finding)
 
-    def typed(self, value, expected, path, key, doc, raw=None):
+    def typed(self, value, expected, path, key, doc, raw=None, required=False):
         """True when value has the expected type; otherwise records a wrong-type finding."""
         kinds = {'list': list, 'object': dict, 'string or list': (str, list)}
-        if value is None or isinstance(value, kinds[expected]):
+        if (value is None and not required) or isinstance(value, kinds[expected]):
             return value is not None
         self.add('wrong-type:%s:%s' % (path, key), 'correctness', 'high', 'Config value has the wrong type', path,
-                 '%s is %s, expected %s' % (key, type(value).__name__, expected),
+                 '%s is %s, expected %s' % (key, 'null' if value is None else type(value).__name__, expected),
                  'Make %s a%s %s; Claude Code rejects or ignores a value of the wrong type.'
                  % (key, 'n' if expected[0] == 'o' else '', expected), doc,
                  line=line_of(raw, '"%s"' % key.split('.')[-1].split('[')[0]))
@@ -427,11 +432,9 @@ class Scan:
             state, data, raw = self.load_json(os.path.basename(rel), path)
             if state == 'missing':
                 continue
-            entry = {'path': rel, 'scope': scope, 'state': state, 'data': data if state == 'ok' else {},
-                     'raw': raw or '', 'error': data if state == 'invalid-json' else None}
-            if state == 'ok' and not isinstance(data, dict):
-                entry['data'] = {}
-            out.append(entry)
+            out.append({'path': rel, 'scope': scope, 'state': state, 'root': data if state == 'ok' else None,
+                        'data': data if state == 'ok' and isinstance(data, dict) else {},
+                        'raw': raw or '', 'error': data if state == 'invalid-json' else None})
         return out
 
     def plugin_manifests(self):
@@ -442,7 +445,7 @@ class Scan:
                     and len(parts) - 2 <= 3:
                 root = '/'.join(parts[:-2])
                 state, data, _ = self.load_json(rel)
-                skills = set()
+                skills, named = set(), set()
                 base = (root + '/') if root else ''
                 if self.exists(base + 'skills'):
                     skills.add(base + 'skills')
@@ -454,6 +457,7 @@ class Scan:
                                 cand = os.path.normpath(base + strip_dot(item)).replace(os.sep, '/')
                                 if cand in self.dirs:
                                     skills.add(cand)
+                                    named.add(cand)
                     plugins = data.get('plugins')
                     for plugin in plugins if self.typed(plugins, 'list', rel, 'plugins', 'plugins') else []:
                         source = plugin.get('source') if isinstance(plugin, dict) else None
@@ -462,7 +466,8 @@ class Scan:
                             if cand in self.dirs:
                                 skills.add(cand)
                 manifests.append({'path': rel, 'root': root or '.', 'kind': parts[-1][:-5], 'state': state,
-                                  'data': data if state == 'ok' else None, 'skill_dirs': sorted(skills)})
+                                  'data': data if state == 'ok' else None, 'skill_dirs': sorted(skills),
+                                  'declared_skills': named - {base + 'skills'}})
         return manifests
 
     # -- signals ----------------------------------------------------------
@@ -534,11 +539,15 @@ class Scan:
             command = entry['command']
             seen = invocations.get(command, [])
             entry['args'] = any(p != strip_dot(command) for p in seen)
-            if command in from_mention or any(mutating(p) for p in seen):
-                # Scripts found only by mention, or with mutating subcommands documented, get exact rules.
+            script = command.split('/')[0] in ('bin', 'script', 'scripts')
+            if command in from_mention or any(mutating(p) for p in seen) or (script and entry['args']):
+                # Scripts found by mention or documented with arguments, and commands with mutating
+                # subcommands documented, get exact rules: a wildcard would also allow e.g. `bin/ci --fix`.
                 safe = [] if command in from_mention else [command]
-                safe += [p for p in seen if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p)
-                         and (command not in from_mention or checking(p)) and p not in safe]
+                for p in seen:
+                    if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p) \
+                            and (command not in from_mention or checking(p)) and p not in safe:
+                        safe.append(p)
                 if not safe:
                     detected.remove(entry)
                     continue
@@ -582,6 +591,9 @@ class Scan:
                 continue
             if s['state'] == 'too-large':
                 self.too_large(path, 'settings-index')
+                continue
+            if s['state'] == 'ok' and not isinstance(s['root'], dict):
+                self.typed(s['root'], 'object', path, '(root)', 'settings-index', raw, required=True)
                 continue
             perms = data.get('permissions') if self.typed(data.get('permissions'), 'object', path, 'permissions',
                                                           'permission-rules', raw) else {}
@@ -680,12 +692,13 @@ class Scan:
                          'project MCP servers are read from the root .mcp.json',
                          'Move the servers to a root .mcp.json.', 'config-causes')
         skill_dirs = ['.claude/skills'] + [d for m in manifests for d in m['skill_dirs']]
+        defaults = {'.claude/skills'} | (set(skill_dirs) - {d for m in manifests for d in m['declared_skills']})
         for base in sorted(set(skill_dirs)):
             try:
                 names = sorted(os.listdir(self.abs(base)))
             except OSError:
                 continue
-            if 'SKILL.md' in names:
+            if 'SKILL.md' in names and base not in defaults:
                 continue  # a manifest path naming one skill directory, not a directory of skills
             for name in names:
                 rel = base + '/' + name
@@ -761,6 +774,12 @@ class Scan:
                                                             if re.fullmatch(r'\.claude/commands/.+\.md', f)]]
         procedures = self.procedure_docs({i['path'] for i in instructions}, skill_texts)
         project_settings = [s for s in settings if s['scope'] == 'project']
+        # Coverage that depends on settings contents is not judged when a project settings file was not read.
+        blind = ['%s (%s)' % (s['path'], s['state'] if s['state'] != 'ok' else 'not an object')
+                 for s in project_settings if not isinstance(s['root'], dict)]
+        if blind:
+            self.limits.append('%s not checked; allowlist, secret-deny, stop-hook and lsp coverage not judged'
+                               % ', '.join(blind))
         allow = [r for s in project_settings for r in rules_of(s['data'], 'allow')]
         deny = [r for s in project_settings for r in rules_of(s['data'], 'deny')]
         hooks = {}
@@ -863,7 +882,7 @@ class Scan:
             return self.exact.get(c['command']) or [c['command']] + ([c['command'] + ' x'] if c['args'] else [])
 
         uncovered = [c for c in targets if not all(any(bash_rule_matches(r, probe) for r in allow) for probe in probes(c))]
-        if uncovered:
+        if uncovered and not blind:
             rules = []
             for c in uncovered:
                 if c['command'] in self.exact:
@@ -882,7 +901,7 @@ class Scan:
         uncovered_secrets = [s for s in secret_paths if not denied(
             sample_for(s['path_or_pattern']) if s['where'] != 'tree' else
             (s['path_or_pattern'] + 'x' if s['path_or_pattern'].endswith('/') else s['path_or_pattern']))]
-        if uncovered_secrets:
+        if uncovered_secrets and not blind:
             rules = []
             for s in uncovered_secrets:
                 rule = deny_rule(s['path_or_pattern'])
@@ -894,7 +913,7 @@ class Scan:
                      'Add to .claude/settings.json: ' + json.dumps({'permissions': {'deny': rules[:20]}})
                      + ' (a Read deny also blocks Edit).', 'read-edit-rules', confidence='medium')
         stop_hook = any(hooks.get(e) for e in STOP_EVENTS)
-        if must_rules and not stop_hook:
+        if must_rules and not stop_hook and not blind:
             cmd = next((c['command'] for c in checks for r in must_rules if self.mentioned(c['command'], r['text'])),
                        (documented or [c['command'] for c in checks] or ['<your check command>'])[0])
             cmd = (self.exact.get(cmd) or [cmd])[0]
@@ -934,7 +953,7 @@ class Scan:
                          'Add evals/ cases for the skills of %s and run `claude plugin eval` as a release gate '
                          'or in CI.' % (', '.join(p['name'] for p in without) or 'each plugin'),
                          'plugin-evals', confidence='medium')
-        if typed and not lsp_enabled:
+        if typed and not lsp_enabled and not blind:
             langs = sorted({LANGUAGES.get(t, 'csharp' if t.endswith('.csproj') else 'python') for t in typed})
             self.add('lsp', 'coverage', 'low', 'No code-intelligence plugin', '.', 'typed markers: ' + ', '.join(typed),
                      'Install %s from the official marketplace; check /plugin for the exact name.' % ', '.join(
@@ -960,6 +979,7 @@ class Scan:
         def coverage(total, missing):
             return 'n/a' if not total else 'met' if not missing else 'missing' if missing == total else 'partial'
 
+        unjudged = ('n/a', 'not checked: ' + ', '.join(blind), [])
         status = {
             'instructions': ('missing' if not roots else 'partial' if ids('oversized') else 'met',
                              ', '.join('%s (%d lines)' % (i['path'], i['lines']) for i in roots) or 'none',
@@ -974,6 +994,8 @@ class Scan:
                          '%d must-run rules; stop-type hook %s' % (len(must_rules), 'present' if stop_hook else 'absent'),
                          ids('stop-hook')),
         }
+        if blind:
+            status.update(allowlist=unjudged, secrets=unjudged, enforced=unjudged)
         baseline = []
         for item in self.catalog.get('baseline', []):
             state, evidence, fids = status.get(item['id'], ('n/a', 'not evaluated', []))
@@ -1187,8 +1209,10 @@ def dismiss(root, fid, reason):
     path = os.path.join(folder, 'claudit-dismissed.json')
     real_root = os.path.realpath(root)
     if os.path.islink(folder) or os.path.islink(path) or (os.path.exists(path) and not os.path.isfile(path)) \
+            or (os.path.exists(folder) and not os.path.isdir(folder)) \
             or os.path.dirname(os.path.realpath(path)) != os.path.join(real_root, '.claude'):
-        raise UsageError('refusing to write %s: it or .claude is a symlink or not inside the project' % DISMISSED)
+        raise UsageError('refusing to write %s: it or .claude is a symlink, not a file/directory, '
+                         'or not inside the project' % DISMISSED)
     data = {'version': 1, 'dismissed': []}
     if os.path.exists(path):
         try:
