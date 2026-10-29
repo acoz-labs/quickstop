@@ -24,6 +24,7 @@ MAX_DEPTH = 6
 MAX_READ = 512 * 1024
 SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '.venv', 'venv',
              'target', '.tox', '.mypy_cache', '.pytest_cache', 'coverage', '.next'}
+DEPENDENCY_DIRS = {'node_modules', 'vendor', 'venv'}  # never skill directories without a SKILL.md
 FIXTURE_DIRS = {'fixture', 'fixtures', '__fixtures__', 'testdata'}
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
@@ -202,14 +203,20 @@ def deny_rule(entry):
     return 'Read(%s)' % pattern
 
 
+def command_words(command):
+    """Lower-case words of a command: its name and arguments, skipping path arguments (tests/fix_parser.py)."""
+    tokens = command.lower().split()
+    return {w for i, t in enumerate(tokens) if i == 0 or '/' not in t for w in re.split(r'[/=._:-]+', t) if w}
+
+
 def mutating(command):
-    """True when any word of a command (path segments and flags included) is a mutating verb."""
-    return bool(set(re.split(r'[\s/=._:-]+', command.lower())) & MUTATING)
+    """True when a word of a command is a mutating verb, as in `bin/sdlc apply` or `npm run lint:fix`."""
+    return bool(command_words(command) & MUTATING)
 
 
 def checking(command):
     """True when a word of a command names a check, as in `bin/sdlc check`."""
-    return bool(set(re.split(r'[\s/=._:-]+', command.lower())) & set(CHECK_NAMES))
+    return bool(command_words(command) & set(CHECK_NAMES))
 
 
 def version_tuple(version):
@@ -266,7 +273,7 @@ class Scan:
 
             def skill_like(d):  # skill names such as build/ are not build output; node_modules/, .git/ never are
                 return in_skills and re.fullmatch(r'[a-z0-9][a-z0-9-]*', d) and (
-                    d not in ('vendor', 'venv') or os.path.isfile(os.path.join(current, d, 'SKILL.md')))
+                    d not in DEPENDENCY_DIRS or os.path.isfile(os.path.join(current, d, 'SKILL.md')))
             subdirs[:] = sorted(d for d in subdirs if (d not in SKIP_DIRS or skill_like(d))
                                 and not os.path.islink(os.path.join(current, d)))
             if depth >= MAX_DEPTH:
@@ -472,7 +479,7 @@ class Scan:
 
     # -- signals ----------------------------------------------------------
     def check_commands(self, corpus, ci_text, loaded=()):
-        """Check commands; sets self.exact to the only invocations to pre-approve where a wildcard is unsafe."""
+        """Check commands; sets self.exact to the exact, non-mutating calls of each to pre-approve."""
         detected, invocations, from_mention = [], {}, set()
 
         def add(command, source):
@@ -534,24 +541,22 @@ class Scan:
                             continue
                         add(base, path)
                     invocations.setdefault(base, []).append(part)
+        # Only exact calls are pre-approved: a wildcard such as `make test *` also allows `make test deploy`.
         self.exact = {}
         for entry in list(detected):
             command = entry['command']
             seen = invocations.get(command, [])
             entry['args'] = any(p != strip_dot(command) for p in seen)
-            script = command.split('/')[0] in ('bin', 'script', 'scripts')
-            if command in from_mention or any(mutating(p) for p in seen) or (script and entry['args']):
-                # Scripts found by mention or documented with arguments, and commands with mutating
-                # subcommands documented, get exact rules: a wildcard would also allow e.g. `bin/ci --fix`.
-                safe = [] if command in from_mention else [command]
-                for p in seen:
-                    if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p) \
-                            and (command not in from_mention or checking(p)) and p not in safe:
-                        safe.append(p)
-                if not safe:
-                    detected.remove(entry)
-                    continue
-                self.exact[command] = safe
+            calls = ([] if command in from_mention else [command]) + [
+                p for p in seen if command not in from_mention or checking(p)]
+            safe = []
+            for p in calls:
+                if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p) and p not in safe:
+                    safe.append(p)
+            if not safe:
+                detected.remove(entry)
+                continue
+            self.exact[command] = safe
         return detected
 
     def mentioned(self, command, corpus_text):
@@ -711,7 +716,7 @@ class Scan:
                         inner = os.listdir(self.abs(rel))
                     except OSError:
                         continue
-                    if inner and 'SKILL.md' not in inner:
+                    if inner and 'SKILL.md' not in inner and name not in DEPENDENCY_DIRS:
                         self.add('skill-missing:' + rel, 'correctness', 'medium', 'Skill directory has no SKILL.md', rel,
                                  'contains %s' % ', '.join(sorted(inner)[:5]),
                                  'Add %s/SKILL.md with name and description frontmatter (exact file name).' % rel,
@@ -878,17 +883,10 @@ class Scan:
                          c['command'] for c in checks)), 'check-to-run', confidence='medium')
         targets = [c for c in checks if c['documented']] or checks
 
-        def probes(c):  # exact invocations, or the command plus any arguments
-            return self.exact.get(c['command']) or [c['command']] + ([c['command'] + ' x'] if c['args'] else [])
-
-        uncovered = [c for c in targets if not all(any(bash_rule_matches(r, probe) for r in allow) for probe in probes(c))]
+        uncovered = [c for c in targets if not all(any(bash_rule_matches(r, call) for r in allow)
+                                                   for call in self.exact[c['command']])]
         if uncovered and not blind:
-            rules = []
-            for c in uncovered:
-                if c['command'] in self.exact:
-                    rules += ['Bash(%s)' % p for p in self.exact[c['command']]]
-                else:
-                    rules += ['Bash(%s)' % c['command']] + (['Bash(%s *)' % c['command']] if c['args'] else [])
+            rules = ['Bash(%s)' % call for c in uncovered for call in self.exact[c['command']]]
             self.add('allowlist', 'coverage', 'medium', 'Check commands are not pre-approved', '.claude/settings.json',
                      'no permissions.allow rule covers: ' + ', '.join(c['command'] for c in uncovered),
                      'Add to .claude/settings.json: ' + json.dumps({'permissions': {'allow': rules}}),
@@ -916,7 +914,7 @@ class Scan:
         if must_rules and not stop_hook and not blind:
             cmd = next((c['command'] for c in checks for r in must_rules if self.mentioned(c['command'], r['text'])),
                        (documented or [c['command'] for c in checks] or ['<your check command>'])[0])
-            cmd = (self.exact.get(cmd) or [cmd])[0]
+            cmd = self.exact[cmd][0] if cmd in self.exact else cmd
             settings_json = json.dumps({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command':
                                         '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop-check.sh'}]}]}})
             script = ('#!/usr/bin/env bash\n# Block finishing until the check passes.\ninput=$(cat)\n'
