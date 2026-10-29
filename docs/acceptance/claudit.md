@@ -14,7 +14,7 @@ native initialization inventory contains only the intended plugin and built-ins.
 Disable unrelated MCP connections, plugin synchronization and hooks where needed
 for isolation without replacing the product's own workflow. Keep credentials out
 of fixture files, prompts, logs and published evidence. Compare consumer files,
-Git index, working tree and decision/cache state before and after each scenario.
+Git index, working tree and cache state before and after each scenario.
 
 Native `claude plugin eval` is useful when available, with local reports and
 bounded runs, but its scaffolds do not load project configuration. Supplement it
@@ -28,73 +28,43 @@ action, an agent's success claim or matching headings is not evidence it happene
 release gate: five synthetic fixtures with planted findings, run by
 `bin/claudit-eval` with a pinned model and `--max-cost-usd`. It isn't a per-PR
 check. A release compares its numbers with the recorded
-[baselines](claudit-eval-baselines.md) using the same model, judge and run count.
-The suite ships in the repository rather than in the plugin; #156 decides
-whether it moves.
+[baselines](claudit-eval-baselines.md) using the same model, judge and run count,
+and records each arm's conditions (tools granted, runs per case, model, judge,
+Claude Code version). Claudit reads docs live, so the gate runs it twice: with
+`--web-fetch` (the live path) and without (the shipped-catalog path). Both must meet
+the release bars; the live path must also beat a plain prompt given the same
+WebFetch grant. The suite ships in the repository rather than in the plugin, so
+measuring Claudit doesn't change plugin bytes.
 
 ## Required scenarios
 
-- Install the retained marketplace package and verify all four skills and six
-  agents load with their intended models and tools. Inspect component paths from
-  the installed payload. Record native validation and inventory results.
-- Exercise a project audit, a non-Git global audit, and a nested/worktree project.
-  Include user and local MCP entries, a remote HTTP server, a valid command-only
-  plugin, a plugin with custom component paths, scoped rules and auto-memory.
-  Distinguish static configuration from live connection health and loaded context.
+- Install the retained marketplace package and verify the native inventory shows
+  one skill (`claudit`) and one agent (`auditor`, Sonnet, read-only tools), and no
+  `knowledge`, `refresh` or `status` skill. Record native validation
+  (`claude plugin validate --strict`) and inventory results.
+- Run a headless read-only audit on a real repository at the candidate and on one
+  other repository. Each report states the intent, gives Correctness, Alignment
+  and Coverage grades with confidences, and ranks 3 to 7 changes with exact diffs
+  and doc citations. Record wall time and cost at list prices.
+- Compare the consumer's files, Git index and working tree before and after a
+  read-only audit: nothing changes, no cache directory is created (check
+  `~/.cache/claudit` and `CLAUDIT_CACHE_DIR`) and nothing is written outside the
+  project.
+- Audit with the docs unreachable (WebFetch denied). The report stays graded and
+  says in one footer line that the shipped catalog was used.
 - Audit a valid current configuration and a separate fixture with real defects.
-  Compare findings to official source evidence and fixture ground truth. Supported
-  defaults, commands, optional manifest metadata, deferred tools and unknown usage
-  must not be reported as proven defects. New/unknown fields require verification.
-- Exercise large instruction inventories and unreadable or malformed configuration.
-  Critical sources must remain visible; skipped content and uncertain effective
-  managed/session state must appear as coverage limitations, not healthy results.
-  Verify actual score-helper inputs and output: partial or unknown categories
-  have no numeric score or weight in the assessed subset, and unknown coverage
-  prevents an overall score or letter grade.
-- Invoke knowledge, refresh and status for fresh, stale, missing and corrupt cache
-  state. Refresh one domain after a host-version change and on first use; a second
-  read must reuse it. Other domains retain their own freshness. Concurrent domain
-  updates must preserve both results. Missing payloads and invalid metadata must
-  never appear fresh.
-- Run an actual official-document research refresh. Inspect fetch calls and source
-  provenance, not just returned citations. No persistent research-memory reads or
-  writes establish freshness. With research unavailable/failed/partial, preserve
-  the previous good payload and report degraded coverage; do not mark failed
-  research as a successful current refresh. Never delete old agent memory silently.
-- Distinguish actual missing required evidence from honest coverage limitations.
-  A successful bounded synthesis must preserve and display unread sections and
-  account applicability limits. Verify that concurrent fetches have distinct
-  synthesis files and that a shared temporary output is rejected at commit time.
-- Seed a fresh ecosystem cache without the dedicated output-styles page. Audit a
-  synthetic plugin with an output style and verify the orchestrator identifies
-  that topic gap, fetches only needed supplemental official pages, synthesizes
-  source-backed claims, and rereads coverage before reporting. A second audit
-  must reuse fresh supplemental evidence. Baseline records must remain unchanged.
-  Exercise an unread relevant section in a retained page: read it without fetching.
-  Repeat with no writes/no network and with a failed supplemental fetch. Verify
-  the read-only planner and applicable audit agents still run, retained source
-  sections support every confirmed defect, and unresolved/optional findings never
-  appear under confirmed-defect headings. Report
-  the unresolved topic, preserve last-good evidence and withhold complete grades.
-  Separate documented behavior from runtime-observed loading/context usage.
-- Run a read-only audit with existing decision records and personal configuration.
-  Consumer files and decisions must remain unchanged. Record allowed plugin cache
-  effects separately, and honor an explicit no-write request for those too.
-- Apply an explicitly selected narrow fix and verify only its intended content
-  changes. A declined or unselected recommendation must not be applied. Previously
-  authorized work must not require an unnecessary second permission question.
-- Record different decisions for identically named files in different scopes and
-  directories. Verify exact matching and legacy-record preservation. Personal
-  decision content must stay out of the shared project record and PR payload.
-- Exercise PR preparation with staged unrelated changes, unstaged edits in the same
-  file, untracked files, paths containing spaces and an existing branch. Inspect
-  the proposed commit/diff and verify the original index/worktree are preserved.
-  Test failure/retry recovery: occupied destinations and existing branches must
-  fail before creating refs, and a failure after mutation must retain an inspectable
-  recovery receipt. A retry must not overwrite it or discard consumer work.
-  Use a local test remote or instrumented GitHub boundary
-  unless an actual external test PR is explicitly in scope; label simulated remote
-  checks honestly and do not claim them as a real published PR.
+  Compare findings to official docs and fixture ground truth. Supported defaults,
+  `Bash(x:*)` rules, matcher-less Stop hooks, gitignored `CLAUDE.local.md` files and
+  deny rules for secrets must not be reported as defects.
+- Run the helper's unit tests on Python 3.9 and the pinned 3.11.
+- Apply one selected change in place and verify only its intended content changes.
+  A declined or unselected change must not be applied. Dismissing a suggestion
+  writes only `.claude/claudit-dismissed.json`, and the next audit omits it.
+- Exercise branch delivery with staged unrelated changes, unstaged edits and an
+  existing branch name against a local test remote: the user's index and working
+  tree are preserved, the PR branch holds only the selected paths and an existing
+  branch is never reused. Label simulated remote checks honestly; don't send an
+  external test PR unless one is explicitly in scope.
 
 ## Acceptance and publication
 

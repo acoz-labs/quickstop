@@ -8,7 +8,6 @@ if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
   exit 64
 fi
 fixture=$(cd "$1" && pwd -P)
-suite=$(cd "$(dirname "$0")" && pwd -P)
 workspace=$(pwd -P)
 
 # Fixtures store dotfiles as dot-* and agent instruction files as *.fixture so
@@ -69,40 +68,3 @@ git config user.email "fixture@example.invalid"
 git add -A
 GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z \
   git -c commit.gpgsign=false commit -q --allow-empty --no-verify -m "Fixture"
-
-if [ -d "$suite/seed-home" ]; then
-  cp -R "$suite/seed-home/." "$HOME/"
-fi
-
-cache="$HOME/.cache/claudit"
-if [ -f "$cache/.seed-root" ]; then
-  new_root=$(cd "$cache" && pwd -P)
-  python3 - "$(cat "$cache/.seed-root")" "$new_root" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-old, new = sys.argv[1].rstrip('/'), sys.argv[2]
-
-
-def move(value):
-    if isinstance(value, str) and (value == old or value.startswith(old + '/')):
-        return new + value[len(old):]
-    if isinstance(value, list):
-        return [move(item) for item in value]
-    if isinstance(value, dict):
-        return {key: move(item) for key, item in value.items()}
-    return value
-
-
-for path in sorted((Path(new) / 'v2').rglob('*.json')):
-    try:
-        record = json.loads(path.read_text())
-    except (OSError, ValueError):
-        continue
-    moved = move(record)
-    if moved != record:
-        path.write_text(json.dumps(moved, indent=2, ensure_ascii=False) + '\n')
-PY
-  rm -f "$cache/.seed-root"
-fi
