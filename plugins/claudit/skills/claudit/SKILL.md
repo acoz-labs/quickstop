@@ -2,7 +2,7 @@
 name: claudit
 description: Grade this project's Claude Code setup (Correctness, Alignment, Coverage) against what the project is for, and recommend the 3-7 changes that would improve it most, with exact diffs and doc citations. Use when asked to audit, review, grade or optimize a Claude Code configuration, CLAUDE.md, settings, hooks, skills or permissions.
 argument-hint: "[focus] [--read-only] [--user]"
-allowed-tools: Read Grep Glob Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py *) Bash(claude --version) WebFetch(domain:code.claude.com)
+allowed-tools: Read Grep Glob Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py scan *) Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py new-pages *) Bash(claude --version) WebFetch(domain:code.claude.com)
 model: sonnet
 ---
 
