@@ -345,8 +345,10 @@ def fingerprint(root, path, base=None):
         names = git(root, 'ls-tree', '-r', '--name-only', '-z', base, '--', path).split('\0')
         return {name[len(path)+1:]: git(root, 'rev-parse', f'{base}:{name}').strip() for name in names if name}
     package = safe_path(root, path)
+    # Bytecode caches are local runtime state, never distributed bytes.
     return {p.relative_to(package).as_posix(): git(root, 'hash-object', str(p)).strip()
-            for p in package.rglob('*') if p.is_file()}
+            for p in package.rglob('*') if p.is_file()
+            and p.suffix != '.pyc' and '__pycache__' not in p.relative_to(package).parts}
 
 
 def check_versions(root, packages, base):
