@@ -13,8 +13,9 @@ for issue #155 on 2026-10-29. Claudit 4.0 (#156) is gated against these numbers.
 - Claudit 3.2.3 (`plugins/claudit` at this commit, unchanged) invoked as
   `/claudit:claudit --read-only`, with a research cache seeded once by
   `bin/claudit-eval seed` (all three domains fresh; $1.33, 223 s). That seed ran
-  with Bash unrestricted. The scoped-permission seed now in the runner was
-  verified afterwards (all domains fresh; $0.99, 186 s). The sandbox
+  with Bash unrestricted. The runner's seed now allows Bash only for the helper
+  commands a refresh uses; it was verified afterwards (all domains fresh; $1.25,
+  275 s). The sandbox
   blocks Claudit's own fetches, so every run used that seeded cache.
 - Costs are at list prices as reported by Claude Code. Agent cost excludes the
   judge; the judge column is separate.
@@ -83,8 +84,8 @@ Compare only runs with the same model, judge and run count.
 
 ## Spend
 
-Total for #155 at list prices: about $15.7. The pooled arms above cost $10.94
+Total for #155 at list prices: about $17.0. The pooled arms above cost $10.94
 (agent plus judge: plain $1.23, `/doctor` $2.46, Claudit $7.25). The successful
-seed cost $1.33, and the scoped-permission seed check $0.99. Two failed seed attempts (permission denials) cost $1.25. F1
+seed cost $1.33, and two scoped-permission seed checks $2.24. Two failed seed attempts (permission denials) cost $1.25. F1
 pipeline debugging cost $0.86, sandbox probes $0.03, and one stopped `/doctor` run
 whose results aren't used cost an estimated $0.3.

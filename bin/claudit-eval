@@ -27,7 +27,8 @@ STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
 ARMS = ('plain', 'doctor', 'claudit')
 DEFAULT_JUDGE = 'claude-haiku-5-5'
 SEED_TOOLS = ('Bash(claude --version)', 'Read', 'Grep', 'Glob', 'Task', 'Agent')
-SECRET_ENV = ('*TOKEN*', '*SECRET*', '*PASSWORD*', '*_KEY', 'GH_*', 'GITHUB_*')
+# Only the helper commands a refresh uses; others (decision-save, prepare-pr, ...) write outside the cache.
+REFRESH_HELPER = ('status', 'knowledge', 'fetch', 'fetch-pages', 'coverage', 'cache-put', 'cache-fail', 'topic-fail')
 STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent')
 # Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
 NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
@@ -247,21 +248,17 @@ def git(cwd, *args):
 
 def seed_command(plugin, target, args):
     runtime = str((Path(plugin) / 'scripts/runtime.py').resolve())
-    prompt = (f'Bash is limited to `claude --version` and `python3 "{runtime}" ...` helper calls, '
-              'so use Read, Glob and Grep to inspect files.')
+    prompt = (f'Bash is limited to `claude --version` and `python3 "{runtime}" <{"|".join(REFRESH_HELPER)}> ...` '
+              'helper calls, so use Read, Glob and Grep to inspect files.')
+    helper = [rule for command in REFRESH_HELPER
+              for rule in (f'Bash(python3 {runtime} {command}:*)', f'Bash(python3 "{runtime}" {command}:*)')]
     return ['claude', '-p', '/claudit:refresh all', '--plugin-dir', str(plugin),
             '--setting-sources', 'project,local', '--strict-mcp-config', '--model', args.model,
             '--max-budget-usd', str(args.max_cost_usd), '--output-format', 'json',
             '--append-system-prompt', prompt, '--permission-mode', 'dontAsk', '--allowedTools', *SEED_TOOLS,
-            f'Bash(python3 {runtime}:*)', f'Bash(python3 "{runtime}":*)',
+            *helper,
             # Research outputs are written with the Write tool; allow it only inside the cache.
             f'Edit(/{target}/**)']
-
-
-def seed_env(target, path):
-    env = {name: value for name, value in os.environ.items()
-           if not any(fnmatch.fnmatchcase(name.upper(), pattern) for pattern in SECRET_ENV)}
-    return dict(env, CLAUDIT_CACHE_DIR=str(target), PATH=path)
 
 
 def seed(args):
@@ -284,7 +281,7 @@ def seed(args):
         command = seed_command(plugin, target, args)
         print(f'Command: {shlex.join(command)}')
         result = subprocess.run(command, cwd=repo, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                env=seed_env(target, path))
+                                env=dict(os.environ, CLAUDIT_CACHE_DIR=str(target), PATH=path))
         try:
             output = json.loads(result.stdout)
         except ValueError as exc:
