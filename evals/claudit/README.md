@@ -75,8 +75,11 @@ running interpreter into the scratch plugin (`.eval-python/`) and puts it first
 in PATH, and Claudit 3.x can't refresh its research cache during a run.
 `seed` builds that cache once, outside the sandbox: it runs `/claudit:refresh all`
 with `claude -p` from a throwaway repository, using `--setting-sources
-project,local`, `--strict-mcp-config`, an isolated `CLAUDIT_CACHE_DIR`, and writes
-allowed only inside the cache. `run --seed-cache` checks that every domain is
+project,local`, `--strict-mcp-config` and an isolated `CLAUDIT_CACHE_DIR`. Its
+permission rules allow Bash only for `claude --version` and Claudit's own helper
+(`python3 <plugin>/scripts/runtime.py ...`), and the Write tool only inside the
+cache; the helper itself runs unsandboxed and writes the cache. Credential-like
+environment variables are dropped. `run --seed-cache` checks that every domain is
 fresh after relocation, then copies the cache into each run. A plugin that reads
 documentation live (the 4.0 design) will hit the same network limit. #156 has to
 account for it.

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f3-misconfigured
-description: JavaScript repo with a Write() rule, a .claudeignore, a flat skill file, project bypassPermissions, an array hook matcher and a 230-line CLAUDE.md restating the code.
+description: JavaScript repo with a Write() rule, a .claudeignore, a flat skill file, project bypassPermissions, an array hook matcher and a 241-line CLAUDE.md restating the code.
 tags: [claudit, correctness, alignment]
 runs: 1
 context:
