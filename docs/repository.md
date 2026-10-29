@@ -27,6 +27,9 @@ bin/check-marketplace --base origin/main
 ```
 
 Without mise, install the pinned Python and run the same commands directly.
+`AGENTS.md` offers `bin/container bin/ci` where supported; this repository
+provides no `bin/container`, so verification runs `bin/ci` directly on the
+pinned Python.
 The initial compatibility run also passed on Python 3.9.6; release evidence uses
 the pinned runtime, not the system default.
 
@@ -34,7 +37,9 @@ the pinned runtime, not the system default.
 checks and regression tests. `--base` additionally rejects changed plugin bytes
 without a strictly higher stable version. Supply the actual pre-change commit;
 an unavailable base is an error, never a reason to skip validation. All distributed
-files, including README changes, count as bytes. Generated listings derive
+files, including README changes, count as bytes. Python bytecode caches (`__pycache__/`,
+`*.pyc`) are local state and never count, in `--base` or in
+`bin/marketplace-release verify-package --path`; `bin/ci` does not write them. Generated listings derive
 versions from the native manifests; separate target packages can release independently. Regenerate indexes with
 `bin/check-marketplace --write` after changing catalog or manifest metadata.
 

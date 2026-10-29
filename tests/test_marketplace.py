@@ -127,6 +127,11 @@ class MarketplaceTests(unittest.TestCase):
         with self.assertRaisesRegex(module.Invalid, 'higher version'):
             module.validate(self.root, 'HEAD')
 
+    def test_bytecode_cache_is_not_payload(self):
+        self.write('plugins/claude-code/sample/scripts/__pycache__/tool.cpython-311.pyc', 'cache')
+        self.write('plugins/claude-code/sample/scripts/stray.pyc', 'cache')
+        self.assertEqual(module.validate(self.root, 'HEAD'), 1)
+
     def test_readme_is_versioned_and_downgrade_fails(self):
         self.write('plugins/claude-code/sample/README.md', 'Updated')
         with self.assertRaisesRegex(module.Invalid, 'higher version'):

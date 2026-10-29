@@ -81,6 +81,13 @@ class ReleaseTests(unittest.TestCase):
         (self.root / 'plugins/sample/data.bin').chmod(0o755)
         self.assertNotEqual(digest, m.package_digest(self.root, self.target['path']))
 
+    def test_verify_package_path_ignores_bytecode_cache(self):
+        self.write('plugins/sample/scripts/__pycache__/tool.cpython-311.pyc', 'cache')
+        self.write('plugins/sample/stray.pyc', 'cache')
+        result = subprocess.run([str(Path(__file__).resolve().parents[1] / 'bin/marketplace-release'), '--root', str(self.root), 'verify-package', '--path', self.target['path'], '--sha256', self.record['sha256']], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(m.package_digest(self.root, self.target['path']), self.record['sha256'])
+
     def test_tampered_digest_refused(self):
         self.record['sha256'] = 'b' * 64
         with self.assertRaisesRegex(m.Invalid, 'digest mismatch'):

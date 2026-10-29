@@ -283,6 +283,11 @@ def projections(catalog, packages, releases=None):
 REPOSITORY_URL = 'https://github.com/acoz-labs/quickstop.git'
 
 
+def is_bytecode(relative):
+    """Bytecode caches are local runtime state, never distributed bytes."""
+    return relative.suffix == '.pyc' or '__pycache__' in relative.parts
+
+
 def package_digest(root, path, commit=None):
     """Hash sorted relative names, executable modes and file SHA-256s, not tar metadata."""
     records = []
@@ -298,7 +303,7 @@ def package_digest(root, path, commit=None):
         package = safe_path(root, path)
         for item in package.rglob('*'):
             require(not item.is_symlink(), 'artifact contains symlink')
-            if item.is_file():
+            if item.is_file() and not is_bytecode(item.relative_to(package)):
                 records.append([item.relative_to(package).as_posix(), '100755' if item.stat().st_mode & 0o111 else '100644', hashlib.sha256(item.read_bytes()).hexdigest()])
     require(records, 'empty artifact')
     return hashlib.sha256(json.dumps(sorted(records), separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
@@ -346,7 +351,7 @@ def fingerprint(root, path, base=None):
         return {name[len(path)+1:]: git(root, 'rev-parse', f'{base}:{name}').strip() for name in names if name}
     package = safe_path(root, path)
     return {p.relative_to(package).as_posix(): git(root, 'hash-object', str(p)).strip()
-            for p in package.rglob('*') if p.is_file()}
+            for p in package.rglob('*') if p.is_file() and not is_bytecode(p.relative_to(package))}
 
 
 def check_versions(root, packages, base):
