@@ -27,6 +27,9 @@ bin/check-marketplace --base origin/main
 ```
 
 Without mise, install the pinned Python and run the same commands directly.
+`AGENTS.md` offers `bin/container bin/ci` where supported; this repository
+provides no `bin/container`, so verification runs `bin/ci` directly on the
+pinned Python.
 The initial compatibility run also passed on Python 3.9.6; release evidence uses
 the pinned runtime, not the system default.
 
