@@ -296,6 +296,11 @@ class Correctness(Project):
         scan = cl.Scan(self.root, False, {}, 'unknown')
         self.assertEqual({d for d in scan.dirs if d.startswith('skills/')}, {'skills/coverage'})
         self.assertFalse([i for i in self.ids(self.scan()) if i.startswith('broken-import')])
+        self.write('.claude/skills/node_modules/dep/index.js', '')
+        self.write('.claude/skills/review/notes.md', 'x\n')
+        ids = self.ids(self.scan())
+        self.assertNotIn('skill-missing:.claude/skills/node_modules', ids)
+        self.assertIn('skill-missing:.claude/skills/review', ids)
 
     def test_misplaced_hooks_and_mcp(self):
         self.write('.claude/hooks.json', {'hooks': {}})
@@ -539,6 +544,22 @@ class Coverage(Project):
         rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
         self.assertEqual(rules, ['Bash(bin/ci)', 'Bash(bin/ci --fast)'])
 
+    def test_tool_commands_get_exact_non_mutating_rules(self):
+        self.write('Makefile', 'test:\n\techo test\ndeploy:\n\techo deploy\n')
+        self.write('package.json', {'scripts': {'lint': 'eslint .', 'lint:fix': 'eslint --fix .',
+                                                'test:deploy': 'deploy'}})
+        self.write('CLAUDE.md', 'Run `make test V=1`, `npm run lint`, `npm run lint:fix` and `npm run test:deploy`.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        # A wildcard would allow `make test deploy`; mutating scripts are never suggested.
+        self.assertEqual(sorted(rules), ['Bash(make test V=1)', 'Bash(make test)', 'Bash(npm run lint)'])
+
+    def test_mutating_words_ignore_path_arguments(self):
+        self.write('bin/test', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', 'Run `bin/test tests/fix_parser.py`.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test tests/fix_parser.py)'])
+        self.assertTrue(cl.mutating('bin/fix-all') and cl.mutating('npm run lint:fix'))
+
     def test_repeated_documented_call_gives_one_rule(self):
         self.write('bin/sdlc', '#!/bin/sh\n', 0o755)
         self.write('CLAUDE.md', 'Run `bin/sdlc check`.\n\nBefore merging, run `bin/sdlc check` again.\n')
@@ -573,10 +594,12 @@ class Coverage(Project):
         result = self.scan()
         f = self.finding(result, 'allowlist')
         snippet = json.loads(f['fix'].split(': ', 1)[1])
-        self.assertEqual(snippet, {'permissions': {'allow': [
-            'Bash(npm test)', 'Bash(npm test *)', 'Bash(bin/check-all --fast)']}})
+        # Exact calls only: `npm test` is already allowed, and `npm test -- <file>` holds a placeholder.
+        self.assertEqual(snippet, {'permissions': {'allow': ['Bash(bin/check-all --fast)']}})
         self.assertEqual(result['signals']['documented_checks'], ['npm test', 'bin/check-all'])
-        self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'missing')
+        self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'partial')
+        self.write('.claude/settings.json', {'permissions': {'allow': []}})
+        self.assertEqual({b['id']: b['status'] for b in self.scan()['baseline']}['allowlist'], 'missing')
         self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(npm test:*)']}})
         result = self.scan()
         self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'partial')
