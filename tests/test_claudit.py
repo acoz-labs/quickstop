@@ -296,10 +296,10 @@ class Correctness(Project):
         scan = cl.Scan(self.root, False, {}, 'unknown')
         self.assertEqual({d for d in scan.dirs if d.startswith('skills/')}, {'skills/coverage'})
         self.assertFalse([i for i in self.ids(self.scan()) if i.startswith('broken-import')])
-        self.write('.claude/skills/node_modules/dep/index.js', '')
+        self.write('.claude/skills/vendor/dep/index.js', '')
         self.write('.claude/skills/review/notes.md', 'x\n')
         ids = self.ids(self.scan())
-        self.assertNotIn('skill-missing:.claude/skills/node_modules', ids)
+        self.assertNotIn('skill-missing:.claude/skills/vendor', ids)
         self.assertIn('skill-missing:.claude/skills/review', ids)
 
     def test_misplaced_hooks_and_mcp(self):
@@ -559,6 +559,15 @@ class Coverage(Project):
         rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
         self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test tests/fix_parser.py)'])
         self.assertTrue(cl.mutating('bin/fix-all') and cl.mutating('npm run lint:fix'))
+        self.assertTrue(cl.mutating('bin/lint --fix=src/') and cl.mutating('make test "deploy"'))
+
+    def test_suggested_calls_are_plain(self):
+        self.write('bin/test', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '```sh\nbin/test check `touch pwned`\nbin/test a & b\nbin/test "x"\n'
+                                'bin/test --shard=1/2\n```\nAlways run `bin/test` before you finish.\n')
+        result = self.scan()
+        rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test --shard=1/2)'])
 
     def test_repeated_documented_call_gives_one_rule(self):
         self.write('bin/sdlc', '#!/bin/sh\n', 0o755)

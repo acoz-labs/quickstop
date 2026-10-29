@@ -29,7 +29,9 @@ FIXTURE_DIRS = {'fixture', 'fixtures', '__fixtures__', 'testdata'}
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
 MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write', 'cascade', 'install', 'delete', 'rm',
-            'fix'}
+            'fix', 'migrate'}
+# Calls Claudit suggests are plain words, paths and flags: no quotes, substitutions or shell operators.
+PLAIN_CALL = re.compile(r'[\w./=,:+@%-]+(?: [\w./=,:+@%-]+)*')
 SECRET_EXAMPLES = ('.env.example', '.env.sample', '.env.template')
 ROOT_INSTRUCTIONS = ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md')
 PROJECT_SETTINGS = ('.claude/settings.json', '.claude/settings.local.json')
@@ -204,9 +206,15 @@ def deny_rule(entry):
 
 
 def command_words(command):
-    """Lower-case words of a command: its name and arguments, skipping path arguments (tests/fix_parser.py)."""
-    tokens = command.lower().split()
-    return {w for i, t in enumerate(tokens) if i == 0 or '/' not in t for w in re.split(r'[/=._:-]+', t) if w}
+    """Lower-case words of a command: its name, flags (`--fix` of `--fix=src/`) and non-path arguments."""
+    words = set()
+    for i, token in enumerate(command.lower().replace('"', ' ').replace("'", ' ').split()):
+        if i and token.startswith('-'):
+            token = token.split('=', 1)[0]
+        elif i and '/' in token:
+            continue  # a path such as tests/fix_parser.py
+        words.update(w for w in re.split(r'[/=._:-]+', token) if w)
+    return words
 
 
 def mutating(command):
@@ -551,7 +559,8 @@ class Scan:
                 p for p in seen if command not in from_mention or checking(p)]
             safe = []
             for p in calls:
-                if not mutating(p) and not re.search(r'[<>{}$*]|\b[A-Z][A-Z_]+\b', p) and p not in safe:
+                if PLAIN_CALL.fullmatch(p) and not re.search(r'\b[A-Z][A-Z_]+\b', p) and not mutating(p) \
+                        and p not in safe:
                     safe.append(p)
             if not safe:
                 detected.remove(entry)
