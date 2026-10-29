@@ -1067,9 +1067,12 @@ class ShipshapeTests(unittest.TestCase):
         for criterion in ('plugin-installation', 'assigned-plugin-scenarios', 'consumer-state-boundaries', 'issue-criteria'):
             self.assertIn(criterion, acceptance)
         self.assertIn('pending', acceptance)
-        for path in ('releases.json', '.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json', 'docs/pi-packages.md'):
-            original = subprocess.run(['git', '-C', str(ROOT), 'show', 'cd7346a33eca33a45f232d17db2e1804d573dccf:' + path], capture_output=True, check=True).stdout
-            self.assertEqual((ROOT / path).read_bytes(), original, path)
+        # Declared without advertisement: no release record, index entry or install command names it.
+        releases = json.loads((ROOT / 'releases.json').read_text())['releases']
+        self.assertNotIn('shipshape', [r['name'] for r in releases])
+        for path in ('.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json'):
+            self.assertNotIn('shipshape', [p['name'] for p in json.loads((ROOT / path).read_text())['plugins']], path)
+        self.assertNotIn('shipshape', (ROOT / 'docs/pi-packages.md').read_text())
 
     def test_four_document_package_coherence(self):
         for name in ('README.md', 'process.md', 'adapt.md', 'examples.md'):

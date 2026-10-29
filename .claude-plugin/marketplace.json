@@ -8,20 +8,20 @@
   "plugins": [
     {
       "name": "claudit",
-      "version": "3.2.3",
-      "description": "Audit and optimize your Claude Code configuration. Caches current Claude Code ecosystem knowledge so any subsequent agent task — building a skill, configuring an MCP, authoring CLAUDE.md — can read it instead of re-fetching docs.",
+      "version": "4.0.0",
+      "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/acoz-labs/quickstop.git",
         "path": "plugins/claudit",
-        "sha": "e23d2fc80a0b06db16cb63cdfafd309f88f35c3c"
+        "sha": "a4342d07ffe4aa5256dc8b908e7b3b8cf8a7eeb4"
       },
       "keywords": [
         "audit",
         "configuration",
         "optimization",
-        "health-check",
-        "best-practices"
+        "best-practices",
+        "grading"
       ]
     },
     {

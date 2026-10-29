@@ -94,12 +94,13 @@ whose results aren't used cost an estimated $0.3.
 
 Recorded on 2026-10-29 against the same suite, Claude Code 2.1.312, model
 `claude-sonnet-5-5` and judge `claude-haiku-5-5`. Every arm ran as one
-`bin/claudit-eval run` pass; no cache was seeded (4.0 has none).
+`bin/claudit-eval run` pass; no cache was seeded (4.0 has none). The Claudit arms
+below ran on the released plugin tree `0939a97d76974df10b5016b2e1f9dfe61d03330d`.
 
 | Arm | Tools granted | Runs per case | Planted findings hit | F4 false defects | Structure graders | Agent $ (per run) | Judge $ | Wall s (per run) |
 |---|---|---|---|---|---|---|---|---|
-| Claudit 4.0.0, live docs | `Bash`, `WebFetch(domain:code.claude.com)` (`--web-fetch`) | 3 | 42/42 (100%) | 0 | 60/60 | 2.10 (0.140) | 0.041 | 940 (62.7) |
-| Claudit 4.0.0, docs unreachable | `Bash` only | 1 | 14/14 (100%) | 0 | 20/20 | 0.49 (0.097) | 0.013 | 217 (43.4) |
+| Claudit 4.0.0, live docs | `Bash`, `WebFetch(domain:code.claude.com)` (`--web-fetch`) | 3 | 41/42 (98%) | 0 | 60/60 | 2.13 (0.142) | 0.041 | 848 (56.5) |
+| Claudit 4.0.0, docs unreachable | `Bash` only | 1 | 14/14 (100%) | 0 | 20/20 | 0.46 (0.093) | 0.013 | 168 (33.6) |
 | Plain prompt, no plugin | `Bash`, `WebFetch(domain:code.claude.com)` (`--web-fetch`) | 3 | 25/42 (60%) | 3 (in 3 runs) | 0/60 | 1.18 (0.079) | 0.041 | 693 (46.2) |
 
 Claudit was invoked as `/claudit:claudit --read-only`. Every case also lists the
@@ -108,9 +109,17 @@ fails and Claudit grades from its shipped catalog, which is the docs-unreachable
 path. Granting the plain prompt the same docs access didn't raise its hit count
 (25/42 both times). The bar 4.0 had to beat was the highest baseline, 25/42.
 
-Every planted F3 defect was hit in all three live runs and in the offline run.
-Per fixture, live: F1 9/9, F2 9/9, F3 18/18, F5 6/6. Offline: F1 3/3, F2 3/3,
+Per fixture, live: F1 9/9, F2 9/9, F3 17/18, F5 6/6. Offline: F1 3/3, F2 3/3,
 F3 6/6, F5 2/2. Plain with docs: F1 6/9, F2 4/9, F3 11/18, F5 4/6.
+
+The live arm's one miss is `finding-flat-skill` in F3 run 3 (judge votes PASS,
+FAIL, FAIL), although that report names `.claude/skills/release-notes.md` as a flat
+file that won't load and gives the `git mv` to `.claude/skills/release-notes/SKILL.md`.
+The gate was accepted on that verified grader false negative (#156). A script
+grader for F3's structural defects would remove this judge noise.
+
+An earlier candidate (plugin tree `421c6c4`, before review) scored 42/42 live and
+14/14 offline under the same conditions.
 
 The pooled summaries are `claudit-4.0-live.json`, `claudit-4.0-offline.json` and
 `plain-web-fetch.json` in [claudit-eval-baselines/](claudit-eval-baselines/).
