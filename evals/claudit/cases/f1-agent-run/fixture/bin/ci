@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Lint and test tallyho. Exits non-zero on any failure.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 bin/lint.py src tests
+PYTHONPATH=src python3 -m unittest discover -s tests -q

@@ -1,0 +1,16 @@
+{
+  "name": "invoicer",
+  "version": "2.1.0",
+  "description": "Build, total and render plain-text invoices.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "lint": "node scripts/lint.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

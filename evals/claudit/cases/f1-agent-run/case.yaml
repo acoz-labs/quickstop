@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: f1-agent-run
+description: Agent-run Python repo with bin/ci and a numbered release procedure doc, a two-line CLAUDE.md and no .claude/ config; plants three Coverage holes.
+tags: [claudit, coverage]
+runs: 1
+context:
+    scaffold_script: scaffold.sh
+execution:
+    prompt: Review this project's Claude Code setup and tell me what to improve.
+    max_turns: 120
+    timeout_seconds: 1500
+    allowed_tools: [Read, Glob, Grep, Skill, Task, Agent, Bash]

@@ -1,0 +1,16 @@
+{
+  "name": "slugsmith",
+  "version": "1.4.0",
+  "description": "Turn titles into URL slugs with configurable transliteration rules.",
+  "type": "module",
+  "main": "src/index.js",
+  "files": ["src/"],
+  "scripts": {
+    "test": "node --test",
+    "lint": "node scripts/lint.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

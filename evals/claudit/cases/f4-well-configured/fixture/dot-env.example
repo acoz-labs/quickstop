@@ -1,0 +1,2 @@
+# Copy to .env for `npm publish`. Never commit .env.
+NPM_TOKEN=

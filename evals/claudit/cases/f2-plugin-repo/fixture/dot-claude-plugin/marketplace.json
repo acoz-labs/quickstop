@@ -1,0 +1,14 @@
+{
+  "name": "changelog-helper",
+  "owner": {
+    "name": "Example Maintainers",
+    "email": "maintainers@example.invalid"
+  },
+  "plugins": [
+    {
+      "name": "changelog-helper",
+      "source": "./",
+      "description": "Draft Keep a Changelog entries from the commits since the last tag."
+    }
+  ]
+}
