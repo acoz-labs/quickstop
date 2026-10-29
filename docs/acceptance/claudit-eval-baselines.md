@@ -89,3 +89,28 @@ Total for #155 at list prices: about $17.0. The pooled arms above cost $10.94
 seed cost $1.33, and two scoped-permission seed checks $2.24. Two failed seed attempts (permission denials) cost $1.25. F1
 pipeline debugging cost $0.86, sandbox probes $0.03, and one stopped `/doctor` run
 whose results aren't used cost an estimated $0.3.
+
+## Claudit 4.0 gate (#156)
+
+Recorded on 2026-10-29 against the same suite, Claude Code 2.1.312, model
+`claude-sonnet-5-5` and judge `claude-haiku-5-5`. Every arm ran as one
+`bin/claudit-eval run` pass; no cache was seeded (4.0 has none).
+
+| Arm | Tools granted | Runs per case | Planted findings hit | F4 false defects | Structure graders | Agent $ (per run) | Judge $ | Wall s (per run) |
+|---|---|---|---|---|---|---|---|---|
+| Claudit 4.0.0, live docs | `Bash`, `WebFetch(domain:code.claude.com)` (`--web-fetch`) | 3 | 42/42 (100%) | 0 | 60/60 | 2.10 (0.140) | 0.041 | 940 (62.7) |
+| Claudit 4.0.0, docs unreachable | `Bash` only | 1 | 14/14 (100%) | 0 | 20/20 | 0.49 (0.097) | 0.013 | 217 (43.4) |
+| Plain prompt, no plugin | `Bash`, `WebFetch(domain:code.claude.com)` (`--web-fetch`) | 3 | 25/42 (60%) | 3 (in 3 runs) | 0/60 | 1.18 (0.079) | 0.041 | 693 (46.2) |
+
+Claudit was invoked as `/claudit:claudit --read-only`. Every case also lists the
+granted tools in its `allowed_tools`. Without `--web-fetch` the live-docs fetch
+fails and Claudit grades from its shipped catalog, which is the docs-unreachable
+path. Granting the plain prompt the same docs access didn't raise its hit count
+(25/42 both times). The bar 4.0 had to beat was the highest baseline, 25/42.
+
+Every planted F3 defect was hit in all three live runs and in the offline run.
+Per fixture, live: F1 9/9, F2 9/9, F3 18/18, F5 6/6. Offline: F1 3/3, F2 3/3,
+F3 6/6, F5 2/2. Plain with docs: F1 6/9, F2 4/9, F3 11/18, F5 4/6.
+
+The pooled summaries are `claudit-4.0-live.json`, `claudit-4.0-offline.json` and
+`plain-web-fetch.json` in [claudit-eval-baselines/](claudit-eval-baselines/).
