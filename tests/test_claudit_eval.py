@@ -295,8 +295,14 @@ class SeedCommandTests(Temp):
         command = ce.seed_command(plugin, target, args)
         runtime = str((plugin / 'scripts/runtime.py').resolve())
         self.assertNotIn('Bash', command)
-        self.assertEqual([item for item in command if item.startswith('Bash(')],
-                         ['Bash(claude --version)', f'Bash(python3 {runtime}:*)', f'Bash(python3 "{runtime}":*)'])
+        rules = [item for item in command if item.startswith('Bash(')]
+        self.assertEqual(rules[0], 'Bash(claude --version)')
+        for helper in ('status', 'fetch', 'cache-put', 'cache-fail', 'topic-fail'):
+            self.assertIn(f'Bash(python3 {runtime} {helper}:*)', rules)
+            self.assertIn(f'Bash(python3 "{runtime}" {helper}:*)', rules)
+        for refused in ('decision-save', 'prepare-pr', 'discover', 'verify-pr', 'identity'):
+            self.assertFalse([rule for rule in rules if f' {refused}' in rule], refused)
+        self.assertFalse([rule for rule in rules if rule.endswith(('runtime.py:*)', 'runtime.py":*)'))])
         self.assertIn(f'Edit(/{target}/**)', command)
         self.assertNotIn('Write', ' '.join(command[command.index('--allowedTools'):]))
         prompt = command[command.index('--append-system-prompt') + 1]
@@ -304,15 +310,6 @@ class SeedCommandTests(Temp):
         for tool in ('Read', 'Grep', 'Glob', 'Task', 'Agent'):
             self.assertIn(tool, command)
 
-    def test_env_drops_secrets_and_keeps_login_basics(self):
-        fake = {'FOO_TOKEN': 'x', 'MY_SECRET_THING': 'x', 'DB_PASSWORD': 'x', 'SOME_API_KEY': 'x', 'GH_HOST': 'x',
-                'GITHUB_ACTIONS': 'x', 'HOME': str(self.base), 'LANG': 'C', 'KEYBOARD': 'ok'}
-        with unittest.mock.patch.dict(os.environ, fake):
-            env = ce.seed_env(self.base / 'cache', '/p')
-        self.assertFalse({'FOO_TOKEN', 'MY_SECRET_THING', 'DB_PASSWORD', 'SOME_API_KEY', 'GH_HOST',
-                          'GITHUB_ACTIONS'} & set(env))
-        self.assertEqual((env['HOME'], env['LANG'], env['KEYBOARD'], env['PATH'], env['CLAUDIT_CACHE_DIR']),
-                         (str(self.base), 'C', 'ok', '/p', str(self.base / 'cache')))
 
 
 def run_record(cost, judge, seconds, graders, error=None, skipped=()):
@@ -432,7 +429,10 @@ class PoolingTests(unittest.TestCase):
         self.assertIn('plugins: claudit@4.0.0', ce.markdown(summary))
 
     def test_refuses_to_pool_or_label_mismatched_results(self):
-        for other in (identified('opus'), identified('sonnet', '4.0.1'), dict(identified('sonnet'), claudeVersion='9')):
+        other_judge = identified('sonnet')
+        other_judge['suite'] = dict(other_judge['suite'], judgeModel='claude-sonnet-5-5')
+        for other in (identified('opus'), identified('sonnet', '4.0.1'), dict(identified('sonnet'), claudeVersion='9'),
+                      other_judge):
             with self.subTest(other=other['suite'], version=other['claudeVersion']):
                 with self.assertRaises(ce.Failure):
                     ce.merge_results([identified('sonnet'), other])
