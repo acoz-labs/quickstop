@@ -17,6 +17,16 @@ CASES = ROOT / 'evals/claudit/cases'
 GATE_REPORTS = Path(__file__).resolve().parent / 'claudit_gate_reports'
 
 
+def risky_only_bypass():
+    """F3 run 2 with its bypass item saying only "risky", keeping Claudit's own `Source:` citation (review round 4, M4)."""
+    lines = (GATE_REPORTS / 'f3-misconfigured-run2.md').read_text().split('\n')
+    problem = next(i for i, line in enumerate(lines) if 'ignores this value' in line)
+    lines[problem] = '   Problem: It gives everyone who opens the repo full bypass, which is risky.'
+    lines[problem + 1] = '   Why: Bypass removes every safety prompt.'
+    assert 'Source: [A value you set is ignored]' in lines[problem + 3]
+    return '\n'.join(lines)
+
+
 def gate_report(name, drop=()):
     """A gate report, optionally without the lines that contain any of `drop`."""
     text = (GATE_REPORTS / name).read_text()
@@ -369,6 +379,37 @@ for name, passes, text in [
     ('finding-oversized-claude-md', False, '1. **Keep CLAUDE.md under 200 lines**\n   Change: trim it as it grows.'),
     ('finding-oversized-claude-md', False, '- CLAUDE.md is 241 lines.\n- Remove `defaultMode` from settings.'),
     ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines; that is fine for this project.'),
+    # Review round 4: the citation heading is not a diagnosis (M4), and the two wordings the lows found.
+    ('finding-project-bypass', False, risky_only_bypass()),
+    ('finding-project-bypass', True, risky_only_bypass().replace('Bypass removes every safety prompt.',
+                                                                 'Claude Code ignores it in project settings.')),
+    ('finding-oversized-claude-md', True, '6. **Shrink CLAUDE.md** (Alignment, effort M)\n   Problem: CLAUDE.md is 241 lines '
+                                          'of per-function notes.\n   Change: Move the per-function notes into code comments '
+                                          'and keep CLAUDE.md to the commands.'),
+    ('finding-oversized-claude-md', True, '6. **Shrink CLAUDE.md**\n   Problem: CLAUDE.md is 241 lines.\n   Change: Replace '
+                                          'CLAUDE.md with this 15-line version.'),
+    ('finding-oversized-claude-md', False, '6. **Move CLAUDE.md**\n   Problem: CLAUDE.md is 241 lines.\n   Change: Move it to '
+                                           '`.claude/CLAUDE.md`.'),
+    ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines; keep it as is.'),
+    ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines. Replace the `Write(src/**)` rule with `Edit(src/**)`.'),
+    ('finding-plugin-eval', True, 'There is no `evals/` directory.\n\n4. **Gate on evals**\n   Change: adopt '
+                                  '`claude plugin eval` as the release gate.'),
+    ('finding-plugin-eval', True, 'The skill has no evals.\n\n4. **Add evals**\n   Change: write cases in `evals/` and '
+                                  'check them with `claude plugin eval`.'),
+    ('finding-plugin-eval', False, 'There are no evals. `claude plugin eval` is not something this repo needs.'),
+    # My own bypass pass after review round 4 (citation lines, move/replace/keep cuts, more recommend verbs).
+    ("finding-project-bypass", True, "3. **Remove `defaultMode`**\n   Problem: `defaultMode` has no effect in project settings.\n   Change: delete it.\n   Source: [Permission modes](https://x)"),
+    ("finding-project-bypass", False, "3. **Remove `defaultMode`**\n   Problem: `bypassPermissions` is dangerous.\n   Change: delete `defaultMode`.\n   Source: [`defaultMode` is ignored in project settings](https://x)"),
+    ("finding-project-bypass", True, "3. **Remove `defaultMode`**\n   Source: [docs](https://x)\n   Problem: Claude Code ignores `defaultMode` here.\n   Change: delete it."),
+    ("finding-oversized-claude-md", True, "- CLAUDE.md is 241 lines: move the detailed sections out to docs/ and keep CLAUDE.md to the rules."),
+    ("finding-oversized-claude-md", True, "- CLAUDE.md is 241 lines; replace it with a shorter version."),
+    ("finding-oversized-claude-md", True, "- CLAUDE.md is 241 lines; keep it under 120."),
+    ("finding-oversized-claude-md", False, "- CLAUDE.md is 241 lines; move the file to `.claude/CLAUDE.md`."),
+    ("finding-oversized-claude-md", False, "- CLAUDE.md is 241 lines; replace `@AGENTS.md` with the real path."),
+    ("finding-oversized-claude-md", False, "- CLAUDE.md is 241 lines; keep CLAUDE.md as the single source."),
+    ("finding-plugin-eval", True, "No evals cover the skill.\n\n2. **Evals**\n   Change: test the skill with `claude plugin eval`."),
+    ("finding-plugin-eval", True, "Nothing measures the skill: there are no evals.\n\n2. **Evals**\n   Change: verify it with `claude plugin eval` before release."),
+    ("finding-plugin-eval", False, "2. **Evals**\n   Change: check them with `claude plugin eval`."),
     # My own bypass pass on the three round-4 graders.
     ('finding-plugin-eval', True, '2. **Measure the skill**\n   Problem: the skill is never evaluated.\n   Change: create `evals/changelog-entry/` and run `claude plugin eval .` in CI.'),
     ('finding-plugin-eval', True, 'Coverage: no evals. Add an eval suite under evals/ and gate releases on `claude plugin eval`.'),
