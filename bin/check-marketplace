@@ -310,17 +310,26 @@ def package_digest(root, path, commit=None):
 
 
 def published_provenance(root):
-    """The provenance each (name, harness, commit) had when releases.json history first recorded it."""
+    """The provenance releases.json history first gave each published commit, version and package digest."""
     first = {}
-    for commit in reversed(git(root, 'log', '--format=%H', '--', 'releases.json').split()):
+    for commit in reversed(git(root, 'log', '--topo-order', '--format=%H', '--', 'releases.json').split()):
         result = subprocess.run(['git', '-C', str(root), 'show', f'{commit}:releases.json'], capture_output=True, text=True)
         if result.returncode:
             continue  # the commit that deleted the lock
         records = decode(result.stdout).get('releases')
         for record in records if isinstance(records, list) else []:
             if isinstance(record, dict):
-                first.setdefault((record.get('name'), record.get('harness'), record.get('commit')), record.get('provenance'))
+                for key in published_keys(record):
+                    first.setdefault(key, record.get('provenance'))
     return first
+
+
+def published_keys(record):
+    """A release is one commit, one version and one package digest; none of them can be re-accepted."""
+    manifest = record.get('manifest') if isinstance(record.get('manifest'), dict) else {}
+    target = record.get('name'), record.get('harness')
+    return [(*target, 'commit', record.get('commit')), (*target, 'version', manifest.get('version')),
+            (*target, 'sha256', record.get('sha256'))]
 
 
 def load_releases(root, packages):
@@ -357,8 +366,9 @@ def load_releases(root, packages):
             require(re.fullmatch('sha256:[0-9a-f]{64}', provenance['artifact']) is not None, 'immutable accepted archive required')
             require(isinstance(provenance['acceptance'], str) and re.fullmatch(r'https://github.com/acoz-labs/quickstop/issues/' + str(provenance['issue']) + r'#issuecomment-[0-9]+', provenance['acceptance']), 'authenticated acceptance receipt link required')
         # A published release keeps its provenance; a new acceptance needs a new candidate commit.
-        require(published.get((*key, record['commit']), provenance) == provenance,
-                f'{key}: provenance differs from the published record for {record["commit"]}')
+        for pin in published_keys(record):
+            require(published.get(pin, provenance) == provenance,
+                    f'{key}: provenance differs from the published record for {pin[2]} {pin[3]}')
         releases[key] = record
     return releases
 

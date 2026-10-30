@@ -452,6 +452,29 @@ class Correctness(Project):
         self.write('.claude/CLAUDE.md', '@../AGENTS.md\n')
         self.assertTrue(self.loading()[0]['AGENTS.md'])
 
+    def test_claude_md_above_the_project_stops_agents_md(self):
+        self.write('repo/AGENTS.md', '# Agents\n')
+        self.write('repo/.claude/settings.json', {})
+        for rel in ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md'):
+            with self.subTest(rel=rel):
+                self.write(rel, '# Above\n')
+                result = cl.Scan(os.path.join(self.root, 'repo'), False, cl.load_catalog(), '2.1.312').run()
+                above = os.path.join(self.root, rel)
+                self.assertEqual({i['path']: i['loaded'] for i in result['inventory']['instructions']}, {'AGENTS.md': False})
+                self.assertIn("Not loaded: AGENTS.md (%s exists and doesn't import it)." % above,
+                              result['inventory']['instruction_loading'])
+                fix = self.finding(result, 'agents-md-not-loaded:AGENTS.md')['fix']
+                self.assertIn('Add "@%s" to %s' % (os.path.relpath(os.path.join(self.root, 'repo/AGENTS.md'),
+                                                                     os.path.dirname(above)), above), fix)
+                os.remove(above)
+
+    def test_directly_read_agents_md_carries_the_session_caveats(self):
+        self.write('AGENTS.md', '# Agents\n')
+        sentence = self.loading()[1]
+        for caveat in ('user-level setting', 'disabled built-in AGENTS.md plugin', 'first session after upgrading',
+                       '2.1.277 to 2.1.280 on Amazon Bedrock or with telemetry off'):
+            self.assertIn(caveat, sentence)
+
     def test_old_claude_code_reads_agents_md_only_through_an_import(self):
         self.write('AGENTS.md', '# Agents\n')
         loaded, sentence, findings = self.loading('2.1.276')
