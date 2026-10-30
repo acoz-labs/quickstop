@@ -68,7 +68,7 @@ TAIL = """
 ---
 Claude Code 2.1.314, catalog 2026-10-29.
 """
-FEWER = 'Fewer than 3 changes are worth making: the setup already runs checks, denies secrets and enforces tests.\n\n'
+FEWER = '2 changes are worth making: the setup already runs checks, denies secrets and enforces tests.\n\n'
 FENCED_STEPS = """   ```markdown
 1. Read docs/release.md.
 2. Bump the version.
@@ -86,8 +86,11 @@ def plan(count, lead='', extra='', tail=TAIL):
 CORPUS = {
     'structure-plan-length': ([
         plan(3), plan(7), plan(5, tail=''), plan(3, tail='\n---\nfooter'), plan(3).rstrip('\n'),
-        plan(2, lead=FEWER), plan(0, lead=FEWER), plan(1, lead='Fewer than three changes are worth making here — '
-                                                               'everything else is already in place.\n\n'),
+        plan(3, lead='3 changes are worth making.\n\n'), plan(2, lead=FEWER),
+        plan(0, lead='No changes are worth making: every baseline item and profile feature is in place.\n\n'),
+        plan(1, lead='Only 1 change is worth making \u2014 everything else is already in place.\n\n'),
+        plan(2, lead='Fewer than three changes are worth making here: everything else is already in place.\n\n'),
+        plan(1, lead='1 change is worth making. The setup is already well fitted to a project this small.\n\n'),
         plan(3, extra=FENCED_STEPS), plan(2, lead='**' + FEWER.replace(': ', ':** ', 1)),
         HEAD.replace('## Top changes', '## Top changes (ranked)') + PLAN_ITEM.format(n=1) * 3 + TAIL,
         HEAD + ''.join('### %d. Change\nProblem: x.\n\n' % n for n in range(1, 5)) + TAIL,
@@ -95,7 +98,8 @@ CORPUS = {
         HEAD + ''.join('%d) Change\n' % n for n in range(1, 4)) + TAIL,
     ], [
         plan(2), plan(8), plan(0), plan(1),
-        plan(3, lead=FEWER), plan(3, lead='**' + FEWER.replace(': ', ':** ', 1)), plan(2, lead='Fewer than 3 changes are worth making.\n\n'),
+        plan(3, lead=FEWER), plan(3, lead='**' + FEWER.replace(': ', ':** ', 1)),
+        plan(2, lead='2 changes are worth making.\n\n'), plan(2, lead='5 changes are worth making.\n\n'),
         plan(2, lead='Only two changes matter here.\n\n'),
         plan(2, extra=FENCED_STEPS),
         plan(2, extra='   1. a sub-step\n   2. another\n'),

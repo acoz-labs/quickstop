@@ -122,6 +122,11 @@ in exactly this form:
 
 ## Top changes
 
+<N> changes are worth making<, and when N is under 3: ": <why no more are">.
+
+<plan length: N is 3 to 7, the changes ranked by impact across all three grades.
+Never pad the list to reach 3; give the reason instead.>
+
 1. **<title>** (<Correctness|Alignment|Coverage>, effort <S|M|L>)
    Problem: <what is wrong or missing now, naming the file (or that it doesn't exist), and what that causes>.
    Why: <how the change serves the intent>.
@@ -136,12 +141,10 @@ in exactly this form:
 <footer>
 ```
 
-Plan length: list 3 to 7 top changes, ranked by impact across all three grades. If
-fewer than 3 are worth making, don't pad the list: make the first line under
-`## Top changes` read "Fewer than 3 changes are worth making: <reason>." and list
-the ones that are. A Coverage hole counts the same as a defect. Every change needs
-the problem, the reason, the exact change and the source. State the problem plainly, even when the grades already
-mention it ("there is no allow rule for `<command>`, so every run prompts").
+Follow the plan length in the shape above. A Coverage hole counts the same as a
+defect. Every change needs the problem, the reason, the exact change and the
+source. State the problem plainly, even when the grades already mention it
+("there is no allow rule for `<command>`, so every run prompts").
 Use the catalog's features for fitting recommendations, including the native checks Claudit can't run for you: recommend `/doctor prompt-audit` when there
 are several or long instruction files, `/doctor` for unused skills, MCP servers and
 slow hooks, `/insights` for recurring friction and `/skill-doctor` for many skills.
