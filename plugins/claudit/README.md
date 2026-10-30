@@ -40,9 +40,10 @@ Asking Claude to audit or improve the Claude Code setup also invokes it.
      enforced by hooks or permissions) plus profiles picked from project signals:
      agent-run repository, plugin or marketplace repository, typed codebase,
      repository with procedure docs.
-3. **The top 3 to 7 changes**, ranked by impact across the three grades. Each has
-   the reason, the exact diff or command, the doc URL and heading it rests on, and
-   the effort.
+3. **The top changes**, ranked by impact across the three grades; the skill's
+   [report step](skills/claudit/SKILL.md#5-report) sets how many. Each has the
+   reason, the exact diff or command, the doc URL and heading it rests on, and the
+   effort.
 4. **An offer to apply** the changes you select, in place or on a branch in an
    isolated worktree with a pull request through `gh`.
 
@@ -54,7 +55,9 @@ that are newer than Claudit's feature catalog.
 - `skills/claudit/scripts/claudit.py` scans the project: inventory, project signals,
   and the misconfigurations the docs name (for example `Write(...)` path rules,
   `.claudeignore`, flat skill files, project `bypassPermissions`, array hook
-  matchers, oversized CLAUDE.md, broken `@` imports and stale paths). It is
+  matchers, oversized CLAUDE.md, broken `@` imports and stale paths). It also
+  reports which instruction files load (`CLAUDE.md`, `AGENTS.md` or both), and the
+  report takes that from the scan rather than stating it from memory. It is
   read-only and needs only the standard library of Python 3.9 or later.
 - `skills/claudit/catalog.json` is the versioned feature catalog: each feature, the
   intent it fits, how to tell it's in use, its doc URL and heading, and its minimum

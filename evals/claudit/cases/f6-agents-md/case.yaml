@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: f6-agents-md
+description: Python package whose only instruction file is AGENTS.md, which Claude Code loads when there is no CLAUDE.md; the report must not say AGENTS.md is ignored.
+tags: [claudit, correctness]
+runs: 1
+context:
+    scaffold_script: scaffold.sh
+execution:
+    prompt: Review this project's Claude Code setup and tell me what to improve.
+    max_turns: 120
+    timeout_seconds: 1500
+    allowed_tools: [Read, Glob, Grep, Skill, Task, Agent, Bash]

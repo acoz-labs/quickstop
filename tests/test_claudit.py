@@ -402,6 +402,68 @@ class Correctness(Project):
         self.assertEqual(inst, {'CLAUDE.md': True, 'AGENTS.md': False, 'docs/agent.md': False})
         self.assertEqual(result['inventory']['instruction_lines_loaded'], 1)
 
+    def loading(self, version='2.1.312'):
+        result = self.scan(version)
+        return ({i['path']: i['loaded'] for i in result['inventory']['instructions']},
+                result['inventory']['instruction_loading'], [i for i in self.ids(result) if i.startswith('agents-md')])
+
+    def test_agents_md_only_loads(self):
+        self.write('AGENTS.md', '# Agents\n')
+        loaded, sentence, findings = self.loading()
+        self.assertEqual(loaded, {'AGENTS.md': True})
+        self.assertTrue(sentence.startswith('Loaded at session start: AGENTS.md (read directly: no CLAUDE.md, '
+                                            '.claude/CLAUDE.md or CLAUDE.local.md;'), sentence)
+        self.assertNotIn('Not loaded', sentence)
+        self.assertEqual(findings, [])
+        self.write('.claude/AGENTS.md', '# More\n')
+        self.assertEqual(self.loading()[0], {'AGENTS.md': True, '.claude/AGENTS.md': True})
+
+    def test_claude_md_only_loads(self):
+        self.write('CLAUDE.md', '# Claude\n')
+        loaded, sentence, findings = self.loading()
+        self.assertEqual(loaded, {'CLAUDE.md': True})
+        self.assertEqual(sentence, 'Loaded at session start: CLAUDE.md. This is the default Project instructions '
+                                   'setting; a user-level setting can change it.')
+        self.assertEqual(findings, [])
+
+    def test_both_load_only_through_an_import(self):
+        self.write('CLAUDE.md', '# Claude\n')
+        self.write('AGENTS.md', '# Agents\n')
+        loaded, sentence, findings = self.loading()
+        self.assertEqual(loaded, {'CLAUDE.md': True, 'AGENTS.md': False})
+        self.assertIn("Not loaded: AGENTS.md (CLAUDE.md exists and doesn't import it).", sentence)
+        self.assertEqual(findings, ['agents-md-not-loaded:AGENTS.md'])
+        self.assertIn('Add "@AGENTS.md" to CLAUDE.md', self.finding(self.scan(), findings[0])['fix'])
+        self.write('CLAUDE.md', '# Claude\n@AGENTS.md\n')
+        loaded, sentence, findings = self.loading()
+        self.assertEqual(loaded, {'CLAUDE.md': True, 'AGENTS.md': True})
+        self.assertIn('AGENTS.md (imported by CLAUDE.md)', sentence)
+        self.assertEqual(findings, [])
+
+    def test_local_or_dot_claude_instructions_also_stop_agents_md(self):
+        self.write('AGENTS.md', '# Agents\n')
+        for rel in ('CLAUDE.local.md', '.claude/CLAUDE.md'):
+            with self.subTest(rel=rel):
+                self.write(rel, '# Mine\n')
+                loaded, sentence, findings = self.loading()
+                self.assertFalse(loaded['AGENTS.md'])
+                self.assertEqual(findings, ['agents-md-not-loaded:AGENTS.md'])
+                os.remove(os.path.join(self.root, rel))
+        self.write('.claude/CLAUDE.md', '@../AGENTS.md\n')
+        self.assertTrue(self.loading()[0]['AGENTS.md'])
+
+    def test_old_claude_code_reads_agents_md_only_through_an_import(self):
+        self.write('AGENTS.md', '# Agents\n')
+        loaded, sentence, findings = self.loading('2.1.276')
+        self.assertEqual(loaded, {'AGENTS.md': False})
+        self.assertIn('Loaded at session start: none. Not loaded: AGENTS.md (Claude Code 2.1.276', sentence)
+        self.assertIn('2.1.277 or later', self.finding(self.scan('2.1.276'), findings[0])['fix'])
+        self.assertEqual(self.loading('2.1.277')[0], {'AGENTS.md': True})
+        self.assertEqual(self.loading('unknown')[0], {'AGENTS.md': True})
+
+    def test_no_instruction_file_loads_nothing(self):
+        self.assertEqual(self.loading()[:2], ({}, 'No project instruction file exists, so none loads.'))
+
     def test_stale_references(self):
         self.write('docs/present.md', '# p\n')
         self.write('pkg/README.md', 'See `notes/local.md` and ../docs/present.md.\n')

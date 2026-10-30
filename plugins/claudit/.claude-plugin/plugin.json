@@ -1,6 +1,6 @@
 {
   "name": "claudit",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
   "author": {
     "name": "quickstop",

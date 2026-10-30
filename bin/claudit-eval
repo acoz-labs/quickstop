@@ -28,7 +28,8 @@ STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
                  'description': 'Empty plugin for the no-plugin eval arms.'}
 ARMS = ('plain', 'doctor', 'claudit')
 DEFAULT_JUDGE = 'claude-haiku-5-5'
-STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent')
+STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent',
+             'structure-plan-length')
 # Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
 NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
 

@@ -98,6 +98,19 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(m.Invalid, 'independent acceptance'):
             self.publish()
 
+    def test_published_provenance_cannot_be_edited(self):
+        self.publish()
+        self.commit()
+        self.record['provenance']['acceptance'] = 'https://github.com/acoz-labs/quickstop/issues/7#issuecomment-124'
+        with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record'):
+            self.publish()
+        self.git('rm', '-qf', 'releases.json')
+        self.commit()  # history that deleted the lock still remembers the published provenance
+        with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record'):
+            self.publish()
+        self.record['provenance']['acceptance'] = 'https://github.com/acoz-labs/quickstop/issues/7#issuecomment-123'
+        self.publish()
+
     def test_legacy_exception_cannot_accept_new_plugin(self):
         self.record['provenance'] = {'kind': 'legacy-preserved'}
         with self.assertRaisesRegex(m.Invalid, 'only preserves'):

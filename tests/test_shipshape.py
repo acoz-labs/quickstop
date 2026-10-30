@@ -26,6 +26,18 @@ def tearDownModule():
     tempfile.tempdir = _TEMPDIR
 
 
+def shipshape_advertisements(root):
+    """Where a release record, native index entry or Pi install command names Shipshape, in any case."""
+    found = [f'releases.json: {r["name"]}' for r in json.loads((root / 'releases.json').read_text())['releases']
+             if r['name'].lower() == 'shipshape']
+    for path in ('.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json'):
+        found += [f'{path}: {p["name"]}' for p in json.loads((root / path).read_text())['plugins']
+                  if p['name'].lower() == 'shipshape']
+    if 'shipshape' in (root / 'docs/pi-packages.md').read_text().lower():
+        found.append('docs/pi-packages.md')
+    return found
+
+
 class ShipshapeTests(unittest.TestCase):
     def test_copied_package_runs_contained_fixture(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1055,7 +1067,7 @@ class ShipshapeTests(unittest.TestCase):
 
     def test_guide_candidate_coherence(self):
         catalog = json.loads((ROOT / 'catalog.json').read_text())
-        candidates = [p for p in catalog['plugins'] if p['name'] == 'shipshape']
+        candidates = [p for p in catalog['plugins'] if p['name'].lower() == 'shipshape']
         self.assertEqual(len(candidates), 1, 'candidate must be declared without advertisement')
         self.assertEqual(candidates[0]['targets'], {'codex': dict(format='agent-plugin', path='plugins/codex/shipshape', acceptance='docs/acceptance/shipshape.md')})
         guide = (ROOT / 'workflows/shipshape/README.md').read_text()
@@ -1068,11 +1080,25 @@ class ShipshapeTests(unittest.TestCase):
             self.assertIn(criterion, acceptance)
         self.assertIn('pending', acceptance)
         # Declared without advertisement: no release record, index entry or install command names it.
-        releases = json.loads((ROOT / 'releases.json').read_text())['releases']
-        self.assertNotIn('shipshape', [r['name'] for r in releases])
-        for path in ('.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json'):
-            self.assertNotIn('shipshape', [p['name'] for p in json.loads((ROOT / path).read_text())['plugins']], path)
-        self.assertNotIn('shipshape', (ROOT / 'docs/pi-packages.md').read_text())
+        self.assertEqual(shipshape_advertisements(ROOT), [])
+
+    def test_shipshape_advertisement_check_ignores_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in ('releases.json', '.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json',
+                         'docs/pi-packages.md'):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / path, root / path)
+            self.assertEqual(shipshape_advertisements(root), [])
+            lock = json.loads((root / 'releases.json').read_text())
+            lock['releases'].append(dict(lock['releases'][0], name='ShipShape'))
+            (root / 'releases.json').write_text(json.dumps(lock))
+            index = json.loads((root / '.claude-plugin/marketplace.json').read_text())
+            index['plugins'].append(dict(index['plugins'][0], name='SHIPSHAPE'))
+            (root / '.claude-plugin/marketplace.json').write_text(json.dumps(index))
+            (root / 'docs/pi-packages.md').write_text('## Shipshape 1.0.0\n')
+            self.assertEqual(shipshape_advertisements(root), ['releases.json: ShipShape', '.claude-plugin/marketplace.json: '
+                                                              'SHIPSHAPE', 'docs/pi-packages.md'])
 
     def test_four_document_package_coherence(self):
         for name in ('README.md', 'process.md', 'adapt.md', 'examples.md'):

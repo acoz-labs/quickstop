@@ -28,7 +28,7 @@ Look for what a per-file scan misses:
 
 Healthy choices are not findings: a matcher-less Stop hook, `Bash(x:*)` rules, a
 gitignored CLAUDE.local.md, deny rules for secrets. Don't repeat the scan's
-findings.
+findings, and take which instruction files load from the scan's `loaded` flags.
 
 Return at most eight findings, each with: grade (Correctness, Alignment or
 Coverage), severity, file and line, the evidence in one sentence, and the exact
