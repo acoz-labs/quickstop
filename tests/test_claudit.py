@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'plugins/claudit/skills/claudit/scripts/claudit.py'
@@ -56,6 +57,10 @@ class Project(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = os.path.realpath(self._tmp.name)
+        # A CLAUDE.md above the system temp directory must not change what these projects load.
+        ceiling = mock.patch.object(cl.Scan, 'ceiling', self.root)
+        ceiling.start()
+        self.addCleanup(ceiling.stop)
 
     def write(self, rel, content='', mode=None):
         path = os.path.join(self.root, rel)
@@ -464,9 +469,13 @@ class Correctness(Project):
                 self.assertIn("Not loaded: AGENTS.md (%s exists and doesn't import it)." % above,
                               result['inventory']['instruction_loading'])
                 fix = self.finding(result, 'agents-md-not-loaded:AGENTS.md')['fix']
-                self.assertIn('Add "@%s" to %s' % (os.path.relpath(os.path.join(self.root, 'repo/AGENTS.md'),
-                                                                     os.path.dirname(above)), above), fix)
+                self.assertEqual(fix, 'Create CLAUDE.md in the project containing "@AGENTS.md"; %s above the project '
+                                      'otherwise keeps it from loading.' % above)
                 os.remove(above)
+        self.write('CLAUDE.md', '# Above\n')
+        cl.Scan.ceiling = os.path.join(self.root, 'repo')  # nothing above the ceiling is checked
+        result = cl.Scan(os.path.join(self.root, 'repo'), False, cl.load_catalog(), '2.1.312').run()
+        self.assertEqual({i['path']: i['loaded'] for i in result['inventory']['instructions']}, {'AGENTS.md': True})
 
     def test_directly_read_agents_md_carries_the_session_caveats(self):
         self.write('AGENTS.md', '# Agents\n')

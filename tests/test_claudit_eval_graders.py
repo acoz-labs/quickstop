@@ -303,6 +303,22 @@ for name, passes, text in [
     ('no-invented-agents-md-ignored', False, 'Only CLAUDE.md is read by Claude Code.'),
     ('no-invented-agents-md-ignored', False, 'Claude Code reads CLAUDE.md files; AGENTS.md is for other tools.'),
     ('no-invented-agents-md-ignored', False, 'Add `@AGENTS.md` to a new CLAUDE.md so Claude sees it.'),
+    # Review round 2 (L6): a true sentence that must keep passing.
+    ('no-invented-agents-md-ignored', True, 'AGENTS.md loads as the project instructions. Claude Code loads CLAUDE.md '
+                                            'only when one exists, and there is none.'),
+    ('no-invented-agents-md-ignored', True, 'Claude Code reads CLAUDE.md only if it exists; here AGENTS.md loads.'),
+    ('no-invented-agents-md-ignored', True, 'Claude Code expects CLAUDE.md or AGENTS.md, and this repo has AGENTS.md.'),
+    ('no-invented-agents-md-ignored', True, 'Don\u2019t rename AGENTS.md: Claude Code and Codex both read it.'),
+    # Review round 2: wrong claims the reviewer found still passing that the regex now catches.
+    *[('no-invented-agents-md-ignored', False, GRADE % text) for text in (
+        'Your AGENTS.md instructions never make it into Claude\'s context.',
+        'Claude Code expects CLAUDE.md; AGENTS.md is for other tools.',
+        'Claude Code doesn\'t know about AGENTS.md.',
+        'Because there is no CLAUDE.md, Claude Code has no project instructions.',
+        'Rename AGENTS.md to CLAUDE.md so Claude Code reads it.',
+        'Symlink CLAUDE.md to AGENTS.md so Claude Code reads it.',
+        'Claude Code reads CLAUDE.md, and your project has none.',
+    )],
 ]:
     CORPUS[name][0 if passes else 1].append(text)
 

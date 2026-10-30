@@ -266,6 +266,8 @@ def capped(items, name, truncated):
 class Scan:
     """One read-only scan of a project root."""
 
+    ceiling = None  # highest directory checked for CLAUDE files above the project; None is the filesystem root
+
     def __init__(self, root, git, catalog, claude_version, user=False):
         self.root, self.git, self.catalog, self.user = root, git, catalog, user
         self.claude_version = claude_version
@@ -433,7 +435,7 @@ class Scan:
         # Which files load follows the docs' default Project instructions setting (memory#agents-md).
         claude_files = [(f['path'], f['abs']) for f in found if f['kind'] == 'project' and f['path'] in CLAUDE_FILES]
         parent = os.path.dirname(self.root)  # one above the project counts too; ~/.claude/CLAUDE.md doesn't
-        while True:
+        while self.ceiling is None or os.path.commonpath([parent, self.ceiling]) == self.ceiling:
             claude_files += [(path, path) for path in (os.path.join(parent, rel) for rel in CLAUDE_FILES)
                              if os.path.isfile(path) and path != os.path.join(HOME, '.claude', 'CLAUDE.md')]
             if os.path.dirname(parent) == parent:
@@ -792,6 +794,9 @@ class Scan:
                          'Add "@%s" to %s so both load, or move what Claude needs into it.' % (
                              os.path.relpath(item['abs'], os.path.dirname(item['blocked_by'][0][1])),
                              item['blocked_by'][0][0])
+                         if item['blocked_by'] and not os.path.isabs(item['blocked_by'][0][0]) else
+                         'Create CLAUDE.md in the project containing "@%s"; %s above the project otherwise keeps it '
+                         'from loading.' % (path, item['blocked_by'][0][0])
                          if item['blocked_by'] else 'Upgrade Claude Code to %s or later, or create a CLAUDE.md containing '
                          '"@%s".' % ('.'.join(map(str, AGENTS_MD_READ)), path),
                          'memory-agents-md', confidence='medium')
