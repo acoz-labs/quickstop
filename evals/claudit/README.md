@@ -28,8 +28,8 @@ the suite moves into the plugin.
 Every case also has five `structure-*` regex graders: the report states the
 project's intent, gives Correctness, Alignment and Coverage grades, each with a
 confidence (Claudit 4.0 targets), and follows the plan-length rule in Claudit's
-skill: 3 to 7 top changes, or the "Fewer than 3 changes are worth making" line
-(a 4.0.1 target).
+skill: 3 to 7 top changes, or a first line such as "2 changes are worth making:
+<reason>" (a 4.0.1 target).
 
 F3's structural defects (the flat skill's paths and move, `Write(...)`,
 `.claudeignore`, project `defaultMode` and the array matcher) and F6's assertion
