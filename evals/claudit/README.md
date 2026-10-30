@@ -31,17 +31,23 @@ confidence (Claudit 4.0 targets), and follows the plan-length rule in Claudit's
 skill: 3 to 7 top changes, or a first line such as "2 changes are worth making:
 <reason>" (a 4.0.1 target).
 
-F3's structural defects (the flat skill's paths and move, `Write(...)`,
-`.claudeignore`, project `defaultMode` and the array matcher) are regex graders,
-so they cost nothing and don't vary with the judge. They need the named path or
-rule and the fix, plus a not-read or ignored word on the same line for
-`.claudeignore` and `defaultMode`. A report that names both but endorses the
-defect would still pass. F6 pairs a regex backstop for common wordings with a
-judge grader for the rest. Each grader file states what it matches, and
-`tests/test_claudit_eval_graders.py` runs every regex grader against reports that
-must pass and must fail, in Python and, when node is installed, in JavaScript, the
-engine `claude plugin eval` uses. F3's oversized CLAUDE.md and F1, F2, F4 and F5's
-`finding-*` and `no-invented-*` graders stay with the model judge.
+F3's six planted findings (the flat skill's paths and move, `Write(...)`,
+`.claudeignore`, project `defaultMode`, the array matcher and the oversized
+CLAUDE.md) and F2's missing `claude plugin eval` are regex graders, so they cost
+nothing and don't vary with the judge. They need the named defect and the fix, and
+some need a not-read, missing or size statement in the same line, sentence or
+change item. A report that names both but endorses the defect would still pass.
+F6 pairs a regex backstop for common wordings with a judge grader for the rest.
+Each grader file states what it matches. `tests/test_claudit_eval_graders.py` runs
+every regex grader against reports that must pass and must fail, in Python and,
+when node is installed, in JavaScript, the engine `claude plugin eval` uses. Its
+fixtures include the 18 final reports from the first 4.0.1 gate run
+(`tests/claudit_gate_reports/`).
+
+These still use the model judge, because each needs judgment about what a report
+recommends: F1's three findings, F2's `claude plugin validate` and stale
+reference, F5's two findings, every F4 `no-invented-*` grader, and F6's
+`no-invented-agents-md-not-loaded`.
 
 Fixtures store dotfiles as `dot-*` and instruction files as `*.fixture` so this
 repository carries no live Claude Code configuration. `scaffold.sh` maps the

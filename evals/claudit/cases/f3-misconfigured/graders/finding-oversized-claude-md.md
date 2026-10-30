@@ -1,9 +1,11 @@
 ---
-type: llm
+type: regex
+pattern: '(?:^|\n)(?=(?:(?!\n[ \t]*\n(?=\S)|\n(?=[0-9]+[.)][ \t]|#|[-*+][ \t]))[\s\S])*?CLAUDE\.md)(?=(?:(?!\n[ \t]*\n(?=\S)|\n(?=[0-9]+[.)][ \t]|#|[-*+][ \t]))[\s\S])*?(?:\b(?:20[1-9]|2[1-9][0-9]|[3-9][0-9]{2}|[1-9],?[0-9]{3})[ \t-]*lines?\b|\b(?:over|more than|above|exceeds?|past|beyond|longer than)\s+(?:the\s+)?(?:recommended\s+)?200(?:[ \t-]+lines?\b|\b)))(?=(?:(?!\n[ \t]*\n(?=\S)|\n(?=[0-9]+[.)][ \t]|#|[-*+][ \t]))[\s\S])*?(?:\bcut\w*|\btrim\w*|\bshorten\w*|\breduc\w*|\bdrop\w*|\bdelet\w*|\bremov\w*|\bcondens\w*|\bslim\w*|\bprun\w*|\bstrip\w*|\bpare\b|\brewrite\w* (?:it )?(?:down|shorter)))'
+flags: i
 weight: 1
 ---
-The fixture's `CLAUDE.md` is about 240 lines, well over the recommended 200-line target, and almost all of it restates the source code function by function (arguments, checks, error messages, examples). Only a few lines carry information the code cannot: the commands (`npm test`, `npm run lint`), Node 20+/ESM, "never store money as a float", "no runtime dependencies", "add a test before changing a tax rate".
+The fixture's `CLAUDE.md` is about 240 lines, well over the recommended 200-line target, and almost all of it restates the source code function by function. Only a few lines carry information the code cannot: the commands (`npm test`, `npm run lint`), Node 20+/ESM, "never store money as a float", "no runtime dependencies", "add a test before changing a tax rate".
 
-PASS only if the report (1) identifies that CLAUDE.md is too long (over ~200 lines) and that it mostly duplicates what the code already says, and (2) recommends cutting it down to what the code can't tell Claude (commands, conventions, rules, gotchas), deleting the function-by-function descriptions or moving any detail worth keeping out of CLAUDE.md (into code comments, a skill, or path-scoped `.claude/rules/`). Splitting it into `@imports` is acceptable only alongside cutting the restated content, since imported files still load into context.
+Script-graded (case-insensitive). One change item names `CLAUDE.md`, states its size, and says to cut it. The size is a line count of 201 or more (also `1,240 lines`) or "over/more than/above/exceed(s)/past/beyond/longer than (the) (recommended) 200 (lines)". The cut is cut..., trim..., shorten..., reduc..., drop..., delet..., remov..., condens..., slim..., prun..., strip..., "pare" or "rewrite (it) down/shorter". A change item ends where a blank line is followed by a column-0 line, or at a column-0 numbered item, `#` heading or `-`/`*`/`+` bullet, so an item's title, Problem, Why and Change lines and its fenced blocks are one unit.
 
-FAIL if the report only says the file is long without noting the code restatement, only suggests reorganising or importing the same content, or does not recommend trimming it.
+The grader doesn't check that the report says the file restates the code; that part of the old judged rubric is no longer graded. "Under 200 lines" alone isn't a size, and a size in one item with a cut in another fails.
