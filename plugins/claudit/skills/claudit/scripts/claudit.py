@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 
-VERSION = '4.0.0'
+VERSION = '4.0.1'
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(HERE, '..', 'catalog.json')
 CAP = 40
@@ -33,10 +33,13 @@ MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write',
 # Calls Claudit suggests are plain words, paths and flags: no quotes, substitutions or shell operators.
 PLAIN_CALL = re.compile(r'[\w./=,:+@%-]+(?: [\w./=,:+@%-]+)*')
 SECRET_EXAMPLES = ('.env.example', '.env.sample', '.env.template')
-ROOT_INSTRUCTIONS = ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md')
+CLAUDE_FILES = ('CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md')  # any one keeps AGENTS.md from loading by default
+AGENTS_FILES = ('AGENTS.md', '.claude/AGENTS.md')
+ROOT_INSTRUCTIONS = CLAUDE_FILES + AGENTS_FILES
 PROJECT_SETTINGS = ('.claude/settings.json', '.claude/settings.local.json')
 DISMISSED = '.claude/claudit-dismissed.json'
 DEFAULT_MODE_IGNORED = (2, 1, 257)
+AGENTS_MD_READ = (2, 1, 277)  # first Claude Code version that reads AGENTS.md without an import
 NUMBERED = re.compile(r'^\s*\d+[.)]\s')
 FENCE = re.compile(r'^\s*(```|~~~)')
 PROCEDURE_WORDS = re.compile(r'release|deploy|runbook|procedure|playbook|rollout|onboarding|sdlc|delivery|review', re.I)
@@ -403,13 +406,12 @@ class Scan:
             path = os.path.join(config, 'CLAUDE.md')
             if os.path.isfile(path):
                 keep(path, path, 'user')
-        imported = set()
         queue = list(found)
         while queue:
             item = queue.pop(0)
             item['text'] = self.read(item['abs'], item['path']) or ''
             item['lines'] = len(item['text'].splitlines())
-            item['imports'] = []
+            item['imports'], item['reals'] = [], set()
             for number, line in prose(item['text']):
                 for target in IMPORT.findall(re.sub(r'`[^`]*`', ' ', line)):
                     target = target.rstrip('.,;:!?)')
@@ -422,20 +424,56 @@ class Scan:
                     ok = os.path.exists(resolved)
                     item['imports'].append({'target': target, 'line': number, 'exists': ok})
                     real = os.path.realpath(resolved)
-                    imported.add(real)
+                    item['reals'].add(real)
                     if ok and resolved.endswith('.md') and real not in seen and item.get('depth', 0) < 5:
                         seen.add(real)
                         queue.append({'path': self.display(resolved), 'abs': resolved, 'kind': 'import',
                                       'depth': item.get('depth', 0) + 1, 'parent': item})
                         found.append(queue[-1])
-        names = {f['path'] for f in found}
-        for item in found:  # parents precede their imports, so a parent's state is known
-            if item['kind'] == 'import':
-                item['loaded'] = item['parent']['loaded']
-            else:
-                item['loaded'] = item['path'] != 'AGENTS.md' or os.path.realpath(item['abs']) in imported \
-                    or not ({'CLAUDE.md', '.claude/CLAUDE.md'} & names)
+        # Which files load follows the docs' default Project instructions setting (memory#agents-md).
+        claude_files = [f['path'] for f in found if f['kind'] == 'project' and f['path'] in CLAUDE_FILES]
+        version = version_tuple(self.claude_version)
+        direct = not claude_files and not (version and version < AGENTS_MD_READ)
+        for item in found:
+            item['loaded'] = item['kind'] != 'import' and (item['path'] not in AGENTS_FILES or direct)
+            if item['path'] in AGENTS_FILES and item['kind'] == 'project':
+                item['blocked_by'] = claude_files
+                if direct:
+                    item['why'] = ('read directly: no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md; adding one '
+                                   'stops that unless it imports this file')
+                elif claude_files:
+                    item['why'] = ("%s exists and doesn't import it" % claude_files[0] if len(claude_files) == 1 else
+                                   "%s exist and don't import it" % ' and '.join(claude_files))
+                else:
+                    item['why'] = 'Claude Code %s reads it only through an import; %s and later read it directly' % (
+                        self.claude_version, '.'.join(map(str, AGENTS_MD_READ)))
+        changed = True
+        while changed:  # an import loads with its parent; an AGENTS file also loads when a loaded file imports it
+            changed = False
+            for item in found:
+                if item['loaded']:
+                    continue
+                real = os.path.realpath(item['abs'])
+                importer = item['parent'] if item['kind'] == 'import' else next(
+                    (o for o in found if o is not item and o['loaded'] and real in o['reals']), None)
+                if importer and importer['loaded']:
+                    item['loaded'] = changed = True
+                    if item['kind'] != 'import':
+                        item['why'] = 'imported by %s' % importer['path']
         return found
+
+    @staticmethod
+    def loading(instructions):
+        """One sentence on which project instruction files load, for the report to quote."""
+        roots = [i for i in instructions if i['kind'] == 'project']
+        if not roots:
+            return 'No project instruction file exists, so none loads.'
+        text = 'Loaded at session start: %s.' % (', '.join(
+            i['path'] + (' (%s)' % i['why'] if i.get('why') else '') for i in roots if i['loaded']) or 'none')
+        skipped = ['%s (%s)' % (i['path'], i['why']) for i in roots if not i['loaded']]
+        if skipped:
+            text += ' Not loaded: %s.' % '; '.join(skipped)
+        return text + ' This is the default Project instructions setting; a user-level setting can change it.'
 
     def settings(self):
         files = [(rel, self.abs(rel), 'project') for rel in PROJECT_SETTINGS]
@@ -736,6 +774,14 @@ class Scan:
     def check_instructions(self, instructions):
         for item in instructions:
             path = item['path']
+            if item['kind'] == 'project' and not item['loaded']:
+                self.add('agents-md-not-loaded:' + path, 'alignment', 'medium', 'AGENTS.md does not load', path,
+                         '%s is not loaded: %s' % (path, item['why']),
+                         'Add "@%s" to %s so both load, or move what Claude needs into it.' % (
+                             os.path.relpath(path, os.path.dirname(item['blocked_by'][0]) or '.'), item['blocked_by'][0])
+                         if item['blocked_by'] else 'Upgrade Claude Code to %s or later, or create a CLAUDE.md containing '
+                         '"@%s".' % ('.'.join(map(str, AGENTS_MD_READ)), path),
+                         'memory-agents-md', confidence='medium')
             if item['kind'] == 'project' and item['loaded'] and item['lines'] > 200:
                 self.add('oversized:' + path, 'alignment', 'medium', 'Instruction file over 200 lines', path,
                          '%d lines' % item['lines'], "Cut it to what Claude can't learn from the repo; move "
@@ -1035,6 +1081,7 @@ class Scan:
                                          **({'gitignored': 'CLAUDE.local.md' in self.ignored(['CLAUDE.local.md'])}
                                             if i['path'] == 'CLAUDE.local.md' else {}))
                                     for i in instructions], 'inventory.instructions', t),
+            'instruction_loading': self.loading(instructions),
             'instruction_lines_loaded': sum(i['lines'] for i in instructions
                                             if i['loaded'] and i['kind'] != 'nested'),
             'rules': capped([{'path': f, 'paths_frontmatter': 'paths' in frontmatter_keys(self.text(f) or '')}

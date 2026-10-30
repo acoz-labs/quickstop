@@ -96,6 +96,9 @@ Recorded on 2026-10-29 against the same suite, Claude Code 2.1.312, model
 `claude-sonnet-5-5` and judge `claude-haiku-5-5`. Every arm ran as one
 `bin/claudit-eval run` pass; no cache was seeded (4.0 has none). The Claudit arms
 below ran on the released plugin tree `0939a97d76974df10b5016b2e1f9dfe61d03330d`.
+Source: the [final gate result](https://github.com/acoz-labs/quickstop/issues/156#issuecomment-6509034055)
+posted on #156, and the [decision](https://github.com/acoz-labs/quickstop/issues/156#issuecomment-6509051261)
+that accepted it.
 
 | Arm | Tools granted | Runs per case | Planted findings hit | F4 false defects | Structure graders | Agent $ (per run) | Judge $ | Wall s (per run) |
 |---|---|---|---|---|---|---|---|---|
@@ -118,8 +121,14 @@ file that won't load and gives the `git mv` to `.claude/skills/release-notes/SKI
 The gate was accepted on that verified grader false negative (#156). A script
 grader for F3's structural defects would remove this judge noise.
 
-An earlier candidate (plugin tree `421c6c4`, before review) scored 42/42 live and
-14/14 offline under the same conditions.
-
 The pooled summaries are `claudit-4.0-live.json`, `claudit-4.0-offline.json` and
 `plain-web-fetch.json` in [claudit-eval-baselines/](claudit-eval-baselines/).
+
+## Suite changes for Claudit 4.0.1 (#168)
+
+F3's five structural graders (flat skill, `Write(...)`, `.claudeignore`, project
+`defaultMode`, array matcher) are now regex graders instead of the model judge,
+every case adds `structure-plan-length`, and `f6-agents-md` adds an `AGENTS.md`-only
+fixture with no planted findings. F1 to F5 still plant 42 findings over three runs;
+structure graders are five per case. The 4.0.1 gate results are posted on #168,
+not recorded here.

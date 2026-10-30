@@ -1,0 +1,7 @@
+# csvsum
+
+Agents maintain this repository. Run `bin/check` before you report a change as done.
+
+- Code lives in `src/csvsum/`, tests in `tests/`.
+- Standard library only; add no dependencies.
+- To release, bump `version` in `pyproject.toml`, add a `CHANGELOG.md` entry and tag `vX.Y.Z`.

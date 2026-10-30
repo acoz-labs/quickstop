@@ -23,10 +23,23 @@ the suite moves into the plugin.
 | `f3-misconfigured` | Misconfigured project | `Write(...)` rule, `.claudeignore`, flat skill file, project `bypassPermissions`, array hook matcher, oversized CLAUDE.md |
 | `f4-well-configured` | Sensible current setup | none: `no-invented-*` graders fail when a healthy choice is reported as a defect |
 | `f5-bare` | Go source and tests, no Claude config | project instructions, test-command allowlist |
+| `f6-agents-md` | Python package whose only instruction file is `AGENTS.md` | none: `no-invented-agents-md-ignored` fails when the report says `AGENTS.md` is ignored |
 
-Every case also has four `structure-*` regex graders: the report states the
-project's intent and gives Correctness, Alignment and Coverage grades, each with
-a confidence. Those are Claudit 4.0 targets.
+Every case also has five `structure-*` regex graders: the report states the
+project's intent, gives Correctness, Alignment and Coverage grades, each with a
+confidence (Claudit 4.0 targets), and follows the plan-length rule in Claudit's
+skill: 3 to 7 top changes, or the "Fewer than 3 changes are worth making" line
+(a 4.0.1 target).
+
+F3's structural defects (the flat skill's paths and move, `Write(...)`,
+`.claudeignore`, project `defaultMode` and the array matcher) and F6's assertion
+are regex graders, so they cost nothing and don't vary with the judge. Each grader
+file states what it matches. `tests/test_claudit_eval_graders.py` runs every regex
+grader against reports that must pass and must fail, in Python and, when node is
+installed, in JavaScript, the engine `claude plugin eval` uses. They grade the
+named tokens and the fix, not the explanation: a report that names both but
+endorses the defect would still pass. The oversized CLAUDE.md and every other
+`finding-*` and `no-invented-*` grader stay with the model judge.
 
 Fixtures store dotfiles as `dot-*` and instruction files as `*.fixture` so this
 repository carries no live Claude Code configuration. `scaffold.sh` maps the
@@ -82,5 +95,6 @@ flag, a run has no way to read documentation. `summary.json` records
 `web_fetch`, and `summarize` refuses to pool results that differ in it.
 
 The judge (default `claude-haiku-5-5`, `--judge-model`) reads only the final
-report. Hit rates are model-judged and vary between runs; compare arms with the
+report. F6's failed `no-invented-*` grader counts as a false defect in the F6 row,
+not F4's. Hit rates are model-judged and vary between runs; compare arms with the
 same model, judge and run count.

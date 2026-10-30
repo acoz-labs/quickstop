@@ -1,9 +1,9 @@
 ---
-type: llm
+type: regex
+pattern: '^(?=[\s\S]*(?:(?:defaultMode|bypassPermissions)[^\n]{0,300}(?:\bignor\w*|\bno effect\b|\bnot (?:appl\w*|honou?r\w*|read|take effect|used)\b|n[\x27’]t (?:appl\w*|take effect|honou?r\w*|work\w*|used)\b)|(?:\bignor\w*|\bno effect\b|\bnot (?:appl\w*|honou?r\w*|read|take effect|used)\b|n[\x27’]t (?:appl\w*|take effect|honou?r\w*|work\w*|used)\b)[^\n]{0,300}(?:defaultMode|bypassPermissions)))(?=[\s\S]*(?:(?:\bremov\w*|\bdelet\w*|\bdrop\w*|\btake (?:it )?out\b)[^\n]{0,200}(?:defaultMode|bypassPermissions)|(?:defaultMode|bypassPermissions)[^\n]{0,200}(?:\bremov\w*|\bdelet\w*|\bdrop\w*|\btake (?:it )?out\b)|\n[ \t]*-[ \t]*"defaultMode"))'
+flags: i
 weight: 1
 ---
-The fixture's committed project settings `.claude/settings.json` set `"permissions": {"defaultMode": "bypassPermissions"}`. Claude Code ignores `bypassPermissions` (and `auto`) as `defaultMode` from project or local settings; it takes effect only from user or managed settings, or `--permission-mode` for one session. A committed attempt to bypass every prompt for everyone who clones the repo is also a hazard.
+The fixture's committed project settings `.claude/settings.json` set `"permissions": {"defaultMode": "bypassPermissions"}`. Claude Code ignores `bypassPermissions` (and `auto`) as `defaultMode` from project or local settings; it takes effect only from user or managed settings, or `--permission-mode` for one session.
 
-PASS only if the report (1) identifies `permissions.defaultMode: "bypassPermissions"` in the project `.claude/settings.json` as a problem because it is ignored at project scope (saying it has no effect from the committed file), and (2) recommends removing it from the project file, optionally saying that anyone who really wants it should set it in their own user settings (`~/.claude/settings.json`), managed settings, or pass `--permission-mode bypassPermissions`.
-
-FAIL if the report only calls bypass mode risky or insecure without saying the project-level setting is ignored, if it treats the setting as active, or if its only fix is moving it to `.claude/settings.local.json` (local scope is ignored too).
+Script-graded (case-insensitive): one line names `defaultMode` or `bypassPermissions` and says it is ignored, has no effect, isn't applied, honoured, read or used, or doesn't take effect or work (within 200 characters, either order). And one line says to remove, delete, drop or take out `defaultMode` or `bypassPermissions` (within 120 characters, either order), or a diff line removes `"defaultMode"`.

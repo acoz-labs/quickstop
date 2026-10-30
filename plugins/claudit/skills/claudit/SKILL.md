@@ -1,6 +1,6 @@
 ---
 name: claudit
-description: Grade this project's Claude Code setup (Correctness, Alignment, Coverage) against what the project is for, and recommend the 3-7 changes that would improve it most, with exact diffs and doc citations. Use when asked to audit, review, grade or optimize a Claude Code configuration, CLAUDE.md, settings, hooks, skills or permissions.
+description: Grade this project's Claude Code setup (Correctness, Alignment, Coverage) against what the project is for, and recommend the few changes that would improve it most, with exact diffs and doc citations. Use when asked to audit, review, grade or optimize a Claude Code configuration, CLAUDE.md, settings, hooks, skills or permissions.
 argument-hint: "[focus] [--read-only] [--user]"
 allowed-tools: Read Grep Glob Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py scan *) Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py new-pages *) Bash(claude --version) WebFetch(domain:code.claude.com)
 model: sonnet
@@ -94,6 +94,11 @@ Confidence is high when the scan covered every file and the finding is
 deterministic, medium when it rests on inferred intent or the docs were
 unreachable, low when files were unreadable or the scan didn't run.
 
+Anything you say about which instruction files load must match the scan's
+`inventory.instruction_loading` and each file's `loaded` flag. Never say from
+memory that Claude Code reads or ignores `CLAUDE.md` or `AGENTS.md`. When `AGENTS.md`
+is loaded, don't recommend a `CLAUDE.md` to make it load.
+
 A finding is a defect only if the scan reported it or you confirmed it against the
 docs. Healthy choices are not defects: a matcher-less Stop hook, `Bash(x:*)`
 rules, a gitignored CLAUDE.local.md, deny rules protecting secrets, an absent
@@ -131,9 +136,11 @@ in exactly this form:
 <footer>
 ```
 
-Pick 3 to 7 top changes ranked by impact across all three grades. A Coverage hole
-counts the same as a defect. Every change needs the problem, the reason, the exact
-change and the source. State the problem plainly, even when the grades already
+Plan length: list 3 to 7 top changes, ranked by impact across all three grades. If
+fewer than 3 are worth making, don't pad the list: make the first line under
+`## Top changes` read "Fewer than 3 changes are worth making: <reason>." and list
+the ones that are. A Coverage hole counts the same as a defect. Every change needs
+the problem, the reason, the exact change and the source. State the problem plainly, even when the grades already
 mention it ("there is no allow rule for `<command>`, so every run prompts").
 Use the catalog's features for fitting recommendations, including the native checks Claudit can't run for you: recommend `/doctor prompt-audit` when there
 are several or long instruction files, `/doctor` for unused skills, MCP servers and

@@ -44,8 +44,8 @@ measuring Claudit doesn't change plugin bytes.
   (`claude plugin validate --strict`) and inventory results.
 - Run a headless read-only audit on a real repository at the candidate and on one
   other repository. Each report states the intent, gives Correctness, Alignment
-  and Coverage grades with confidences, and ranks 3 to 7 changes with exact diffs
-  and doc citations. Record wall time and cost at list prices.
+  and Coverage grades with confidences, and ranks its top changes with exact diffs
+  and doc citations, following the plan-length rule in the skill's report step. Record wall time and cost at list prices.
 - Compare the consumer's files, Git index and working tree before and after a
   read-only audit: nothing changes, no cache directory is created (check
   `~/.cache/claudit` and `CLAUDIT_CACHE_DIR`) and nothing is written outside the
