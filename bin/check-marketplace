@@ -81,8 +81,9 @@ def component_path(package, value):
     return path
 
 
-def git(root, *args):
-    result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True)
+def git(root, *args, stdin=None):
+    # Replace refs would let a local ref rewrite published history and package bytes.
+    result = subprocess.run(['git', '-C', str(root), '--no-replace-objects', *args], input=stdin, capture_output=True, text=True)
     require(result.returncode == 0, 'Git comparison failed; supply an existing commit with --base')
     return result.stdout
 
@@ -297,7 +298,7 @@ def package_digest(root, path, commit=None):
             metadata, name = entry.split('\t', 1)
             mode, kind, oid = metadata.split()
             require(kind == 'blob' and mode in ('100644', '100755'), 'artifact contains unsupported file type')
-            content = subprocess.run(['git', '-C', str(root), 'cat-file', 'blob', oid], check=True, capture_output=True).stdout
+            content = subprocess.run(['git', '-C', str(root), '--no-replace-objects', 'cat-file', 'blob', oid], check=True, capture_output=True).stdout
             records.append([name[len(path) + 1:], mode, hashlib.sha256(content).hexdigest()])
     else:
         package = safe_path(root, path)
@@ -310,26 +311,37 @@ def package_digest(root, path, commit=None):
 
 
 def published_provenance(root):
-    """The provenance releases.json history first gave each published commit, version and package digest."""
-    first = {}
-    for commit in reversed(git(root, 'log', '--topo-order', '--format=%H', '--', 'releases.json').split()):
-        result = subprocess.run(['git', '-C', str(root), 'show', f'{commit}:releases.json'], capture_output=True, text=True)
-        if result.returncode:
-            continue  # the commit that deleted the lock
-        records = decode(result.stdout).get('releases')
+    """Every provenance any lock reachable from HEAD gave each published commit, version and package digest.
+
+    Reads releases.json in every reachable commit, not a path-limited log, so merges and history
+    simplification can't hide a publication. A shallow clone can't prove that and is refused.
+    """
+    require(git(root, 'rev-parse', '--is-shallow-repository').strip() == 'false',
+            'release-lock verification needs full history; fetch with --unshallow')
+    require(not Path(root, git(root, 'rev-parse', '--git-path', 'info/grafts').strip()).exists(),
+            'release-lock verification refuses a repository with grafts')
+    commits = git(root, 'rev-list', 'HEAD').split()
+    found = git(root, 'cat-file', '--batch-check', stdin=''.join(f'{commit}:releases.json\n' for commit in commits))
+    seen = {}
+    for blob in sorted({line.split()[0] for line in found.splitlines() if line.split()[1:2] == ['blob']}):
+        try:
+            records = decode(git(root, 'cat-file', 'blob', blob)).get('releases')
+        except ValueError:
+            continue  # a malformed historical lock publishes nothing
         for record in records if isinstance(records, list) else []:
             if isinstance(record, dict):
                 for key in published_keys(record):
-                    first.setdefault(key, record.get('provenance'))
-    return first
+                    seen.setdefault(key, set()).add(json.dumps(record.get('provenance'), sort_keys=True))
+    return seen
 
 
 def published_keys(record):
     """A release is one commit, one version and one package digest; none of them can be re-accepted."""
     manifest = record.get('manifest') if isinstance(record.get('manifest'), dict) else {}
     target = record.get('name'), record.get('harness')
-    return [(*target, 'commit', record.get('commit')), (*target, 'version', manifest.get('version')),
+    keys = [(*target, 'commit', record.get('commit')), (*target, 'version', manifest.get('version')),
             (*target, 'sha256', record.get('sha256'))]
+    return [key for key in keys if isinstance(key[3], str)]
 
 
 def load_releases(root, packages):
@@ -367,7 +379,9 @@ def load_releases(root, packages):
             require(isinstance(provenance['acceptance'], str) and re.fullmatch(r'https://github.com/acoz-labs/quickstop/issues/' + str(provenance['issue']) + r'#issuecomment-[0-9]+', provenance['acceptance']), 'authenticated acceptance receipt link required')
         # A published release keeps its provenance; a new acceptance needs a new candidate commit.
         for pin in published_keys(record):
-            require(published.get(pin, provenance) == provenance,
+            history = published.get(pin, set())
+            require(len(history) <= 1, f'{key}: history gives {pin[2]} {pin[3]} more than one provenance')
+            require(history <= {json.dumps(provenance, sort_keys=True)},
                     f'{key}: provenance differs from the published record for {pin[2]} {pin[3]}')
         releases[key] = record
     return releases

@@ -72,7 +72,11 @@ indexes; it does not publish them or replace independent review. The command
 requires live independently authenticated acceptance for the nominated candidate.
 Inspect the package digest, manifest snapshot, source commit and acceptance
 receipt in the proposed change. Static lock validation proves consistency, not
-that a manually written acceptance claim is true. Every publication-pointer PR,
+that a manually written acceptance claim is true. `bin/check-marketplace` also
+refuses a record whose commit, version or package digest any lock reachable from
+HEAD gave a different provenance, so a published release can't be re-pointed at
+another acceptance. It needs a full-history clone without grafts and ignores
+replace refs. Every publication-pointer PR,
 including manual recovery edits, needs independent review against actual release
 evidence. Never introduce another legacy-provenance entry to bypass acceptance.
 

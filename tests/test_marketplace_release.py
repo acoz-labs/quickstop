@@ -3,6 +3,7 @@ import importlib.machinery
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -124,12 +125,73 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record for version 1.0.0'):
             self.publish()
         # New bytes under the published version keep the old version's provenance too.
+        self.git('checkout', '--', '.')  # the refused lock stays out of history
         self.write('plugins/sample/README.md', 'Changed bytes, same version')
         self.commit()
         self.record['commit'] = self.git('rev-parse', 'HEAD').strip()
         self.record['sha256'] = m.package_digest(self.root, self.target['path'], self.record['commit'])
         with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record for version 1.0.0'):
             self.publish()
+
+    def forge(self):
+        """A lock with the published record's acceptance link changed."""
+        forged = json.loads(json.dumps(self.record))
+        forged['provenance']['acceptance'] = 'https://github.com/acoz-labs/quickstop/issues/7#issuecomment-1'
+        return {'schema': 1, 'releases': [forged]}
+
+    def test_merge_cannot_hide_the_published_provenance(self):
+        # Review round 2 (M3): a backdated side branch merged with its lock; path-limited log drops the publication.
+        self.git('branch', 'side')
+        self.publish()
+        self.commit()
+        published = self.git('rev-parse', 'HEAD').strip()
+        self.git('checkout', '-q', 'side')
+        self.write('releases.json', self.forge())
+        self.git('add', 'releases.json')
+        self.git('commit', '-qm', 'forged', '--date', '2020-01-01T00:00:00Z')
+        self.git('checkout', '-q', '-')
+        self.git('merge', '-q', '--no-commit', '-s', 'ours', 'side')
+        self.git('checkout', 'side', '--', 'releases.json')
+        self.git('commit', '-qm', 'merge side')
+        self.assertNotIn(published, self.git('log', '--format=%H', '--', 'releases.json'))  # simplification hid it
+        with self.assertRaisesRegex(m.Invalid, 'history gives commit .* more than one provenance'):
+            m.validate(self.root, write=True)
+
+    def test_renamed_or_re_added_lock_keeps_the_published_provenance(self):
+        self.publish()
+        self.commit()
+        self.git('mv', 'releases.json', 'releases-old.json')
+        self.commit()
+        self.write('releases.json', self.forge())
+        self.commit()
+        with self.assertRaisesRegex(m.Invalid, 'more than one provenance'):
+            m.validate(self.root, write=True)
+
+    def test_shallow_clone_and_grafts_are_refused(self):
+        self.publish()
+        self.commit()
+        clone = self.root / 'shallow'
+        subprocess.run(['git', 'clone', '-q', '--depth', '1', self.root.as_uri(), str(clone)], check=True, capture_output=True)
+        with self.assertRaisesRegex(m.Invalid, 'needs full history'):
+            m.validate(clone)
+        shutil.rmtree(clone)
+        grafts = self.root / '.git/info/grafts'
+        grafts.parent.mkdir(exist_ok=True)
+        grafts.write_text(self.git('rev-parse', 'HEAD'))
+        with self.assertRaisesRegex(m.Invalid, 'grafts'):
+            m.validate(self.root)
+
+    def test_replace_refs_cannot_rewrite_the_published_lock(self):
+        self.publish()
+        self.commit()
+        published = self.git('rev-parse', 'HEAD').strip()
+        self.write('releases.json', self.forge())
+        self.git('add', 'releases.json')
+        forged_tree = self.git('write-tree').strip()
+        forged = self.git('commit-tree', forged_tree, '-p', published + '~1', '-m', 'forged').strip()
+        self.git('replace', published, forged)
+        with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record'):
+            m.validate(self.root, write=True)
 
     def test_legacy_exception_cannot_accept_new_plugin(self):
         self.record['provenance'] = {'kind': 'legacy-preserved'}
