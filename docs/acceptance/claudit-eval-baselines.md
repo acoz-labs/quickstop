@@ -126,8 +126,9 @@ The pooled summaries are `claudit-4.0-live.json`, `claudit-4.0-offline.json` and
 
 ## Suite changes for Claudit 4.0.1 (#168)
 
-F3's five structural graders (flat skill, `Write(...)`, `.claudeignore`, project
-`defaultMode`, array matcher) are now regex graders instead of the model judge,
+F3's six graders (flat skill, `Write(...)`, `.claudeignore`, project
+`defaultMode`, array matcher, oversized CLAUDE.md) and F2's `finding-plugin-eval`
+are now regex graders instead of the model judge,
 every case adds `structure-plan-length`, and `f6-agents-md` adds an `AGENTS.md`-only
 fixture with no planted findings. F1 to F5 still plant 42 findings over three runs;
 structure graders are five per case. The 4.0.1 gate results are posted on #168,

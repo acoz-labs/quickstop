@@ -13,6 +13,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'evals/claudit/cases'
+# Final reports from the first 4.0.1 gate run (tree af7bbfb, evals/claudit/results/4.0.1-af7bbfb-live), verbatim.
+GATE_REPORTS = Path(__file__).resolve().parent / 'claudit_gate_reports'
+
+
+def gate_report(name, drop=()):
+    """A gate report, optionally without the lines that contain any of `drop`."""
+    text = (GATE_REPORTS / name).read_text()
+    return '\n'.join(line for line in text.split('\n') if not any(part in line for part in drop))
 
 
 def regex_grader(path):
@@ -323,6 +331,68 @@ for name, passes, text in [
     CORPUS[name][0 if passes else 1].append(text)
 
 
+# Review round 4: the three graders the first gate run missed on, with the exact run texts.
+F2_EVAL_LINES = ('claude plugin eval',)
+for name, passes, text in [
+    # finding-plugin-eval: evals named as missing, and `claude plugin eval` recommended.
+    ('finding-plugin-eval', True, gate_report('f2-plugin-repo-run1.md')),  # judge PASS/FAIL/FAIL
+    ('finding-plugin-eval', True, gate_report('f2-plugin-repo-run3.md')),  # judge FAIL/FAIL/FAIL
+    ('finding-plugin-eval', False, gate_report('f2-plugin-repo-run1.md', drop=F2_EVAL_LINES)),
+    ('finding-plugin-eval', False, gate_report('f2-plugin-repo-run3.md', drop=F2_EVAL_LINES)),
+    ('finding-plugin-eval', False, gate_report('f2-plugin-repo-run1.md', drop=('no plugin eval suite', 'no `evals/`'))),
+    ('finding-plugin-eval', False, gate_report('f2-plugin-repo-run3.md', drop=('evaluates', 'no `evals/`'))),
+    ('finding-plugin-eval', True, 'The plugin has no eval suite.\nAdd `evals/` cases and run `claude plugin eval` in CI.'),
+    ('finding-plugin-eval', True, 'Nothing evaluates the skill; use `claude plugin eval` with an `evals/` directory.'),
+    ('finding-plugin-eval', True, '`evals/` is missing. Wire `claude plugin eval` into the release checklist.'),
+    ('finding-plugin-eval', False, 'Run `claude plugin eval` before each release.'),
+    ('finding-plugin-eval', False, 'There is no eval suite for the skill. Add more unit tests.'),
+    ('finding-plugin-eval', False, 'There are no evals.\n\nRun `claude plugin validate .` in CI.'),
+    ('finding-plugin-eval', False, 'Evals are not set up.\n\n## Also worth knowing\n\n- `claude plugin eval` exists.'),
+    # finding-project-bypass: the diagnosis and the fix each within one change item.
+    ('finding-project-bypass', True, gate_report('f3-misconfigured-run2.md')),  # regex missed on one line
+    ('finding-project-bypass', False, gate_report('f3-misconfigured-run2.md', drop=('Remove `defaultMode', 'Delete the'))),
+    ('finding-project-bypass', False, gate_report('f3-misconfigured-run2.md', drop=('ignores this value', 'is ignored]('))),
+    ('finding-project-bypass', True, '3. **Remove `defaultMode`**\n   Problem: it sets bypass mode.\n   Why: Claude Code '
+                                     'ignores that in project settings.'),
+    ('finding-project-bypass', False, '3. **Remove `defaultMode`**\n   Problem: it sets bypass mode.\n\n4. **Fix the '
+                                      'matcher**\n   Problem: Claude Code ignores an array matcher.'),
+    ('finding-project-bypass', False, '- `defaultMode` is set to bypass.\n- `.claude/settings.json` hooks are ignored.\n'
+                                      '- Remove `defaultMode`.'),
+    # finding-oversized-claude-md: one change item names CLAUDE.md, its size and a cut.
+    ('finding-oversized-claude-md', True, gate_report('f3-misconfigured-run3.md')),  # judge FAIL/FAIL/FAIL
+    ('finding-oversized-claude-md', False, gate_report('f3-misconfigured-run3.md', drop=('is 241 lines',))),
+    ('finding-oversized-claude-md', False, gate_report('f3-misconfigured-run3.md', drop=('Cut CLAUDE.md', 'Change: reduce',
+                                                                                      'Drop the'))),
+    ('finding-oversized-claude-md', True, '1. **Trim CLAUDE.md**\n   Problem: CLAUDE.md is over 200 lines and restates the '
+                                          'code.\n   Change: delete the per-function sections.'),
+    ('finding-oversized-claude-md', True, 'CLAUDE.md (1,240 lines) should be condensed to the commands and rules.'),
+    ('finding-oversized-claude-md', False, '1. **Keep CLAUDE.md under 200 lines**\n   Change: trim it as it grows.'),
+    ('finding-oversized-claude-md', False, '- CLAUDE.md is 241 lines.\n- Remove `defaultMode` from settings.'),
+    ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines; that is fine for this project.'),
+    # My own bypass pass on the three round-4 graders.
+    ('finding-plugin-eval', True, '2. **Measure the skill**\n   Problem: the skill is never evaluated.\n   Change: create `evals/changelog-entry/` and run `claude plugin eval .` in CI.'),
+    ('finding-plugin-eval', True, 'Coverage: no evals. Add an eval suite under evals/ and gate releases on `claude plugin eval`.'),
+    ('finding-plugin-eval', True, 'Problem: The repo lacks an eval directory.\nChange: `claude plugin eval` with cases in `evals/`; run it in CI.'),
+    ('finding-plugin-eval', True, 'Without evals, skill regressions slip through. Add `claude plugin eval` to `ci.yml`.'),
+    ('finding-plugin-eval', False, 'Evals exist under `evals/`. Run `claude plugin eval` in CI.'),
+    ('finding-plugin-eval', False, 'No CI workflow. Run `claude plugin validate .` in CI.'),
+    ('finding-plugin-eval', False, 'Optional: someday look at `claude plugin eval`.\nThere are no evals.'),
+    ('finding-plugin-eval', False, 'The skill is not tested by `claude plugin evaluate`.'),
+    ('finding-project-bypass', True, '### 2. Drop defaultMode\n\nProblem: `bypassPermissions` in `.claude/settings.json` has no effect at project scope.\n\nChange: remove the key.'),
+    ('finding-project-bypass', True, '| `.claude/settings.json` | `defaultMode: bypassPermissions` is ignored here; remove it |'),
+    ('finding-project-bypass', True, '2. **Project bypass**\n   Problem: `defaultMode` is `bypassPermissions`.\n   ```json\n   {"permissions": {}}\n   ```\n   Why: it is ignored in project settings, so delete `defaultMode`.'),
+    ('finding-project-bypass', False, '2. **Project bypass**\n   Problem: `defaultMode` is `bypassPermissions`, which skips every prompt.\n   Change: remove `defaultMode`.'),
+    ('finding-project-bypass', False, 'Your `defaultMode` is `bypassPermissions`.\n\nThis is ignored by most teams. Nothing to change.'),
+    ('finding-oversized-claude-md', True, '6. **Cut CLAUDE.md**\n   Problem: at 241 lines it repeats the code.\n   ```diff\n-  ## toCents\n   ```\n   Change: delete the function sections.'),
+    ('finding-oversized-claude-md', True, '- `CLAUDE.md` is 241 lines, well past the 200-line target; trim it to commands and rules.'),
+    ('finding-oversized-claude-md', True, '### Shorten CLAUDE.md\n\nCLAUDE.md has 241 lines. Reduce it to what the code cannot say.'),
+    ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines.\n\nRemove the `Write(src/**)` rule.'),
+    ('finding-oversized-claude-md', False, '- CLAUDE.md: 41 lines; trim the stale section.'),
+    ('finding-oversized-claude-md', False, '- README.md is 241 lines; cut it.'),
+]:
+    CORPUS.setdefault(name, ([], []))[0 if passes else 1].append(text)
+
+
 class GraderPatternTests(unittest.TestCase):
     def graders(self):
         out = {}
@@ -350,6 +420,17 @@ class GraderPatternTests(unittest.TestCase):
                 self.assertNotRegex(grader['pattern'], r'\(\?[iPmsx<]|\\[AZz]|\(\?<[=!]')
                 self.assertLessEqual(set(grader.get('flags', '')), {'i'})
                 self.assertIn(grader.get('match', 'contains'), ('contains', 'not_contains'))
+
+    def test_first_gate_reports_pass_every_regex_grader(self):
+        # All 18 live reports from tree af7bbfb; the 4 recorded misses were grader false negatives.
+        reports = sorted(GATE_REPORTS.glob('*.md'))
+        self.assertEqual(len(reports), 18)
+        for report in reports:
+            case = report.name.rsplit('-run', 1)[0]
+            for path in sorted((CASES / case / 'graders').glob('*.md')):
+                if 'type: regex' in path.read_text().split('\n---\n', 1)[0]:
+                    with self.subTest(report=report.name, grader=path.stem):
+                        self.assertTrue(verdict(regex_grader(path), report.read_text()))
 
     @unittest.skipUnless(shutil.which('node'), 'node not installed')
     def test_javascript_engine_agrees(self):
