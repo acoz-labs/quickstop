@@ -111,6 +111,26 @@ class ReleaseTests(unittest.TestCase):
         self.record['provenance']['acceptance'] = 'https://github.com/acoz-labs/quickstop/issues/7#issuecomment-123'
         self.publish()
 
+    def test_published_provenance_cannot_move_to_another_commit_or_version(self):
+        self.publish()
+        self.commit()
+        self.write('docs/unrelated.md', 'A later commit with the same package bytes')
+        self.commit()
+        later = self.git('rev-parse', 'HEAD').strip()
+        self.assertEqual(m.package_digest(self.root, self.target['path'], later), self.record['sha256'])
+        self.record['commit'] = later  # same version and digest under a new commit
+        self.publish()  # a pointer move that keeps the provenance is fine
+        self.record['provenance']['acceptance'] = 'https://github.com/acoz-labs/quickstop/issues/7#issuecomment-1'
+        with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record for version 1.0.0'):
+            self.publish()
+        # New bytes under the published version keep the old version's provenance too.
+        self.write('plugins/sample/README.md', 'Changed bytes, same version')
+        self.commit()
+        self.record['commit'] = self.git('rev-parse', 'HEAD').strip()
+        self.record['sha256'] = m.package_digest(self.root, self.target['path'], self.record['commit'])
+        with self.assertRaisesRegex(m.Invalid, 'provenance differs from the published record for version 1.0.0'):
+            self.publish()
+
     def test_legacy_exception_cannot_accept_new_plugin(self):
         self.record['provenance'] = {'kind': 'legacy-preserved'}
         with self.assertRaisesRegex(m.Invalid, 'only preserves'):

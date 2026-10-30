@@ -431,7 +431,14 @@ class Scan:
                                       'depth': item.get('depth', 0) + 1, 'parent': item})
                         found.append(queue[-1])
         # Which files load follows the docs' default Project instructions setting (memory#agents-md).
-        claude_files = [f['path'] for f in found if f['kind'] == 'project' and f['path'] in CLAUDE_FILES]
+        claude_files = [(f['path'], f['abs']) for f in found if f['kind'] == 'project' and f['path'] in CLAUDE_FILES]
+        parent = os.path.dirname(self.root)  # one above the project counts too; ~/.claude/CLAUDE.md doesn't
+        while True:
+            claude_files += [(path, path) for path in (os.path.join(parent, rel) for rel in CLAUDE_FILES)
+                             if os.path.isfile(path) and path != os.path.join(HOME, '.claude', 'CLAUDE.md')]
+            if os.path.dirname(parent) == parent:
+                break
+            parent = os.path.dirname(parent)
         version = version_tuple(self.claude_version)
         direct = not claude_files and not (version and version < AGENTS_MD_READ)
         for item in found:
@@ -442,8 +449,9 @@ class Scan:
                     item['why'] = ('read directly: no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md; adding one '
                                    'stops that unless it imports this file')
                 elif claude_files:
-                    item['why'] = ("%s exists and doesn't import it" % claude_files[0] if len(claude_files) == 1 else
-                                   "%s exist and don't import it" % ' and '.join(claude_files))
+                    names = [name for name, _ in claude_files]
+                    item['why'] = ("%s exists and doesn't import it" % names[0] if len(names) == 1 else
+                                   "%s exist and don't import it" % ' and '.join(names))
                 else:
                     item['why'] = 'Claude Code %s reads it only through an import; %s and later read it directly' % (
                         self.claude_version, '.'.join(map(str, AGENTS_MD_READ)))
@@ -473,6 +481,10 @@ class Scan:
         skipped = ['%s (%s)' % (i['path'], i['why']) for i in roots if not i['loaded']]
         if skipped:
             text += ' Not loaded: %s.' % '; '.join(skipped)
+        if any(i['loaded'] and i.get('why', '').startswith('read directly') for i in roots):
+            return text + (' This assumes the default Project instructions setting. A user-level setting, a disabled '
+                           'built-in AGENTS.md plugin, the first session after upgrading from 2.1.276 or earlier, or '
+                           '2.1.277 to 2.1.280 on Amazon Bedrock or with telemetry off can stop AGENTS.md loading.')
         return text + ' This is the default Project instructions setting; a user-level setting can change it.'
 
     def settings(self):
@@ -778,7 +790,8 @@ class Scan:
                 self.add('agents-md-not-loaded:' + path, 'alignment', 'medium', 'AGENTS.md does not load', path,
                          '%s is not loaded: %s' % (path, item['why']),
                          'Add "@%s" to %s so both load, or move what Claude needs into it.' % (
-                             os.path.relpath(path, os.path.dirname(item['blocked_by'][0]) or '.'), item['blocked_by'][0])
+                             os.path.relpath(item['abs'], os.path.dirname(item['blocked_by'][0][1])),
+                             item['blocked_by'][0][0])
                          if item['blocked_by'] else 'Upgrade Claude Code to %s or later, or create a CLAUDE.md containing '
                          '"@%s".' % ('.'.join(map(str, AGENTS_MD_READ)), path),
                          'memory-agents-md', confidence='medium')

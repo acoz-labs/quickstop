@@ -82,6 +82,8 @@ def plan(count, lead='', extra='', tail=TAIL):
     return HEAD + lead + ''.join(PLAN_ITEM.format(n=n) + extra for n in range(1, count + 1)) + tail
 
 
+GRADE = '## Grades\n\n- **Alignment: B** (confidence: medium). %s\n'
+
 # name -> (reports that must pass, reports that must fail)
 CORPUS = {
     'structure-plan-length': ([
@@ -96,6 +98,16 @@ CORPUS = {
         HEAD + ''.join('### %d. Change\nProblem: x.\n\n' % n for n in range(1, 5)) + TAIL,
         HEAD + ''.join('**%d. Change**\nProblem: x.\n\n' % n for n in range(1, 4)) + TAIL,
         HEAD + ''.join('%d) Change\n' % n for n in range(1, 4)) + TAIL,
+        # Review round 1 (L2): heading, count-line and list variants that must pass.
+        HEAD.replace('## Top changes', '## Top changes:') + PLAN_ITEM.format(n=1) * 3 + TAIL,
+        HEAD.replace('## Top changes', '## Top 3 changes') + PLAN_ITEM.format(n=1) * 3 + TAIL,
+        HEAD.replace('## Top changes', '## The top changes') + PLAN_ITEM.format(n=1) * 3 + TAIL,
+        plan(2, lead='Just 2 changes are worth making: the setup is otherwise sound for a repo this small.\n\n'),
+        plan(2, lead='2 changes worth making: the setup is otherwise sound for a repo this small.\n\n'),
+        plan(2, lead='*2 changes are worth making:* the setup is otherwise sound for a repo this small.\n\n'),
+        plan(2, lead='> 2 changes are worth making: the setup is otherwise sound for a repo this small.\n\n'),
+        plan(4, tail='\nWhich should I apply?\n1. All\n2. Only 1 and 2\n3. None\n4. Let me pick\n'),
+        plan(3, tail='\n---\n1. footer line that looks numbered\n2. another\n3. a third\n4. a fourth\n5. fifth\n'),
     ], [
         plan(2), plan(8), plan(0), plan(1),
         plan(3, lead=FEWER), plan(3, lead='**' + FEWER.replace(': ', ':** ', 1)),
@@ -106,6 +118,9 @@ CORPUS = {
         plan(2, tail='   ```json\n1. unclosed fence\n2. still inside\n'),
         HEAD.replace('## Top changes\n\n', '') + PLAN_ITEM.format(n=1) * 3,
         'Here is what I would improve:\n\n1. Add an allowlist.\n2. Add a Stop hook.\n3. Add a skill.\n',
+        plan(2, tail='\nWhich should I apply?\n1. All\n2. None\n'),
+        plan(2, lead='> 2 changes are worth making.\n\n'),
+        HEAD.replace('## Top changes', '## Top changes to skip') + PLAN_ITEM.format(n=1) * 2 + TAIL,
     ]),
     'finding-flat-skill': ([
         # The 4.0.0 verified grader false negative (#156), verbatim.
@@ -118,32 +133,46 @@ CORPUS = {
         'Put `release-notes.md` in a `release-notes` directory with a `SKILL.md` file.',
         'Rename it to SKILL.md inside .claude/skills/release-notes/ (it is now release-notes.md).',
         'Or move `.claude/skills/release-notes.md` to `.claude/commands/release-notes.md`.',
+        '`.claude/skills/release-notes.md` won\u2019t load. Rename it to `SKILL.md` in a new `release-notes` directory.',
+        'Fix `release-notes.md`: put it at `SKILL.md` under a `release-notes` folder in `.claude/skills/`.',
     ], [
         '`.claude/skills/release-notes.md` is a flat file and will not load as a skill.',
         'Move `.claude/skills/release-notes.md` to `.claude/skills/release-notes/skill.md`.',
         'Improve the release-notes skill description so Claude triggers it.',
         'Skills live in `.claude/skills/<name>/SKILL.md`.',
+        '`release-notes.md` is fine; your other skill, `.claude/skills/review/SKILL.md`, is good too.',
     ]),
     'finding-write-rule': ([
         'Replace `Write(src/**)` with `Edit(src/**)`: Write rules never match.',
         '```diff\n-      "Write(src/**)",\n+      "Edit(src/**)",\n```',
         'The `Write(...)` rule is never checked; use `Edit(./src/**)`.',
         'Remove the `Write(src/**)` rule; file writes are governed by Edit rules.',
+        '`Write(src/**)` never matches. Use `Edit` rules instead.',
+        'Replace `Write(src/**)` with `Edit(**/src/**)`.',
+        'The `Write(src/**)` allow rule does nothing; replace it with an Edit permission.',
     ], [
         '`Write(src/**)` is too broad and a security risk.',
         '`Write(src/**)` never matches.\nAdd `Edit(.env)` to the deny list.',
         'Allow `Edit(src/**)` for the formatter.',
+        '`Write(src/**)` is broad.\nSeparately, consider Edit rules for docs.',
+        '`Write(src/**)` is broad; remove it.',
     ]),
     'finding-claudeignore': ([
         '`.claudeignore` has no effect. Add deny rules: `Read(./.env)`, `Read(./.env.*)`, `Read(./secrets/**)`.',
         'Claude Code ignores .claudeignore.\n```json\n{"permissions": {"deny": ["Read(.env)"]}}\n```',
         'Use `Read(**/.env)` in permissions.deny instead of the .claudeignore file.',
         'Delete `.claudeignore`; it is not a Claude Code file.',
-        '`git rm .claudeignore`',
+        '`.claudeignore` is not a Claude Code file.\n`git rm .claudeignore`',
+        '`.claudeignore` does nothing; deny `Read(//repo/.env)` instead.',
+        'Claude Code never reads `.claudeignore`. Add `Read(**/.env)` to `permissions.deny`.',
     ], [
         '`.claudeignore` is not read by Claude Code.',
         'Add `coverage/` to `.claudeignore` as well.',
         'Deny secrets: `Read(./.env)` and `Read(./secrets/**)`.',
+        # Review round 1 (L1): inventory mention plus the baseline deny change, no diagnosis.
+        'Files: `CLAUDE.md`, `.claude/settings.json`, `.claudeignore`, `package.json`.\n'
+        '```json\n{"permissions": {"deny": ["Read(./.env)"]}}\n```',
+        '`git rm .claudeignore` after you add more entries to it.',
     ]),
     'finding-project-bypass': ([
         'Problem: `.claude/settings.json` sets `permissions.defaultMode` to `bypassPermissions`; Claude Code ignores it '
@@ -153,10 +182,13 @@ CORPUS = {
         '"defaultMode": "bypassPermissions",\n```',
         'The defaultMode setting doesn’t take effect at project scope. Delete the defaultMode line.',
         'Take out `defaultMode`: project settings aren’t honoured for bypassPermissions.',
+        '`defaultMode: bypassPermissions` only works from user or managed settings, so delete it.',
+        'Claude Code skips it there. Remove `defaultMode` from `.claude/settings.json`.',
     ], [
         '`bypassPermissions` is dangerous for everyone who clones the repo; remove `defaultMode`.',
         '`defaultMode` is ignored in project settings; move it to `.claude/settings.local.json`.',
         'Consider whether you need permission prompts at all.',
+        '`bypassPermissions` is applied to everyone; delete `defaultMode`.',
     ]),
     'finding-array-matcher': ([
         'The PostToolUse `"matcher": ["Edit", "Write"]` is invalid.\n```json\n"matcher": "Edit|Write"\n```',
@@ -165,10 +197,12 @@ CORPUS = {
         'Make the PostToolUse matcher the string "Write|Edit".',
         'The matcher is a JSON array; write it as `^(Edit|Write)$`.',
         'Use `"Edit,Write"` instead of the array matcher.',
+        'Write the PostToolUse matcher as `"Edit|Write"` (matchers are strings).',
     ], [
         'The PostToolUse matcher is an array and will not fire.',
         'The lint hook runs `npm run lint` on every Edit|Write; make it faster.',
         'Hooks: add a Stop hook that runs `npm test`.',
+        'The PostToolUse matcher lists Edit and Write.',
     ]),
     'no-invented-agents-md-ignored': ([
         'Loaded at session start: AGENTS.md (read directly: no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md; adding '
@@ -184,6 +218,21 @@ CORPUS = {
         '```markdown\n@AGENTS.md\n```\nThe `.claudeignore` file is ignored.',
         'AGENTS.md is short (8 lines) and points at files that exist. Nothing is ignored.',
         'AGENTS.md holds shared rules, not Claude-specific ones.',
+        # Review round 1 (M2): true statements the first version failed.
+        *(GRADE % t for t in (
+            'Your AGENTS.md is not ignored: Claude Code reads it because there is no CLAUDE.md.',
+            'AGENTS.md is no longer ignored; since 2.1.277 Claude Code reads it directly.',
+            'Claude Code before 2.1.277 doesn\'t read AGENTS.md, but you are on 2.1.314.',
+            'A subagent started without project instructions doesn\'t load AGENTS.md.',
+        )),
+        # More true statements, my own paraphrases.
+        'AGENTS.md isn\u2019t read when a `CLAUDE.md` exists, so keep it the only instruction file.',
+        'Claude Code reads `AGENTS.md` here; a disabled built-in AGENTS.md plugin would stop that.',
+        'AGENTS.md is loaded at session start, and nothing in it is ignored.',
+        'The 8-line AGENTS.md loads; Claude Code picks it up without a CLAUDE.md.',
+        'Keep AGENTS.md as the single source; Claude Code and Codex both read it.',
+        'If you ever add a `CLAUDE.local.md`, import `@AGENTS.md` from it so Claude Code keeps loading it.',
+        'First sessions after an upgrade from 2.1.276 can miss AGENTS.md.',
     ], [
         'Claude Code reads `CLAUDE.md`, not `AGENTS.md`, so these instructions may not load unless a `CLAUDE.md` '
         'imports them.',
@@ -199,8 +248,63 @@ CORPUS = {
         'AGENTS.md has no effect on Claude Code sessions.',
         'AGENTS.md is for Codex, not Claude Code.',
         'Without an import, AGENTS.md is not picked up.',
+        # Review round 1 (M2): wrong claims the first version let through, in a Grades bullet as the reviewer ran them.
+        *(GRADE % t for t in (
+            'AGENTS.md is not automatically loaded by Claude Code.',
+            'Claude Code does not natively read AGENTS.md.',
+            'Claude Code doesn\'t recognize AGENTS.md.',
+            'AGENTS.md is a convention for Codex and Cursor; Claude Code looks for CLAUDE.md.',
+            'When Claude Code starts, it reads CLAUDE.md, not AGENTS.md.',
+            'Claude Code ignores AGENTS.md when there is no CLAUDE.md.',
+            'Claude Code only picks up CLAUDE.md.',
+            'AGENTS.md is skipped by Claude Code.',
+            'Without a CLAUDE.md, Claude starts each session with no project instructions.',
+            'Create a CLAUDE.md containing `@AGENTS.md` so Claude Code loads your AGENTS.md.',
+        )),
+        # More wrong claims, my own paraphrases.
+        'AGENTS.md is silently ignored by Claude Code.',
+        'Claude Code doesn\u2019t look at AGENTS.md at all.',
+        'Import AGENTS.md from a new CLAUDE.md so that it loads.',
+        'Add a CLAUDE.md with `@AGENTS.md` so the rules reach Claude.',
+        'After startup Claude Code reads only CLAUDE.md.',
+        'Claude Code uses CLAUDE.md instead of AGENTS.md.',
+        'Claude Code skips AGENTS.md.',
     ]),
 }
+
+# My own bypass pass after review round 1: (grader, must pass, report).
+for name, passes, text in [
+    ('structure-plan-length', True, plan(3, tail='') + '\n'),
+    ('structure-plan-length', True, plan(7, lead='7 changes are worth making.\n\n')),
+    ('structure-plan-length', False, plan(8, lead='8 changes are worth making.\n\n')),
+    ('structure-plan-length', True, plan(3, extra='   Is this safe? Yes.\n')),
+    ('structure-plan-length', False, plan(2, lead='2 changes are worth making:\nthe setup is sound.\n\n')),
+    ('structure-plan-length', True, plan(2, lead='Two changes are worth making - the rest is already in place here.\n\n')),
+    ('structure-plan-length', False, plan(2, lead='Only 2 changes are worth making: ok.\n\n')),
+    ('finding-flat-skill', True, 'Move release-notes.md to .claude/skills/release-notes/SKILL.md'),
+    ('finding-flat-skill', False, 'Move .claude/skills/release-notes.md somewhere skills load.'),
+    ('finding-write-rule', True, '```diff\n-"Write(src/**)"\n+"Edit(./src/**)"\n```'),
+    ('finding-write-rule', False, 'Edit(src/**) is already allowed.'),
+    ('finding-claudeignore', True, '`.claudeignore` isn\u2019t read by Claude Code. Deny with `Read(./.env)`.'),
+    ('finding-claudeignore', True, 'Claude Code has no `.claudeignore` support. Use `Read(./secrets/**)` deny rules.'),
+    ('finding-claudeignore', False, 'Keep `.claudeignore` as is.\nAdd `Read(./.env)` to deny.'),
+    ('finding-project-bypass', True, '`defaultMode` is ignored in project settings.\n```diff\n-  "defaultMode": "bypassPermissions",\n```'),
+    ('finding-project-bypass', True, 'Remove `"defaultMode": "bypassPermissions"`: it doesn\u2019t apply from project settings.'),
+    ('finding-project-bypass', False, '`defaultMode` is set to `bypassPermissions`. Remove it: it is dangerous.'),
+    ('finding-array-matcher', True, 'The matcher `["Edit", "Write"]` is an array.\n```json\n{"matcher": "Edit|Write"}\n```'),
+    ('finding-array-matcher', False, '`"matcher": "Edit|Write"` is fine.'),
+    ('no-invented-agents-md-ignored', True, 'Claude Code reads AGENTS.md since there is no CLAUDE.md.'),
+    ('no-invented-agents-md-ignored', True, 'AGENTS.md: loaded (no CLAUDE.md).'),
+    ('no-invented-agents-md-ignored', True, 'A CLAUDE.md is not needed: AGENTS.md is read directly.'),
+    ('no-invented-agents-md-ignored', True, 'AGENTS.md is read directly; you do not need a CLAUDE.md that imports it.'),
+    ('no-invented-agents-md-ignored', True, 'Don\u2019t add a CLAUDE.md just to load AGENTS.md: it already loads.'),
+    ('no-invented-agents-md-ignored', False, 'Claude Code won\u2019t pick up AGENTS.md.'),
+    ('no-invented-agents-md-ignored', False, 'Claude does not read AGENTS.md by default.'),
+    ('no-invented-agents-md-ignored', False, 'Only CLAUDE.md is read by Claude Code.'),
+    ('no-invented-agents-md-ignored', False, 'Claude Code reads CLAUDE.md files; AGENTS.md is for other tools.'),
+    ('no-invented-agents-md-ignored', False, 'Add `@AGENTS.md` to a new CLAUDE.md so Claude sees it.'),
+]:
+    CORPUS[name][0 if passes else 1].append(text)
 
 
 class GraderPatternTests(unittest.TestCase):
