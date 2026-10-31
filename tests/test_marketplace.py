@@ -1,8 +1,12 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
+import platform
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -316,3 +320,40 @@ class MarketplaceTests(unittest.TestCase):
         for key, value in [('skills', []), ('hooks', {'hooks': {}}), ('agents', []), ('mcpServers', [])]:
             self.write(path, dict(original, **{key: value}))
             with self.assertRaises(module.Invalid): self.generate()
+
+
+class PinnedPythonTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.expected = platform.python_version()
+
+    def interpreter(self, folder, name, target=None):
+        path = self.root / folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if target:
+            path.symlink_to(target)
+        else:
+            path.write_text('#!/bin/sh\necho "0.0.0 /elsewhere/python3"\n')
+            path.chmod(0o755)
+        return path.parent
+
+    def test_finds_the_pinned_version_behind_another_python3(self):
+        first = self.interpreter('first', 'python3')
+        minor = '.'.join(self.expected.split('.')[:2])
+        later = self.interpreter('later', f'python{minor}', sys.executable)
+        found = module.find_python(self.expected, f'{first}{os.pathsep}{later}')
+        self.assertEqual(Path(found).resolve(), Path(sys.executable).resolve())
+
+    def test_no_matching_version_is_none(self):
+        self.assertIsNone(module.find_python(self.expected, str(self.interpreter('only', 'python3'))))
+
+    def test_missing_pin_fails_naming_the_version(self):
+        (self.root / 'bin').mkdir()
+        shutil.copy(Path(__file__).resolve().parents[1] / 'bin/check-marketplace', self.root / 'bin')
+        (self.root / '.python-version').write_text('0.0.1\n')
+        result = subprocess.run([sys.executable, str(self.root / 'bin/check-marketplace')], capture_output=True, text=True,
+                                env={'PATH': str(self.interpreter('only', 'python3'))})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Python 0.0.1 (pinned in .python-version) not found', result.stderr)

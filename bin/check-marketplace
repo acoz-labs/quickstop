@@ -3,9 +3,12 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import platform
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -449,5 +452,44 @@ def main():
     return 0
 
 
+PROBE = 'import platform, sys; print(platform.python_version(), sys.executable)'
+
+
+def find_python(expected, path=None):
+    """Return the executable of an interpreter whose version is exactly expected, or None."""
+    names = (f"python{'.'.join(expected.split('.')[:2])}", 'python3', 'python')
+    candidates = [Path(d) / name for d in os.get_exec_path({'PATH': path} if path is not None else None) for name in names]
+    mise = shutil.which('mise', path=path)
+    if mise:
+        where = subprocess.run([mise, 'where', f'python@{expected}'], capture_output=True, text=True)
+        if where.returncode == 0 and where.stdout.strip():
+            candidates.append(Path(where.stdout.strip()) / 'bin/python3')
+    for candidate in candidates:
+        if not os.access(candidate, os.X_OK) or candidate.is_dir():
+            continue
+        try:
+            probe = subprocess.run([str(candidate), '-c', PROBE], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        version, _, executable = probe.stdout.strip().partition(' ')
+        if probe.returncode == 0 and version == expected:
+            return executable
+    return None
+
+
+def use_pinned_python():
+    """Re-exec under the Python pinned in .python-version unless already running it."""
+    pin = Path(__file__).resolve().parent.parent / '.python-version'
+    expected = pin.read_text().strip()
+    if platform.python_version() == expected:
+        return
+    executable = find_python(expected)
+    if executable is None:
+        sys.exit(f'Python {expected} (pinned in .python-version) not found on PATH or through mise; '
+                 f'install it, for example with: mise install python@{expected}')
+    os.execv(executable, [executable, str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
 if __name__ == '__main__':
+    use_pinned_python()
     sys.exit(main())
