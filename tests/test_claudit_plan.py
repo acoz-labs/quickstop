@@ -380,8 +380,8 @@ class Grades(unittest.TestCase):
         self.assertEqual(self.letters([finding('stale-ref:C:x', 'correctness', path='C'),
                                        finding('write-rule:s:W', 'correctness', path='s')])['correctness'],
                          ('D', [1, 2], 0))
-        self.assertEqual(self.letters([finding('invalid-json:s', 'correctness', 'high', 's')])['correctness'],
-                         ('F', [1], 0))
+        for fatal in ('invalid-json:s', 'matcher-type:s:PostToolUse'):
+            self.assertEqual(self.letters([finding(fatal, 'correctness', 'high', 's')])['correctness'], ('F', [1], 0))
         self.assertEqual(self.letters([finding('allowlist'), finding('plugin-eval')])['coverage'], ('C', [1, 2], 0))
         bare = self.letters([finding('no-instructions', severity='high'), finding('allowlist')], setup=False)
         self.assertEqual(bare['coverage'], ('F', [1, 2], 0))

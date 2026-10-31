@@ -87,7 +87,7 @@ CHANGE_TITLES = {
     'plugin-validate': 'Run claude plugin validate', 'plugin-eval': 'Add evals for {subject}',
     'lsp': 'Install a code-intelligence plugin',
 }
-FATAL = ('invalid-json',)  # configuration that doesn't load grades Correctness F
+FATAL = ('invalid-json', 'matcher-type')  # configuration that doesn't load (a file, or hooks dropped): Correctness F
 # Features a project can decline in its docs: (finding kind, label, what names the feature).
 DECLINABLE = (
     ('stop-hook', 'Hooks', r'\bhooks?\b'),
