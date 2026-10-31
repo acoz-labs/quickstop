@@ -384,6 +384,19 @@ class HostCheckTests(unittest.TestCase):
         self.assertFalse(host['passed'])
         self.assertEqual(list(self.tmp.iterdir()), [])
 
+    def test_unrelated_writes_to_claude_json_pass_but_a_temp_dir_entry_fails(self):
+        state = self.home / '.claude.json'
+        with mock.patch.object(we, 'copy_plugin', side_effect=lambda *a: (state.write_text('{"tips": 2}\n'),
+                                                                          {'version': '0.3.1'})[1]):
+            self.assertEqual(self.failed(self.check()), [])
+
+        def leak(source, target):
+            state.write_text(json.dumps({'projects': {str(Path(target).parent.parent / 'workspace'): {}}}))
+            return {'version': '0.3.1'}
+
+        with mock.patch.object(we, 'copy_plugin', side_effect=leak):
+            self.assertEqual(self.failed(self.check()), ['real-state-untouched: ~/.claude.json'])
+
 
 def run_item(passed=True, error=None, scored=True, names=('a', 'b')):
     return {'error': error, 'costUsd': 0.25, 'durationSeconds': 40, 'turns': 7,
