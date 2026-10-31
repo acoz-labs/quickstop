@@ -252,10 +252,31 @@ def expected_suite(evals, runs, case_filter=None):
     return {'cases': cases, 'runs': runs, 'case_filter': case_filter}
 
 
-def eval_command(plugin, args, out):
+def case_tools(case_yaml):
+    """The case's one-line `allowed_tools: [...]` list."""
+    lines = [line for line in Path(case_yaml).read_text().splitlines() if line.strip().startswith('allowed_tools:')]
+    if len(lines) != 1 or not lines[0].rstrip().endswith(']') or '[' not in lines[0]:
+        raise Failure(f'{case_yaml}: expected one one-line allowed_tools list')
+    inner = lines[0].split('[', 1)[1].rstrip()[:-1]
+    return [item.strip().strip('"') for item in inner.split(',') if item.strip()]
+
+
+def bash_grant(evals):
+    """The operator grant: every case's `Bash(...)` patterns, never Bash as a whole."""
+    tools = {tool for path in Path(evals).glob('cases/*/case.yaml') for tool in case_tools(path)}
+    if 'Bash' in tools:
+        raise Failure('a case grants all of Bash; list Bash(<command>:*) patterns instead')
+    grant = sorted(tool for tool in tools if tool.startswith('Bash('))
+    if not grant:
+        raise Failure(f'no case under {evals} lists a Bash(...) pattern')
+    return grant
+
+
+def eval_command(plugin, args, out, grant):
+    # --allow-tools is variadic; the --json option after the patterns ends it.
     command = ['claude', 'plugin', 'eval', str(plugin), '--model', args.model,
                '--max-cost-usd', str(args.max_cost_usd), '--runs', str(args.runs), '--trust-plugin', '--scaffold',
-               '--no-publish', '--ablation', 'none', '--threshold', '0', '--allow-tools', 'Bash',
+               '--no-publish', '--ablation', 'none', '--threshold', '0', '--allow-tools', *grant,
                '--json', str(out / 'result.json'), '--output-dir', str(out)]
     if args.case:
         command += ['--case', args.case]
@@ -300,7 +321,7 @@ def run(args):
         expected = expected_suite(plugin / 'evals', args.runs, args.case)
         git_dir = copy_git(plugin / '.eval-git')
         env = dict(os.environ, PATH=f'{git_dir}{os.pathsep}{os.environ.get("PATH", "")}')
-        command = eval_command(plugin, args, out)
+        command = eval_command(plugin, args, out, bash_grant(plugin / 'evals'))
         print(f'Scratch: {scratch}')
         print(f'Cases: {", ".join(cases)}')
         print(f'Command: {shlex.join(command)}')

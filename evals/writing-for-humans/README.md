@@ -50,8 +50,9 @@ grader is a script (regex or `tool_used`); there is no model judge.
 ### `audit-typed`
 
 The prompt is the typed user invocation, `/writing-for-humans:writing-audit`, which is
-how the skill is meant to run. Tools are Read, Glob, Grep and read-only `git`
-subcommands. No edit tool is granted, so the audit is review-only.
+how the skill is meant to run. No edit tool is granted, so the audit is review-only.
+
+Tools: `Read`, `Glob`, `Grep`, `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)`, `Bash(git status:*)`, `Bash(git branch:*)`, `Bash(git rev-parse:*)`.
 
 - `loads`: the session `init` record lists the plugin and both skills.
 - `reads-artifacts-reference`: a Read of `skills/writing-style/references/artifacts.md`. Enforces `skills/writing-audit/SKILL.md:13` and the table row at `:17` (read the reference for each surface; the draft is a workflow artifact, `:35`). A pass also shows `${CLAUDE_PLUGIN_ROOT}` expands to a readable file.
@@ -62,8 +63,9 @@ subcommands. No edit tool is granted, so the audit is review-only.
 
 ### `audit-not-automatic`
 
-The prompt asks for a writing audit in plain words, without the command. The Skill
-tool is allowed.
+The prompt asks for a writing audit in plain words, without the command.
+
+Tools: `Read`, `Glob`, `Grep`, `Skill`, `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)`, `Bash(git status:*)`, `Bash(git branch:*)`, `Bash(git rev-parse:*)`.
 
 - `skill-offered`: the `init` record offers the Skill tool and lists `writing-for-humans:writing-audit`, so the next grader can't pass just because the skill or tool was missing.
 - `not-invoked`: no Skill call to `writing-audit`. Enforces `skills/writing-audit/SKILL.md:4` and `docs/acceptance/writing-for-humans.md:32` (a user-only skill Claude never invokes is the expected result; a recorded automatic call is a failure). A refused call still counts as a call.
@@ -74,6 +76,20 @@ This case exercises the skill's `disable-model-invocation: true` frontmatter
 while the session still lists it as installed. Without that setting Claude could
 call the skill for this request, and a call fails the case. It records the outcome
 for one prompt and model, not a triggering guarantee.
+
+### Tool grants
+
+Each `Tools:` line is the case's grant: its `allowed_tools`, plus the runner's
+`--allow-tools`, which applies to every case. The runner passes only the cases'
+`Bash(git …:*)` patterns there, never `Bash` as a whole. A test checks that each
+`Tools:` line matches what the case and runner grant.
+
+Claude Code still runs, without any rule, the shell commands it classes as read-only.
+In the smoke pass for issue #177 (Claude Code 2.1.316), `ls -R`, `grep -rniE`, `head`
+and `git ls-files` ran, while a command list with `cat`, `echo` and `gh pr view` was
+refused. Bash stays inside the eval sandbox either way, and `no-external-action` still
+fails any commit, push, rebase, reset or PR attempt. Tools that need no permission,
+such as `Task` and `ToolSearch`, are offered too; the session's `init` record lists them.
 
 ## Pass rule
 

@@ -31,6 +31,7 @@ spec = importlib.util.spec_from_loader('wfh_eval', loader)
 we = importlib.util.module_from_spec(spec)
 loader.exec_module(we)
 
+GIT_SUBCOMMANDS = ('branch', 'diff', 'log', 'rev-parse', 'show', 'status')
 SKILLS = ['writing-for-humans:writing-audit', 'writing-for-humans:writing-style', 'simplify']
 
 
@@ -518,13 +519,41 @@ class RunnerTests(unittest.TestCase):
 
     def test_eval_command_pins_model_cost_and_no_judge(self):
         args = we.argparse.Namespace(model='claude-sonnet-5-5', max_cost_usd=2.0, runs=1, case=None, keep_temp=False)
-        command = we.eval_command(Path('/s/plugin'), args, Path('/o'))
+        command = we.eval_command(Path('/s/plugin'), args, Path('/o'), we.bash_grant(SUITE))
         for flag, value in (('--model', 'claude-sonnet-5-5'), ('--max-cost-usd', '2.0'), ('--ablation', 'none'),
-                            ('--allow-tools', 'Bash'), ('--runs', '1')):
+                            ('--runs', '1')):
             self.assertEqual(command[command.index(flag) + 1], value)
         self.assertNotIn('--judge-model', command)
         self.assertIn('--scaffold', command)
         self.assertIn('--no-publish', command)
+
+    def test_eval_command_grants_only_the_cases_git_patterns(self):
+        args = we.argparse.Namespace(model='m', max_cost_usd=1.0, runs=1, case=None, keep_temp=False)
+        command = we.eval_command(Path('/s/plugin'), args, Path('/o'), we.bash_grant(SUITE))
+        start = command.index('--allow-tools') + 1
+        end = next(i for i in range(start, len(command)) if command[i].startswith('--'))
+        self.assertEqual(command[start:end], [f'Bash(git {sub}:*)' for sub in GIT_SUBCOMMANDS])
+        self.assertNotIn('Bash', command)
+
+    def test_bash_grant_refuses_whole_bash_and_a_missing_pattern(self):
+        for line in ('    allowed_tools: [Read, Bash]', '    allowed_tools: [Read, Grep]', '    prompt: hi'):
+            case = self.base / 'evals/cases/c/case.yaml'
+            case.parent.mkdir(parents=True, exist_ok=True)
+            case.write_text(f'name: c\nexecution:\n{line}\n')
+            with self.assertRaises(we.Failure, msg=line):
+                we.bash_grant(self.base / 'evals')
+
+    def test_readme_tool_lists_match_the_granted_tools(self):
+        grant = we.bash_grant(SUITE)
+        granted = {path.parent.name: sorted(set(we.case_tools(path)) | set(grant))
+                   for path in sorted(CASES.glob('*/case.yaml'))}
+        sections = re.split(r'^### `([^`]+)`$', (SUITE / 'README.md').read_text(), flags=re.M)[1:]
+        listed = {}
+        for name, body in zip(sections[::2], sections[1::2]):
+            lines = re.findall(r'^Tools: (`.*`)\.$', body, flags=re.M)
+            self.assertEqual(len(lines), 1, name)
+            listed[name] = sorted(re.findall(r'`([^`]+)`', lines[0]))
+        self.assertEqual(listed, granted)
 
     def test_cli_requires_model_and_cost(self):
         for argv in (['run', '--model', 'm'], ['run', '--max-cost-usd', '1'],
