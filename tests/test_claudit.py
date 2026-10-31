@@ -611,7 +611,7 @@ class Coverage(Project):
             self.write('bin/' + name, '#!/bin/sh\n', 0o755)
         self.write('CLAUDE.md', 'Run `bin/sdlc check`, then `bin/sdlc apply` and `bin/release promote`.\n'
                                 'Compare with `bin/sdlc check BASE`.\n'
-                                'Also `bin/check-marketplace --base origin/main` and `bin/check-marketplace --write`.\n')
+                                'Also run `bin/check-marketplace --base origin/main` and `bin/check-marketplace --write`.\n')
         result = self.scan()
         rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
         self.assertEqual(rules, ['Bash(bin/sdlc check)', 'Bash(bin/check-marketplace --base origin/main)'])

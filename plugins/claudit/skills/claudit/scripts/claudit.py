@@ -151,6 +151,17 @@ def decline_forms(feature):
 DECLINE_FORMS = [(feature, label, re.compile(r'\b(?:%s)\b' % pattern, re.I), decline_forms(pattern))
                  for feature, label, pattern in DECLINABLE]
 LIST_ITEM = re.compile(r'^\s*(?:[-*+]|[0-9]+[.)])\s+')
+# Command contexts (see code_snippets).
+SHELL_FENCES = {'', 'sh', 'bash', 'zsh', 'fish', 'shell', 'console', 'shell-session', 'shellsession', 'terminal',
+                'powershell', 'pwsh', 'ps1', 'bat', 'cmd'}
+CONSOLE_FENCES = {'console', 'shell-session', 'shellsession', 'terminal'}  # prompts mixed with output
+PROMPT = re.compile(r'^\s*[$%>]\s+(\S.*)$')
+RUN_WORDS = re.compile(r'\b(?:run|execute|invoke|call)(?:\s*:\s*|\s+(?:the\s+)?(?:command|script)\s+|'
+                       r'(?:\s+[\w-]+){1,4}\s+(?:with|using|via)\s+|\s+)$', re.I)
+NEGATED = re.compile(r"\b(?:not|never|don['\u2019]t|doesn['\u2019]t|avoid|no need to)\s+$", re.I)
+COMMAND_LABEL = re.compile(r'\b(?:commands?|checks?|tests?|usage|verify|verification|validation|lint|build)\s*:\s*$',
+                           re.I)
+CHAIN = re.compile(r'\s*(?:,\s*(?:and\s+|or\s+|then\s+)?|\s(?:and|or|then)\s+|\s*\(or\s+)\s*', re.I)
 
 
 class UsageError(Exception):
@@ -211,18 +222,72 @@ def prose(text):
 
 
 def code_snippets(text):
-    """Inline backtick spans and fenced code lines, the places commands are documented."""
-    fence = None
+    """The commands a Markdown text documents as calls, from command contexts only.
+
+    - Fenced blocks with no language or a shell one (sh, bash, zsh, shell, console, ...), and indented code
+      blocks. In a console or shell-session block only prompt lines (`$`, `%`, `>`) count; other languages
+      (text, output, json, ...) are not commands.
+    - A prose line starting with a shell prompt: `$ bin/ci`.
+    - A backticked command that begins a list item ("- `bin/ci`: runs the suite") or fills a table cell.
+      A fence with no language counts, so output belongs in a `text` or `console` fence.
+    - A backticked command after run, execute, invoke or call ("Run `bin/ci`", "run: `x`", "Run the tests with
+      `x`"), unless negated ("never run `x`"), and the spans chained to it by a comma, and, or or then.
+    - A backticked command after a label naming commands: "Commands: `x`", "Test: `x`".
+    Inline code anywhere else (a sentence naming a tool, a heading) is not a call.
+    """
+    fence, info, previous, last_top, in_block, last_line = None, '', '', '', False, ''
     for line in text.splitlines():
         match = FENCE.match(line)
         if match:
-            fence = match.group(1) if fence is None else (None if line.strip().startswith(fence) else fence)
+            if fence is None:
+                fence, info = match.group(1), line.strip()[3:].strip().split(' ')[0].lower()
+            elif line.strip().startswith(fence):
+                fence = None
             continue
         if fence is not None:
+            if info in SHELL_FENCES:
+                prompt = PROMPT.match(line)
+                if prompt or info not in CONSOLE_FENCES:
+                    yield (prompt.group(1) if prompt else line).strip()
+            continue
+        # An indented code block starts after a blank line that doesn't continue a list item.
+        in_block = bool(re.match(r'(?: {4}|\t)\S', line)) and (
+            in_block or (not previous.strip() and not LIST_ITEM.match(last_top)))
+        previous = line
+        if in_block:
             yield line.strip()
-        else:
-            for span in re.findall(r'`([^`\n]+)`', line):
-                yield span.strip()
+            continue
+        wrapped, last_line = last_line, line  # a run phrase may end on the previous line
+        if line.strip() and not line[0].isspace():
+            last_top = line
+        body = line.strip()
+        if body.startswith('#'):
+            continue  # a heading names things; it doesn't run them
+        prompt = PROMPT.match(line)
+        if prompt and '`' not in prompt.group(1):  # `> Run \`x\`` is a quote of prose, `$ x` a prompt
+            yield prompt.group(1).strip()
+            continue
+        if body.startswith('|'):
+            for cell in body.strip('|').split('|'):
+                cell = re.fullmatch(r'\s*`([^`\n]+)`\s*', cell)
+                if cell:
+                    yield cell.group(1).strip()
+        item = LIST_ITEM.match(line)
+        start = item.end() if item else 0
+        called = False
+        for span in re.finditer(r'`([^`\n]+)`', line):
+            before = line[start:span.start()]
+            if start == 0 and not before.strip() and wrapped.strip() and not wrapped.lstrip().startswith(('#', '|')):
+                before = wrapped.strip() + ' '
+            run = RUN_WORDS.search(before)
+            if (item and not line[item.end():span.start()].strip() and start == item.end()) \
+                    or (run and not NEGATED.search(before[:run.start()])) or COMMAND_LABEL.search(before) \
+                    or (called and CHAIN.fullmatch(before)):
+                called = True
+                yield span.group(1).strip()
+            else:
+                called = False
+            start = span.end()
 
 
 def split_commands(snippet):

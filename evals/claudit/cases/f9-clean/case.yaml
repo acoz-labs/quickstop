@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f9-clean
-description: Small, fully configured Node library: nothing is worth changing, so the report says No changes worth making with Coverage A.
+description: Small, fully configured Node library where nothing is worth changing, so the report says No changes worth making with Coverage A.
 tags: [claudit, coverage]
 runs: 1
 context:
