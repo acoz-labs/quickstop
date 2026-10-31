@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claudit 4.0 helper: a deterministic, read-only scan of a project's Claude Code setup.
+"""Claudit 4.1 helper: a deterministic, read-only scan of a project's Claude Code setup.
 
 Subcommands: scan, new-pages, dismiss. Standard library only; Python 3.9+.
 The only write is `dismiss`, to <root>/.claude/claudit-dismissed.json. The
@@ -14,8 +14,9 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
-VERSION = '4.0.1'
+VERSION = '4.1.0'
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(HERE, '..', 'catalog.json')
 CAP = 40
@@ -25,7 +26,12 @@ MAX_READ = 512 * 1024
 SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '.venv', 'venv',
              'target', '.tox', '.mypy_cache', '.pytest_cache', 'coverage', '.next'}
 DEPENDENCY_DIRS = {'node_modules', 'vendor', 'venv'}  # never skill directories without a SKILL.md
-FIXTURE_DIRS = {'fixture', 'fixtures', '__fixtures__', 'testdata'}
+# Directory words that mark test data: fixtures, eval suites and graders, saved reports and results. A
+# directory is split into words at punctuation and case changes, lower-cased, trailing digits dropped.
+DATA_WORDS = {'fixture', 'fixtures', 'testdata', 'golden', 'goldens', 'snapshot', 'snapshots', 'cassette', 'cassettes',
+              'eval', 'evals', 'grader', 'graders', 'report', 'reports', 'result', 'results'}
+TEST_WORDS = {'test', 'tests'}
+EVAL_CASE_FILES = ('case.yaml', 'case.yml')  # a directory holding one is an eval case: everything below is data
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
 MUTATING = {'release', 'publish', 'promote', 'deploy', 'apply', 'push', 'write', 'cascade', 'install', 'delete', 'rm',
@@ -50,6 +56,11 @@ MUST = re.compile(r'\b(always|must|before (?:you )?(?:report|finish|commit|push|
 MUST_NOT = re.compile(r"\b(must not|mustn't|never)\b", re.I)
 AGENT_DIRECTIVE = re.compile(r'\b(agents?\s+(?:run|must|should|own|act|acting|are|may|will|can|author|review|implement)'
                              r'|agent-run|agent-driven|autonomous(?:ly)?)\b', re.I)
+ON_DEMAND = re.compile(r'\bon[- ]demand\b', re.I)
+SKILL_WORDS = re.compile(r'\b(?:skills?|slash commands?|invok\w*)\b', re.I)
+LINK = re.compile(r'\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)')
+LINK_DEF = re.compile(r'^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?')
+MD_PATH = re.compile(r'(?<![\w/.@-])((?:\.{1,2}/)*[\w.-]+(?:/[\w.-]+)*\.md)(?![\w/-])', re.I)
 IMPORT = re.compile(r'(?:^|(?<=\s))@([^\s`\'"()<>\[\]]+)')
 TOKEN_SPLIT = re.compile(r'[\s`"\'()\[\],;|]+')
 LANGUAGES = {'tsconfig.json': 'typescript', 'go.mod': 'go', 'Cargo.toml': 'rust', 'pom.xml': 'java',
@@ -58,6 +69,52 @@ LANGUAGES = {'tsconfig.json': 'typescript', 'go.mod': 'go', 'Cargo.toml': 'rust'
 GRADES = {'correctness': 0, 'alignment': 1, 'coverage': 2}
 SEVERITIES = {'high': 0, 'medium': 1, 'low': 2}
 HOME = os.path.expanduser('~')
+PLAN_MAX = 7
+# The plan item title for each finding kind; findings of one kind on one path are one item.
+CHANGE_TITLES = {
+    'invalid-json': 'Fix the JSON in {path}', 'wrong-type': 'Fix the value types in {path}',
+    'too-large': 'Check {path} by hand', 'write-rule': 'Replace the path rules that never match in {path}',
+    'default-mode': 'Remove defaultMode from {path}', 'auto-mode': 'Move autoMode out of {path}',
+    'mcp-location': 'Move the MCP servers to .mcp.json', 'matcher-type': 'Make the hook matchers in {path} strings',
+    'matcher-ignored': 'Remove the ignored hook matchers in {path}', 'hook-script': 'Fix the hook scripts in {path}',
+    'claudeignore': 'Replace .claudeignore with deny rules', 'hooks-file': 'Move {path} into settings hooks',
+    'flat-skill': 'Move {path} into a skill directory', 'skill-missing': 'Add a SKILL.md to {path}',
+    'agents-md-not-loaded': 'Make {path} load', 'oversized': 'Cut {path} to what Claude needs',
+    'broken-import': 'Fix the imports in {path}', 'stale-ref': 'Fix the stale paths in {path}',
+    'no-instructions': 'Add a short CLAUDE.md', 'undocumented-checks': 'Record the check commands in {path}',
+    'allowlist': 'Pre-approve the check commands', 'secret-deny': 'Deny reads of secret paths',
+    'stop-hook': 'Enforce the check with a Stop hook', 'procedure-skill': 'Add a skill for {path}',
+    'plugin-validate': 'Run claude plugin validate', 'plugin-eval': 'Add evals for {subject}',
+    'lsp': 'Install a code-intelligence plugin',
+}
+FATAL = ('invalid-json',)  # configuration that doesn't load grades Correctness F
+# Features a project can decline in its docs: (finding kind, label, what names the feature).
+DECLINABLE = (
+    ('stop-hook', 'Hooks', r'\bhooks?\b'),
+    ('plugin-eval', 'Plugin evals', r'\bclaude plugin eval\b|\b(?:tuning|evaluation|eval)\s+campaigns?\b'
+                                    r'|\beval(?:uation)?\s+(?:suites?|cases?|runs?)\b|\bevals?\b'),
+    ('plugin-validate', 'Plugin validation', r'\bclaude plugin validate\b|\bplugin validation\b'),
+    ('allowlist', 'Pre-approved commands', r'\ballow-?lists?\b|\ballow rules?\b|\bpre-?approv\w*'),
+    ('procedure-skill', 'Procedure skills', r'\bskills?\b'),
+    ('lsp', 'Code-intelligence plugins', r'\blsp\b|\bcode[- ]intelligence\b|\blanguage servers?\b'),
+)
+# A decline: a strong verb within 30 characters before or 60 after the feature, or a negation within 30
+# characters before it in a sentence that also says the choice is deliberate.
+DECLINE_STRONG = re.compile(r'\b(?:retired|removed|dropped|declined|abandoned|phased out|decided against|'
+                            r'chose not to|choose not to|opted out of|opt out of|disabled)\b', re.I)
+DECLINE_WEAK = re.compile(r"\b(?:no|without|not|never|don['’]t|doesn['’]t|do not|does not)\b", re.I)
+DELIBERATE = re.compile(r'\b(?:deliberate(?:ly)?|intentional(?:ly)?|on purpose|by design|by choice|decided|decision|'
+                        r'policy)\b', re.I)
+# Sentences that only consider, plan or reverse a decline never count.
+UNSURE = re.compile(r'\?|\b(?:if|unless|whether|would|could|might|maybe|perhaps|until|consider\w*|todo)\b'
+                    r'|\b(?:will|to|going to) be\b|\b(?:restored|reinstated|re-?enabled|re-?added|brought back|again)\b'
+                    r"|(?:\b(?:not|never|no longer)|n['’]t)\s+(?:been\s+|be\s+)?"
+                    r'(?:retired|removed|dropped|declined|disabled|abandoned)\b', re.I)
+# A sentence about another tool's hooks, skills or evals declines nothing in Claude Code unless it names Claude.
+OTHER_TOOLS = re.compile(r'\b(?:git|pre-commit|pre-push|commit-msg|husky|lefthook|webhooks?|cursor|codex|copilot|'
+                         r'windsurf|gemini|aider|eslint|prettier)\b', re.I)
+CLAUDE_NAMED = re.compile(r'\bclaude\b', re.I)
+LIST_ITEM = re.compile(r'^\s*(?:[-*+]|[0-9]+[.)])\s+')
 
 
 class UsageError(Exception):
@@ -256,11 +313,52 @@ def scrub(command):
                   r'\1***', command)
 
 
+def link_targets(line):
+    """Relative paths a prose line points at: Markdown links and link definitions, and bare or backticked .md paths."""
+    found = LINK.findall(line) + LINK_DEF.findall(line) + MD_PATH.findall(LINK.sub(' ', line))
+    targets = []
+    for target in found:
+        if re.match(r'[a-z][a-z0-9+.-]*:', target, re.I) or target.startswith(('#', '/', '~')):
+            continue  # a URL, an anchor in the same file or an absolute path
+        target = urllib.parse.unquote(target.split('#', 1)[0].split('?', 1)[0])
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
+def identity(path):
+    """The file a path names, through symlinks and case-insensitive file systems; None when it doesn't exist."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
 def capped(items, name, truncated):
     if len(items) > CAP:
         truncated[name] = len(items) - CAP
         return items[:CAP]
     return items
+
+
+def dir_words(segment):
+    """Lower-case words of one directory name, split at punctuation and case changes, trailing digits dropped."""
+    words = (re.sub(r'[0-9]+$', '', w.lower()) for w in re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+', segment))
+    return {w for w in words if w}
+
+
+def data_path(rel, nested_instruction=False, eval_cases=()):
+    """True for test data: a path below a data directory (DATA_WORDS), an eval case or a test directory.
+
+    A test directory's own CLAUDE.md is a nested instruction file; one any deeper is data.
+    """
+    dirs = rel.split('/')[:-1]
+    for index, name in enumerate(dirs):
+        words = dir_words(name)
+        if words & DATA_WORDS or (words & TEST_WORDS and (not nested_instruction or index < len(dirs) - 1)):
+            return True
+    return any(rel.startswith(case + '/') for case in eval_cases)
 
 
 class Scan:
@@ -275,6 +373,8 @@ class Scan:
         self.no_matcher = set(catalog.get('no_matcher_events') or [])
         self.files, self.dirs = self.walk()
         self.fileset = set(self.files)
+        self.eval_cases = sorted({f.rsplit('/', 1)[0] for f in self.files
+                                  if '/' in f and f.split('/')[-1] in EVAL_CASE_FILES})
 
     # -- filesystem -------------------------------------------------------
     def walk(self):
@@ -351,6 +451,31 @@ class Scan:
                     if p.strip() and not p.startswith(('#', '!'))]
         return {r for r in rels if any(read_pattern_matches(p, r) for p in patterns)}
 
+    def data(self, rel, nested_instruction=False):
+        """True when a project file is test data (see data_path), also through a symlink, or a link out of the project."""
+        if data_path(rel, nested_instruction, self.eval_cases):
+            return True
+        if not os.path.islink(self.abs(rel)):
+            return False
+        real = os.path.relpath(os.path.realpath(self.abs(rel)), self.root).replace(os.sep, '/')
+        return real.startswith('../') or real == '..' or data_path(real, nested_instruction, self.eval_cases)
+
+    def inside(self, path):
+        real = os.path.realpath(path)
+        return os.path.commonpath([real, self.root]) == self.root
+
+    def references(self, text, base):
+        """(file identity, line number, line, path) for each project file a text's prose points at, from base or the root."""
+        found = []
+        for number, line in prose(text):
+            for target in link_targets(line):
+                for start in (base, self.root):
+                    path = os.path.normpath(os.path.join(start, target))
+                    if os.path.isfile(path) and self.inside(path):
+                        found.append((identity(path), number, line, self.display(path)))
+                        break
+        return found
+
     def display(self, path):
         rel = os.path.relpath(path, self.root)
         return rel.replace(os.sep, '/') if not rel.startswith('..') else path
@@ -361,8 +486,9 @@ class Scan:
         doc = self.catalog.get('docs', {}).get(key) or {}
         return {'url': doc.get('url'), 'heading': doc.get('heading')}
 
-    def add(self, fid, grade, severity, title, path, evidence, fix, doc, confidence='high', line=None):
+    def add(self, fid, grade, severity, title, path, evidence, fix, doc, confidence='high', line=None, subject=None):
         finding = {'id': fid, 'grade': grade, 'severity': severity, 'title': title, 'path': path,
+                   'change': CHANGE_TITLES[fid.split(':')[0]].format(path=path, subject=subject or path),
                    'evidence': evidence[:300], 'fix': fix, 'source': self.source(doc), 'confidence': confidence}
         if line:
             finding['line'] = line
@@ -401,7 +527,7 @@ class Scan:
                 keep(rel, self.abs(rel), 'project')
         for rel in self.files:
             if rel.endswith('/CLAUDE.md') and rel != '.claude/CLAUDE.md' and rel.count('/') <= 3 \
-                    and not set(rel.split('/')[:-1]) & FIXTURE_DIRS:
+                    and not self.data(rel, nested_instruction=True):
                 keep(rel, self.abs(rel), 'nested')
         if self.user:
             config = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(HOME, '.claude')
@@ -510,7 +636,7 @@ class Scan:
         for rel in self.files:
             parts = rel.split('/')
             if len(parts) >= 2 and parts[-2] == '.claude-plugin' and parts[-1] in ('plugin.json', 'marketplace.json') \
-                    and len(parts) - 2 <= 3:
+                    and len(parts) - 2 <= 3 and not self.data(rel):
                 root = '/'.join(parts[:-2])
                 state, data, _ = self.load_json(rel)
                 skills, named = set(), set()
@@ -626,14 +752,29 @@ class Scan:
         pattern = r'(?<![\w/.-])(?:\./)?' + re.escape(strip_dot(command)) + r'(?![\w-])'
         return re.search(pattern, corpus_text) is not None
 
-    def procedure_docs(self, instruction_paths, skill_texts):
+    def procedure_docs(self, instructions):
+        """Numbered procedure docs outside test data, whether a skill covers each, and where loaded instructions link it."""
+        reached = {}
+        for item in team_instructions(instructions):
+            for ident, number, line, _ in self.references(item['text'], os.path.dirname(item['abs'])):
+                reached.setdefault(ident, (item['path'], number, line))
+        # Project skills and commands cover a doc by path or name. A doc a shipped skill (a plugin's) links is
+        # that skill's reference material, product content rather than a team procedure.
+        project_skills = [self.text(f) or '' for f in self.files
+                          if re.fullmatch(r'\.claude/skills/[^/]+/SKILL\.md|\.claude/commands/.+\.md', f)]
+        product = {ident for f in self.files if f.split('/')[-1] == 'SKILL.md' and not f.startswith('.claude/')
+                   and not self.data(f)
+                   for ident, _, _, _ in self.references(self.text(f) or '', os.path.dirname(self.abs(f)))}
+        paths = {i['path'] for i in instructions}
         docs = []
         for rel in self.files:
             name = rel.split('/')[-1]
             parts = rel.split('/')
-            if not rel.endswith('.md') or rel in instruction_paths or name == 'SKILL.md' or 'skills' in parts \
-                    or parts[0] == '.claude' or re.match(r'(README|CHANGELOG|LICENSE)', name, re.I) \
-                    or set(parts[:-1]) & FIXTURE_DIRS:
+            if not rel.endswith('.md') or rel in paths or name == 'SKILL.md' or 'skills' in parts \
+                    or parts[0] == '.claude' or re.match(r'(README|CHANGELOG|LICENSE)', name, re.I) or self.data(rel):
+                continue
+            ident = identity(self.abs(rel))
+            if ident in product:
                 continue
             text = self.text(rel) or ''
             steps = sum(1 for _, line in prose(text) if NUMBERED.match(line))
@@ -645,9 +786,49 @@ class Scan:
                 hit = steps >= 5 or (steps >= 3 and PROCEDURE_WORDS.search(name + ' ' + title) is not None)
             if hit:
                 stem = name[:-3]
-                has_skill = any(rel in t or re.search(r'\b' + re.escape(stem) + r'\b', t, re.I) for t in skill_texts)
-                docs.append({'path': rel, 'steps': steps, 'title': title[:120], 'has_skill': has_skill})
+                has_skill = any(
+                    rel in t or re.search(r'\b' + re.escape(stem) + r'\b', t, re.I) for t in project_skills)
+                via = reached.get(ident)
+                docs.append({'path': rel, 'steps': steps, 'title': title[:120], 'has_skill': has_skill,
+                             'linked_from': '%s:%d' % via[:2] if via else None,
+                             'on_demand': bool(via and ON_DEMAND.search(via[2])) or any(
+                                 ON_DEMAND.search(line) and SKILL_WORDS.search(line) for _, line in prose(text))})
         return docs
+
+    def declines(self, instructions):
+        """Features the project documents a deliberate choice against, each with the sentence, file and line.
+
+        Read from the loaded instructions, then the Markdown files their prose links (outside test data), then
+        README.md; the first decline of each feature counts.
+        """
+        loaded = team_instructions(instructions)
+        sources, seen = [], set()
+        for path, abs_path in [(i['path'], i['abs']) for i in loaded] + [
+                (rel, self.abs(rel)) for i in loaded
+                for _, _, _, rel in self.references(i['text'], os.path.dirname(i['abs']))] + [
+                ('README.md', self.abs('README.md'))]:
+            ident = identity(abs_path)
+            if ident and ident not in seen and path.lower().endswith('.md') and not self.data(path) \
+                    and os.path.isfile(abs_path) and self.inside(abs_path):
+                seen.add(ident)
+                sources.append((path, self.read(abs_path, path) or ''))
+        found = {}
+        for path, text in sources:
+            for sentence, line_at in sentences(text):
+                if UNSURE.search(sentence):
+                    continue
+                for feature, label, pattern in DECLINABLE:
+                    if feature in found or (OTHER_TOOLS.search(sentence) and not CLAUDE_NAMED.search(sentence)):
+                        continue
+                    for match in re.finditer(pattern, sentence, re.I):
+                        before = sentence[max(0, match.start() - 30):match.start()]
+                        after = sentence[match.end():match.end() + 60]
+                        if DECLINE_STRONG.search(before) or DECLINE_STRONG.search(after) or (
+                                DECLINE_WEAK.search(before) and DELIBERATE.search(sentence)):
+                            found[feature] = {'feature': feature, 'label': label, 'path': path,
+                                              'line': line_at(match.start()), 'quote': sentence[:240]}
+                            break
+        return [found[feature] for feature, _, _ in DECLINABLE if feature in found]
 
     # -- correctness checks -----------------------------------------------
     def check_settings(self, settings):
@@ -850,9 +1031,7 @@ class Scan:
         for c in checks:
             c['documented'] = c['command'] in documented
         skills = sorted(f for f in self.files if re.fullmatch(r'\.claude/skills/[^/]+/SKILL\.md', f))
-        skill_texts = [self.text(f) or '' for f in skills + [f for f in self.files
-                                                            if re.fullmatch(r'\.claude/commands/.+\.md', f)]]
-        procedures = self.procedure_docs({i['path'] for i in instructions}, skill_texts)
+        procedures = self.procedure_docs(instructions)
         project_settings = [s for s in settings if s['scope'] == 'project']
         # Coverage that depends on settings contents is not judged when a project settings file was not read.
         blind = ['%s (%s)' % (s['path'], s['state'] if s['state'] != 'ok' else 'not an object')
@@ -882,12 +1061,14 @@ class Scan:
             text = self.text(f) or ''
             if 'anthropics/claude-code-action' in text or re.search(r'\bclaude (-p|--print)\b', text):
                 agent_run.append('%s runs Claude Code' % f)
-        if 'docs/operations' in self.dirs or any(re.search(r'sdlc', f, re.I) and f.endswith('.md') for f in self.files):
+        if 'docs/operations' in self.dirs or any(re.search(r'sdlc', f, re.I) and f.endswith('.md') and not self.data(f)
+                                                 for f in self.files):
             agent_run.append('delivery/SDLC docs present')
         typed = []
         for f in self.files:
             name = f.split('/')[-1]
-            if f.count('/') <= 2 and (name in LANGUAGES or name.endswith('.csproj')) and name not in typed:
+            if f.count('/') <= 2 and (name in LANGUAGES or name.endswith('.csproj')) and name not in typed \
+                    and not self.data(f):
                 typed.append(name)
         pyproject = self.text('pyproject.toml') or ''
         if re.search(r'^\[tool\.(mypy|pyright)\]', pyproject, re.M):
@@ -896,6 +1077,8 @@ class Scan:
         secret_paths = []
         for f in self.files:
             parts = f.split('/')
+            if self.data(f):
+                continue  # sample secrets in test data are not the project's
             if 'secrets' in parts[:-1]:
                 d = '/'.join(parts[:parts.index('secrets') + 1]) + '/'
                 if not any(s['path_or_pattern'] == d for s in secret_paths):
@@ -1000,14 +1183,22 @@ class Scan:
                      '%s:%d: %s' % (must_rules[0]['path'], must_rules[0]['line'], must_rules[0]['text']),
                      'Add to .claude/settings.json: %s and create .claude/hooks/stop-check.sh (chmod +x):\n%s'
                      % (settings_json, script), 'stop-hook', confidence='medium', line=must_rules[0]['line'])
+        optional = []
         for doc in procedures:
             if not doc['has_skill']:
                 slug = re.sub(r'[^a-z0-9]+', '-', doc['path'].split('/')[-1][:-3].lower()).strip('-') or 'procedure'
-                self.add('procedure-skill:' + doc['path'], 'coverage', 'medium', 'Procedure has no skill', doc['path'],
-                         '%d numbered steps: %s' % (doc['steps'], doc['title']),
-                         'Create .claude/skills/%s/SKILL.md with name and description frontmatter that follows '
-                         'the steps in %s (keep the doc as the source and link it).' % (slug, doc['path']),
-                         'procedures-skills', confidence='medium')
+                fix = ('Create .claude/skills/%s/SKILL.md with name and description frontmatter that follows '
+                       'the steps in %s (keep the doc as the source and link it).' % (slug, doc['path']))
+                if doc['linked_from'] and not doc['on_demand']:
+                    # Loaded instructions already lead Claude to it; a skill is a convenience, not a gap.
+                    optional.append({'id': 'procedure-skill:' + doc['path'], 'path': doc['path'],
+                                     'change': CHANGE_TITLES['procedure-skill'].format(path=doc['path']),
+                                     'reason': '%s links it from the loaded instructions' % doc['linked_from'],
+                                     'fix': fix, 'source': self.source('procedures-skills')})
+                else:
+                    self.add('procedure-skill:' + doc['path'], 'coverage', 'medium', 'Procedure has no skill',
+                             doc['path'], '%d numbered steps: %s' % (doc['steps'], doc['title']), fix,
+                             'procedures-skills', confidence='medium')
         if plugin_checks:
             where = manifests[0]['path']
             if not plugin_checks['validate_documented']:
@@ -1025,12 +1216,20 @@ class Scan:
                              suites, 'documented' if plugin_checks['eval_documented'] else 'not documented'),
                          'Add evals/ cases for the skills of %s and run `claude plugin eval` as a release gate '
                          'or in CI.' % (', '.join(p['name'] for p in without) or 'each plugin'),
-                         'plugin-evals', confidence='medium')
+                         'plugin-evals', confidence='medium',
+                         subject=', '.join(p['name'] for p in without) or 'the plugin skills')
         if typed and not lsp_enabled and not blind:
             langs = sorted({LANGUAGES.get(t, 'csharp' if t.endswith('.csproj') else 'python') for t in typed})
             self.add('lsp', 'coverage', 'low', 'No code-intelligence plugin', '.', 'typed markers: ' + ', '.join(typed),
                      'Install %s from the official marketplace; check /plugin for the exact name.' % ', '.join(
                          l + '-lsp' for l in langs), 'code-intelligence', confidence='medium')
+
+        # documented declines
+        declined = self.declines(instructions)
+        for entry in declined:
+            entry['finding_ids'] = [f['id'] for f in self.findings if f['id'].split(':')[0] == entry['feature']]
+        gone = {fid for entry in declined for fid in entry['finding_ids']}
+        self.findings = [f for f in self.findings if f['id'] not in gone]
 
         # dismissed findings
         dismissed = []
@@ -1069,6 +1268,10 @@ class Scan:
         }
         if blind:
             status.update(allowlist=unjudged, secrets=unjudged, enforced=unjudged)
+        for entry in declined:
+            item = {'allowlist': 'allowlist', 'stop-hook': 'enforced'}.get(entry['feature'])
+            if item and entry['finding_ids']:
+                status[item] = ('declined', 'declined in %s:%d' % (entry['path'], entry['line']), [])
         baseline = []
         for item in self.catalog.get('baseline', []):
             state, evidence, fids = status.get(item['id'], ('n/a', 'not evaluated', []))
@@ -1129,13 +1332,129 @@ class Scan:
             'plugin_checks': plugin_checks,
             'must_rules': capped(must_rules, 'signals.must_rules', t),
         }
+        plan = plan_of(self.findings, optional, declined)
+        setup = bool(roots or project_settings or '.claude' in self.dirs)
         out = {'claudit': VERSION, 'catalog_version': self.catalog.get('catalog_version'),
                'claude_version': self.claude_version, 'root': '.', 'git': self.git, 'inventory': inventory,
                'signals': signals, 'profiles': profiles, 'findings': capped(self.findings, 'findings', t),
+               'plan': plan, 'grades': grades_of(plan, setup), 'optional': optional, 'declined': declined,
+               'footer': audited(self.root, self.git),
                'baseline': baseline, 'dismissed': dismissed, 'limits': self.limits}
         if t:
             out['truncated'] = t
         return redact(out)
+
+
+def team_instructions(instructions):
+    """Loaded project instructions and their imports, without personal CLAUDE.local.md and what it imports."""
+    def personal(item):
+        while item.get('parent'):
+            item = item['parent']
+        return item['path'] == 'CLAUDE.local.md'
+    return [i for i in instructions if i['loaded'] and i['kind'] in ('project', 'import') and not personal(i)]
+
+
+def sentences(text):
+    """(sentence, line number of an offset in it) for a text's prose; a paragraph or list item may wrap over lines."""
+    units, current, last = [], [], None
+    for number, line in prose(text):
+        body = line.strip().lstrip('>').strip()
+        heading = body.startswith(('#', '|'))
+        if not body or heading or LIST_ITEM.match(line) or last is None or number != last + 1:
+            if current:
+                units.append(current)
+            current = []
+        if body and not heading:
+            current.append((number, LIST_ITEM.sub('', body, count=1)))
+        last = number
+    if current:
+        units.append(current)
+    for unit in units:
+        joined, marks = '', []
+        for number, body in unit:
+            joined += ' ' if joined else ''
+            marks.append((len(joined), number))
+            joined += body
+        for match in re.finditer(r'(?:[^.!?;]|[.!?;](?=\S))+[.!?;]?', joined):
+            start = match.start() + len(match.group()) - len(match.group().lstrip())
+            sentence = match.group().strip()
+            if sentence:
+                yield sentence, (lambda offset, start=start, marks=marks:
+                                 max(n for o, n in marks if o <= start + offset))
+
+
+def plan_of(findings, optional=(), declined=()):
+    """The deterministic plan: findings of one kind on one path are one item, ranked by severity, grade and id.
+
+    Up to PLAN_MAX items; the rest overflow. Secret deny rules join a .claudeignore item, whose fix adds them.
+    """
+    groups, index = [], {}
+    ignore_file = any(f['id'] == 'claudeignore' for f in findings)
+    for finding in sorted(findings, key=lambda f: (SEVERITIES[f['severity']], GRADES[f['grade']], f['id'])):
+        kind = finding['id'].split(':')[0]
+        merged = kind == 'claudeignore' or (kind == 'secret-deny' and ignore_file)
+        key = ('claudeignore', '') if merged else (kind, finding['path'])
+        if key not in index:
+            index[key] = {'title': finding['change'], 'kind': kind, 'grades': [],
+                          'severity': finding['severity'], 'finding_ids': []}
+            groups.append(index[key])
+        index[key]['finding_ids'].append(finding['id'])
+        if finding['grade'] not in index[key]['grades']:
+            index[key]['grades'].append(finding['grade'])
+    items, overflow = groups[:PLAN_MAX], groups[PLAN_MAX:]
+    for number, item in enumerate(items, 1):
+        item['n'] = number
+    count = len(items)
+    if count >= 3:
+        summary = '%d changes are worth making.' % count
+        if overflow:
+            summary += ' %d more %s under Also worth knowing.' % (len(overflow), 'is' if len(overflow) == 1 else 'are')
+    else:
+        reasons = ['the scan found no %sdefects or gaps' % ('other ' if count else '')]
+        if optional:
+            reasons.append('optional items are under Also worth knowing')
+        if declined:
+            reasons.append('declined features are under Declined by the project')
+        head = 'No changes worth making' if not count else '%d change%s worth making' % (
+            count, ' is' if count == 1 else 's are')
+        summary = '%s: %s.' % (head, '; '.join(reasons))
+    return {'items': items, 'overflow': overflow, 'summary': summary}
+
+
+def grades_of(plan, setup):
+    """Letters for the three grades from the plan, and which plan items would raise each.
+
+    Correctness and Alignment: F for configuration that doesn't load (Correctness only), D for a high or several
+    mediums, C for one medium, B for lows only, A for none; a missing instruction file counts as one Alignment
+    medium. Coverage: A to D for 0, 1, 2 or 3+ gaps, F with no setup at all.
+    """
+    groups = plan['items'] + plan['overflow']
+    grades = {}
+    for grade in GRADES:
+        mine = [g for g in groups if grade in g['grades'] or (grade == 'alignment' and g['kind'] == 'no-instructions')]
+        if grade == 'coverage':
+            letter = 'F' if not setup else 'ABCD'[min(len(mine), 3)]
+        else:
+            severities = ['medium' if g['kind'] == 'no-instructions' else g['severity'] for g in mine]
+            letter = ('F' if any(g['kind'] in FATAL for g in mine) else
+                      'D' if 'high' in severities or severities.count('medium') >= 2 else
+                      'C' if 'medium' in severities else 'B' if severities else 'A')
+        grades[grade] = {'letter': letter, 'items': [g['n'] for g in mine if 'n' in g],
+                         'more': sum(1 for g in mine if 'n' not in g)}
+    return grades
+
+
+def audited(root, git):
+    """The report footer's first line: Claudit's version and the audited commit."""
+    if not git:
+        return 'Claudit %s; not a git repo' % VERSION
+    proc = run(['git', '-C', root, 'rev-parse', '--verify', '-q', 'HEAD^{commit}'])
+    sha = proc.stdout.strip() if proc is not None and proc.returncode == 0 else ''
+    if not re.fullmatch(r'[0-9a-f]{40,64}', sha):
+        return 'Claudit %s; git repo with no commits' % VERSION
+    status = run(['git', '-C', root, 'status', '--porcelain'])
+    dirty = status is not None and status.returncode == 0 and bool(status.stdout.strip())
+    return 'Claudit %s; audited commit %s%s' % (VERSION, sha, ' plus uncommitted changes' if dirty else '')
 
 
 def path_tokens(line):

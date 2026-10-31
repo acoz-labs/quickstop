@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)"
+    ],
+    "deny": [
+      "Read(./.env)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-tests.sh\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

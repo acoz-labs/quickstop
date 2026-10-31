@@ -1,0 +1,13 @@
+{
+  "name": "wordtally",
+  "version": "2.0.1",
+  "type": "module",
+  "main": "src/tally.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,11 @@
+# toneguide
+
+Maintainers run this plugin by hand on drafts. Decisions that shape the setup
+are in @docs/decisions.md.
+
+## Commands
+
+- `bin/check` validates the skill's examples.
+- `claude plugin validate .` validates the manifest and skill.
+
+Always run `bin/check` before you report a change as done.

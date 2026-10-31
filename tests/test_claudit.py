@@ -786,7 +786,8 @@ class Coverage(Project):
         self.write('tests/fixtures/release.md', '# Release\n' + steps)
         self.write('.claude/skills/ship/SKILL.md', '---\nname: ship\ndescription: Follows docs/deploy-guide.md\n---\n')
         self.write('.claude-plugin/plugin.json', {'name': 'p'})
-        self.write('skills/shipped/SKILL.md', '---\nname: shipped\n---\nFollow docs/RELEASE.md and docs/runbook.md.\n')
+        self.write('skills/shipped/SKILL.md', '---\nname: shipped\n---\nFollow [the method](../../docs/method.md).\n')
+        self.write('docs/method.md', '# Release method\n' + steps)  # a shipped skill's reference material
         self.write('docs/runbook.md', '# Runbook\n1. a\n2. b\n3. c\n')
         self.write('.claude/commands/runbook.md', 'Follow docs/runbook.md.\n')
         result = self.scan()

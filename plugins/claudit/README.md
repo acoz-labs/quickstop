@@ -40,15 +40,64 @@ Asking Claude to audit or improve the Claude Code setup also invokes it.
      enforced by hooks or permissions) plus profiles picked from project signals:
      agent-run repository, plugin or marketplace repository, typed codebase,
      repository with procedure docs.
-3. **The top changes**, ranked by impact across the three grades; the skill's
-   [report step](skills/claudit/SKILL.md#5-report) sets how many. Each has the
-   reason, the exact diff or command, the doc URL and heading it rests on, and the
-   effort.
-4. **An offer to apply** the changes you select, in place or on a branch in an
+   A grade below A names the changes that would raise it.
+3. **The top changes**, ranked by impact across the three grades, up to seven. Each
+   has the reason, the exact diff or command, the doc URL and heading it rests on,
+   and the effort. When nothing is worth changing, the report says "No changes worth
+   making", which is a valid result with Coverage A.
+4. **Declined by the project**: features the project documents a deliberate choice
+   against, quoted with their file and line. Claudit doesn't recommend them or count
+   them against Coverage.
+5. **An offer to apply** the changes you select, in place or on a branch in an
    isolated worktree with a pull request through `gh`.
 
-Process detail stays in a short footer, including Claude Code documentation pages
-that are newer than Claudit's feature catalog.
+Process detail stays in a short footer. Its first line gives the Claudit version and
+the audited commit (or "not a git repo"), so a report can be reproduced; it also
+lists Claude Code documentation pages that are newer than Claudit's feature catalog.
+
+## Same tree, same result
+
+The scan, not the model, decides the grade letters, which findings become changes,
+their order and how many there are. The model writes the intent, the explanations
+and the diffs. The rules:
+
+- **Plan.** Findings of one kind on one file are one change. Changes are ranked by
+  severity (high, medium, low), then grade (Correctness, Alignment, Coverage), then
+  finding id. The first seven are the plan; any more go under Also worth knowing.
+  Fewer than three come with the reason; the plan is never padded.
+- **Grades.** Correctness and Alignment: F for configuration that doesn't load
+  (Correctness only), D for a high finding or several mediums, C for one medium, B
+  for lows only, A for none; a project with no instruction file gets an Alignment
+  medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
+  at all.
+- **Procedures already reachable are optional.** A procedure doc that loaded
+  team instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
+  CLAUDE.local.md) already link, as a Markdown
+  link or a bare or backticked path, is reachable, so a skill for it is optional
+  rather than a change. It becomes a change when the doc, or the line linking it,
+  says the procedure should be invoked on demand ("on demand" with "skill", "slash
+  command" or "invoke" in the doc). A doc that a skill anywhere in the repository
+  links (a plugin's skill, for example) is that skill's reference material, not a
+  team procedure.
+- **Test data isn't configuration.** Files below a directory whose name contains
+  one of the words fixture(s), testdata, golden(s), snapshot(s), cassette(s),
+  eval(s), grader(s), report(s) or result(s), below a test or tests directory, or
+  inside an eval case (a directory with `case.yaml`) are data. They are never read
+  as procedures, plugin manifests, typed-code markers or secrets. Names are split
+  at punctuation and case changes and compared case-insensitively, so
+  `claudit_gate_reports`, `__fixtures__` and `TestData` all count; symlinks are
+  judged by their target too. A test directory's own `CLAUDE.md` is still an
+  instruction file. Anything else the tests load can be dismissed.
+- **Documented declines.** Claudit reads the loaded team instructions, the Markdown
+  files they link and the README. A sentence declines a feature (hooks, plugin evals,
+  plugin validation, pre-approved commands, procedure skills, code intelligence)
+  when a word such as retired, removed, dropped, declined, abandoned, disabled,
+  decided against or chose not to sits next to it, or when it is negated ("no eval
+  campaign") in a sentence that says the choice is deliberate (deliberately,
+  intentionally, by design, by choice, decided, decision, policy). Sentences that
+  are questions, conditional, future, negated or reversed ("if", "will be", "weren't
+  removed", "restored") don't count, nor do sentences about another tool (Git hooks,
+  Cursor skills) that don't name Claude.
 
 ## How it works
 

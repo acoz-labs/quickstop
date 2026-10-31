@@ -25,7 +25,7 @@ action, an agent's success claim or matching headings is not evidence it happene
 ## Eval suite and baselines
 
 [`evals/claudit/`](../../evals/claudit/README.md) is Claudit's `claude plugin eval`
-release gate: five synthetic fixtures with planted findings, run by
+release gate: nine synthetic fixtures with planted findings, run by
 `bin/claudit-eval` with a pinned model and `--max-cost-usd`. It isn't a per-PR
 check. A release compares its numbers with the recorded
 [baselines](claudit-eval-baselines.md) using the same model, judge and run count,
@@ -43,7 +43,8 @@ measuring Claudit doesn't change plugin bytes.
   `knowledge`, `refresh` or `status` skill. Record native validation
   (`claude plugin validate --strict`) and inventory results.
 - Run a headless read-only audit on a real repository at the candidate and on one
-  other repository. Each report states the intent, gives Correctness, Alignment
+  other repository (`bin/claudit-eval headless`, which keeps each command line and
+  script-checks the report against the scan of the same clone). Each report states the intent, gives Correctness, Alignment
   and Coverage grades with confidences, and ranks its top changes with exact diffs
   and doc citations, following the plan-length rule in the skill's report step. Record wall time and cost at list prices.
 - Compare the consumer's files, Git index and working tree before and after a

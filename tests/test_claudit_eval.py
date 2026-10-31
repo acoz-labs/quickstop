@@ -421,6 +421,211 @@ def frontmatter(path):
             if line.strip() and not line.startswith((' ', '\t', '-', '#'))}
 
 
+FAKE_EVAL = """#!/usr/bin/env python3
+import json, os, sys
+argv = sys.argv
+out = argv[argv.index('--json') + 1]
+sandbox = os.path.join(os.environ['FAKE_TMP'], 'e-Ab12Cd')
+os.makedirs(os.path.join(sandbox, 'out'))
+trace = os.path.join(sandbox, 'out', 'trace.jsonl')
+with open(trace, 'w') as handle:
+    handle.write(json.dumps({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+        {'type': 'text', 'text': 'thinking aloud'}]}}) + '\\n')
+    handle.write(json.dumps({'type': 'result', 'result': '# Claudit: alpha\\n\\nReport text.'}) + '\\n')
+run = {'costUsd': 0.1, 'judgeCostUsd': 0, 'durationSeconds': 5, 'graders': [], 'tracePath': trace}
+lost = dict(run, tracePath=os.path.join(os.environ['FAKE_TMP'], 'gone', 'trace.jsonl'))
+with open(out, 'w') as handle:
+    json.dump({'costUsd': 0.2, 'cases': [{'name': 'alpha', 'graders': [], 'arms': {'with': [run, lost]}}]}, handle)
+"""
+
+
+class ReportRetentionTests(RunTests):
+    def fake(self, script):
+        fake = self.base / 'fake-bin'
+        fake.mkdir(exist_ok=True)
+        (fake / 'claude').write_text(script)
+        (fake / 'claude').chmod(0o755)
+        return dict(os.environ, TMPDIR=str(self.tmp), CLAUDIT_EVAL_NO_PYTHON_COPY='1', FAKE_TMP=str(self.tmp),
+                    PATH=f'{fake}{os.pathsep}{os.environ.get("PATH", "")}')
+
+    def test_run_keeps_reports_and_command_lines_and_removes_sandboxes(self):
+        for keep in (False, True):
+            with self.subTest(keep_temp=keep):
+                out = self.base / f'out-{keep}'
+                args = ['run', '--arm', 'plain', '--model', 'm', '--max-cost-usd', '1', '--output-dir', str(out)]
+                result = subprocess.run([sys.executable, str(self.repo / 'bin/claudit-eval'), *args,
+                                         *(['--keep-temp'] if keep else [])],
+                                        env=self.fake(FAKE_EVAL), capture_output=True, text=True,
+                                        stdin=subprocess.DEVNULL)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((out / 'reports/alpha-run1.md').read_text(), '# Claudit: alpha\n\nReport text.\n')
+                self.assertFalse((out / 'reports/alpha-run2.md').exists())
+                self.assertIn('no final report text for alpha-run2.md', result.stderr)
+                command = (out / 'command.txt').read_text().splitlines()
+                self.assertEqual(command[0], 'runner: ' + shlex.join([str(self.repo / 'bin/claudit-eval'), *args,
+                                                                      *(['--keep-temp'] if keep else [])]))
+                self.assertTrue(command[2].startswith('eval: claude plugin eval '))
+                self.assertIn(' --keep-temp ', command[2])
+                self.assertEqual((self.tmp / 'e-Ab12Cd').exists(), keep)
+                shutil.rmtree(self.tmp / 'e-Ab12Cd', ignore_errors=True)
+
+    def test_final_reply_prefers_the_result(self):
+        trace = self.base / 'trace.jsonl'
+        trace.write_text('not json\n[1]\n' + json.dumps({'role': 'assistant', 'content': 'plain reply'}) + '\n')
+        self.assertEqual(ce.final_reply(trace), 'plain reply')
+        trace.write_text(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'tool_use'},
+                                                                                   {'type': 'text', 'text': 'A'}]}})
+                         + '\n' + json.dumps({'type': 'result', 'result': ' '}) + '\n')
+        self.assertEqual(ce.final_reply(trace), 'A')
+        trace.write_text(json.dumps({'type': 'user', 'message': {'role': 'user', 'content': 'q'}}) + '\n')
+        self.assertIsNone(ce.final_reply(trace))
+
+    def test_only_the_eval_sandbox_shape_is_removed(self):
+        for name in ('e-Ab12Cd', 'keep-me', 'e-toolongname'):
+            trace = self.tmp / name / 'out' / 'trace.jsonl'
+            trace.parent.mkdir(parents=True)
+            trace.write_text(json.dumps({'type': 'result', 'result': 'r'}) + '\n')
+            out = self.base / ('out-' + name)
+            out.mkdir()
+            ce.keep_reports({'cases': [{'name': 'c', 'arms': {'with': [{'tracePath': str(trace)}]}}]}, out, False)
+            self.assertEqual((out / 'reports/c-run1.md').read_text(), 'r\n')
+            self.assertEqual((self.tmp / name).exists(), name != 'e-Ab12Cd')
+
+
+def scan_of(root):
+    proc = subprocess.run([sys.executable, str(ROOT / 'plugins/claudit' / ce.HELPER), 'scan', '--root', str(root),
+                           '--claude-version', '2.1.316'], capture_output=True, text=True,
+                          env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+    return json.loads(proc.stdout)
+
+
+def conforming(scan):
+    """A report that follows the scan exactly."""
+    items = ''.join('%d. **%s** (Coverage, effort S)\n   Problem: x.\n   Change: y.\n   Source: [h](u)\n\n'
+                    % (i['n'], i['title']) for i in scan['plan']['items'])
+    grades = '\n'.join('- **%s: %s** (confidence: high). %s' % (
+        name.capitalize(), g['letter'], 'Fine.' if g['letter'] == 'A' else 'Items %s would raise it.' % ', '.join(
+            str(n) for n in g['items'])) for name, g in scan['grades'].items())
+    declined = ''.join('- **%s** (`%s:%d`): "%s"\n' % (d['label'], d['path'], d['line'], d['quote'])
+                       for d in scan['declined'])
+    return ('# Claudit: x\n\n**Intent:** x.\n\n## Grades\n\n%s\n\n## Top changes\n\n%s\n\n%s%s'
+            '## Also worth knowing\n\n- Optional.\n\n---\n%s\nClaude Code 2.1.316.\n' % (
+                grades, scan['plan']['summary'], items,
+                '## Declined by the project\n\n%s\n' % declined if declined else '', scan['footer']))
+
+
+class GradeTests(Temp):
+    def repo(self):
+        root = self.base / 'repo'
+        (root / 'bin').mkdir(parents=True)
+        (root / 'CLAUDE.md').write_text('# r\n\n@docs/repository.md\n\nAlways run `bin/ci` before you finish.\n'
+                                        'Follow `docs/operations/sdlc.md`.\n')
+        (root / 'docs/operations').mkdir(parents=True)
+        (root / 'docs/repository.md').write_text('Claude Code hooks were retired; CI is the gate.\n')
+        (root / 'docs/operations/sdlc.md').write_text('# Delivery\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
+        (root / 'docs/release.md').write_text('# Release\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
+        (root / 'tests/reports').mkdir(parents=True)
+        (root / 'tests/reports/run.md').write_text('# Release report\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
+        (root / 'bin/ci').write_text('#!/bin/sh\n')
+        (root / 'bin/ci').chmod(0o755)
+        env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        for args in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@x.invalid', '-c',
+                                                     'commit.gpgsign=false', 'commit', '-q', '-m', 'x']):
+            subprocess.run(['git', '-C', str(root), *args], check=True, env=env)
+        return root
+
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_grade_controls(self):
+        scan = scan_of(self.repo())
+        self.assertEqual([i['title'] for i in scan['plan']['items']],
+                         ['Pre-approve the check commands', 'Add a skill for docs/release.md'])
+        helper = ce.load_helper(ROOT / 'plugins/claudit')
+        good = conforming(scan)
+        checks = ce.grade_report(good, scan, helper)
+        self.assertEqual(checks, {'plan_items': True, 'grades': True, 'grade_raise': True, 'footer': True,
+                                  'no_test_data_findings': True, 'optional_not_planned': True,
+                                  'declined_listed': True})
+        bad = {'plan_items': good.replace('1. **Pre-approve', '1. **Allow'),
+               'grades': good.replace('**Coverage: C**', '**Coverage: B**'),
+               'grade_raise': good.replace('Items 1, 2 would raise it.', 'Two gaps.'),
+               'footer': good.replace(scan['footer'], 'Claudit 4.1.0'),
+               'declined_listed': good.replace('## Declined by the project', '## Declined')}
+        for check, text in bad.items():
+            with self.subTest(check=check):
+                self.assertNotEqual(text, good)
+                self.assertFalse(ce.grade_report(text, scan, helper)[check])
+        report, scan_path = self.base / 'report.md', self.base / 'scan.json'
+        report.write_text(good)
+        scan_path.write_text(json.dumps(scan))
+        proc = subprocess.run([sys.executable, str(RUNNER), 'grade', '--report', str(report), '--scan', str(scan_path)],
+                              capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertFalse((ROOT / 'plugins/claudit/skills/claudit/scripts/__pycache__').exists())
+
+
+FAKE_HEADLESS = """#!/usr/bin/env python3
+import json, os, sys
+if sys.argv[1:] == ['--version']:
+    print('2.1.316 (Claude Code)')
+    sys.exit(0)
+sys.path.insert(0, os.environ['FAKE_TESTS'])
+from test_claudit_eval import conforming, scan_of
+with open(os.environ['FAKE_ARGS'], 'a') as handle:
+    handle.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')
+print(json.dumps({'result': conforming(scan_of(os.getcwd())), 'total_cost_usd': 0.12}))
+"""
+
+
+class HeadlessTests(GradeTests):
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_fresh_clone_runs_are_recorded_and_graded(self):
+        repo = self.repo()
+        sha = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+        fake = self.base / 'fake-bin'
+        fake.mkdir()
+        (fake / 'claude').write_text(FAKE_HEADLESS)
+        (fake / 'claude').chmod(0o755)
+        tmp = self.base / 'tmp'
+        tmp.mkdir()
+        calls = self.base / 'calls.jsonl'
+        env = dict(os.environ, PATH=f'{fake}{os.pathsep}{os.environ.get("PATH", "")}', TMPDIR=str(tmp),
+                   FAKE_TESTS=str(Path(__file__).resolve().parent), FAKE_ARGS=str(calls), PYTHONDONTWRITEBYTECODE='1',
+                   GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        out = self.base / 'out'
+        proc = subprocess.run([sys.executable, str(RUNNER), 'headless', '--repo', str(repo), '--sha', sha,
+                               '--plugin', str(ROOT / 'plugins/claudit'), '--model', 'claude-sonnet-5-5',
+                               '--max-budget-usd', '0.5', '--runs', '2', '--output-dir', str(out)],
+                              capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        summary = json.loads((out / 'summary.json').read_text())
+        self.assertEqual((summary['runs'], summary['passed'], summary['median_cost_usd']), (2, 2, 0.12))
+        clones = [json.loads(line)['cwd'] for line in calls.read_text().splitlines()]
+        self.assertEqual(len(set(clones)), 2)
+        for number, clone in enumerate(clones, 1):
+            meta = json.loads((out / f'run{number}/meta.json').read_text())
+            self.assertEqual(meta['head'], sha)
+            self.assertTrue(meta['passed'], meta['checks'])
+            self.assertEqual(shlex.split(meta['command']), [
+                'claude', '-p', '/claudit:claudit --read-only', '--plugin-dir', str(ROOT / 'plugins/claudit'),
+                *ce.HEADLESS_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.5'])
+            self.assertTrue((out / f'run{number}/report.md').read_text().startswith('# Claudit'))
+            self.assertFalse(Path(clone).exists())
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    def test_refuses_an_instruction_file_above_the_clone(self):
+        tmp = self.base / 'tmp'
+        tmp.mkdir()
+        (self.base / 'CLAUDE.md').write_text('# above\n')
+        proc = subprocess.run([sys.executable, str(RUNNER), 'headless', '--repo', 'x', '--sha', 'y', '--plugin',
+                               str(ROOT / 'plugins/claudit'), '--model', 'm', '--max-budget-usd', '1',
+                               '--output-dir', str(self.base / 'out')],
+                              capture_output=True, text=True, env=dict(os.environ, TMPDIR=str(tmp),
+                                                                       PYTHONDONTWRITEBYTECODE='1'))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('is above the clone and would load', proc.stderr)
+        self.assertEqual(list(tmp.iterdir()), [])
+
+
 class SuiteStructureTests(unittest.TestCase):
     def test_cases_follow_the_suite_contract(self):
         cases = sorted(path for path in (ROOT / 'evals/claudit/cases').glob('*') if path.is_dir())

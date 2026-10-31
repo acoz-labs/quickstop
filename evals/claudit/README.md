@@ -1,7 +1,7 @@
 # Claudit eval suite
 
 A `claude plugin eval` suite that measures how well a Claude Code setup review
-finds planted problems in five small synthetic repositories. It is Claudit's
+finds planted problems in nine small synthetic repositories. It is Claudit's
 release gate (issue #155), not a per-PR check: each full pass spends model budget.
 Recorded baselines are in [the baseline record](../../docs/acceptance/claudit-eval-baselines.md).
 
@@ -24,12 +24,25 @@ the suite moves into the plugin.
 | `f4-well-configured` | Sensible current setup | none: `no-invented-*` graders fail when a healthy choice is reported as a defect |
 | `f5-bare` | Go source and tests, no Claude config | project instructions, test-command allowlist |
 | `f6-agents-md` | Python package whose only instruction file is `AGENTS.md` | none: `no-invented-agents-md-ignored` (regex) and `no-invented-agents-md-not-loaded` (judge) fail when the report says `AGENTS.md` doesn't load or recommends a `CLAUDE.md` to make it load |
+| `f7-fixture-noise` | Python CLI whose eval grader, golden report and fixture repository look like procedures and config | none on test data: `no-invented-fixture-findings` (regex) fails on a finding about them; the one real change is a skill for `docs/release.md` |
+| `f8-documented-decline` | Advisory plugin whose `docs/decisions.md` retires hooks and declines an eval campaign | none: `structure-declined` needs both under "Declined by the project" with `docs/decisions.md:3` and `:5`, `no-invented-declined-recommendation` fails if either is recommended, `structure-coverage-a` needs Coverage A |
+| `f9-clean` | Small, fully configured Node library | none: "No changes worth making" (`structure-plan-items`) with Coverage A (`structure-coverage-a`) |
 
-Every case also has five `structure-*` regex graders: the report states the
+Every case also has these `structure-*` regex graders: the report states the
 project's intent, gives Correctness, Alignment and Coverage grades, each with a
 confidence (Claudit 4.0 targets), and follows the plan-length rule in Claudit's
-skill: 3 to 7 top changes, or a first line such as "2 changes are worth making:
-<reason>" (a 4.0.1 target).
+skill: up to 7 top changes, and fewer than 3 only with a first line such as "2
+changes are worth making: <reason>" (a 4.0.1 target). Claudit 4.1 targets add
+three more, all script graders:
+
+- `structure-plan-items`: Top changes holds exactly the plan the scan decides for
+  the fixture, titles word for word, in order, and nothing else ("No changes worth
+  making" when it's empty). `tests/test_claudit_case_graders.py` builds each one
+  from the scan of the scaffolded fixture and fails when a committed pattern falls
+  behind; rebuild them with `python3 tests/test_claudit_case_graders.py --write`.
+- `structure-footer`: the footer names Claudit's version and an audited commit.
+- `structure-grade-raise`: every grade below A names the plan items that would
+  raise it.
 
 F3's six planted findings (the flat skill's paths and move, `Write(...)`,
 `.claudeignore`, project `defaultMode`, the array matcher and the oversized
@@ -78,14 +91,38 @@ bin/claudit-eval run --arm doctor --model claude-sonnet-5-5 --max-cost-usd 5
 
 The 4.0 gate runs the claudit arm twice, with and without `--web-fetch`.
 
-`run` writes `result.json` (full results, including local trace paths) and
-`summary.json` (path-free metrics) under `evals/claudit/results/<timestamp>-<arm>/`
-(git-ignored), and prints a table: findings hit per case, structure graders
+`run` writes `result.json` (full results, including local trace paths),
+`summary.json` (path-free metrics), `command.txt` (the exact runner and `claude plugin
+eval` command lines) and `reports/<case>-run<N>.md` (each run's final report, read
+from its trace) under `evals/claudit/results/<timestamp>-<arm>/` (git-ignored), and
+prints a table: findings hit per case, structure graders
 passed, F4 false defects, agent and judge cost, and wall time. `summarize
 <result.json>` reprints it. `--dry-run` assembles the scratch directory and prints
-the eval command without spending anything; `--keep-temp` keeps each run's
-transcript for debugging. Exit status 2 means the cost
+the eval command without spending anything; `--keep-temp` keeps each run's sandbox and trace
+for debugging; without it the runner removes them once the reports are saved. Exit status 2 means the cost
 ceiling stopped the eval and the results are partial.
+
+## Real repositories
+
+`headless` audits one repository at one commit the accepted way (#156, #168):
+`claude -p` on the normal login with `--plugin-dir` on the candidate bytes,
+`--setting-sources project,local`, `--strict-mcp-config`, `--no-session-persistence`,
+`--permission-mode default` and `--allowedTools Read Grep Glob`, from a fresh clone
+per run under `TMPDIR` (it refuses when an instruction file sits above the clone).
+
+```sh
+bin/claudit-eval headless --repo https://github.com/acoz-labs/quickstop.git --sha efc71b7 \
+  --plugin <candidate>/plugins/claudit --model claude-sonnet-5-5 --max-budget-usd 0.5 --runs 3 \
+  --output-dir <retained>/quickstop-efc71b7
+```
+
+Each `run<N>/` keeps `report.md`, the raw JSON, stderr, the scan of the same clone
+and `meta.json` with the exact command line, commit, Claude Code version, cost,
+wall time and the script checks: the report's plan, grade letters and footer
+match the scan, every grade below A names its items, the scan raised nothing on
+test data, optional procedures aren't planned, and declines are listed with their
+`path:line`. `summary.json` gives the medians. `grade --report R --scan S` runs the
+same checks on any saved report.
 
 ## Sandbox limits
 
