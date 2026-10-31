@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Claudit `claude plugin eval` suite on one arm or summarize a result."""
+"""Run the Claudit `claude plugin eval` suite on one arm, summarize a result, or run and grade headless audits."""
 import sys
 
 if sys.version_info < (3, 11):
@@ -8,11 +8,15 @@ if sys.version_info < (3, 11):
 import argparse
 import datetime as dt
 import fnmatch
+import importlib.machinery
+import importlib.util
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shlex
+import statistics
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +36,46 @@ STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage
              'structure-plan-length')
 # Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
 NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
+HELPER = 'skills/claudit/scripts/claudit.py'
+# The accepted headless method (#156, #168): normal login, candidate bytes, no user settings or MCP servers.
+HEADLESS_FLAGS = ('--setting-sources', 'project,local', '--strict-mcp-config', '--no-session-persistence',
+                  '--permission-mode', 'default', '--output-format', 'json', '--allowedTools', 'Read', 'Grep', 'Glob')
+
+# Script graders built from a scan (Claudit 4.1): the report must carry the scan's plan, grades and footer.
+TOP = r'(?:^|\n)#{2,3}[ \t]+(?:The )?Top(?: [0-9]+)? changes[^\n]*'
+SECTION_END = r'(?=\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S]))|\n?(?![\s\S]))'
+NOT_ITEM = r'(?:(?!\n(?:#{3,4}[ \t]+)?(?:\*\*)?[0-9]+[.)][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*'
+GRADE_RAISE = (r'(?:^|\n)[ \t]*[-*][ \t]+\*\*(?:Correctness|Alignment|Coverage): [B-F]\*\*'
+               r'(?![^\n]*\bitems?[ \t]+#?[0-9])')
+
+
+def title_pattern(title):
+    """A plan title, word for word; a word with a dot or slash (a path) may be backticked."""
+    words = []
+    for word in title.split(' '):
+        escaped = re.escape(word).replace('\\-', '-')
+        words.append('\\x60?%s\\x60?' % escaped if re.search(r'[./]', word) else escaped)
+    return '[ \\t]+'.join(words)
+
+
+def plan_items_pattern(titles):
+    """Top changes holds exactly these items, numbered 1 to N in this order, or the no-changes line."""
+    if not titles:
+        return TOP + r'\n(?:[ \t]*\n)*[ \t]*(?:>[ \t]*)?(?:\*\*|\*|_)?No changes worth making' + NOT_ITEM + SECTION_END
+    items = ''.join(r'\n(?:#{3,4}[ \t]+)?(?:\*\*)?%d[.)][ \t]+(?:\*\*)?%s(?:\*\*|[ \t]*(?=\(|\n|(?![\s\S])))'
+                    % (n, title_pattern(t)) + NOT_ITEM for n, t in enumerate(titles, 1))
+    return TOP + NOT_ITEM + items + SECTION_END
+
+
+def footer_pattern(version):
+    return (r'(?:^|\n)[-*_]{3,}[ \t]*\n(?:[^\n]*\n)*?[^\n]*\bClaudit ' + re.escape(version)
+            + r'; audited commit \x60?[0-9a-f]{40}\b')
+
+
+def declined_pattern(refs):
+    body = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
+    return r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*' + ''.join(
+        r'(?=%s\x60?%s\b)' % (body, re.escape(ref)) for ref in refs)
 
 
 class Failure(Exception):
@@ -123,17 +167,16 @@ def default_output(arm):
 
 
 def eval_command(plugin, args, out):
+    # --keep-temp keeps each run's trace so its final report can be retained; run() removes the sandboxes.
     command = ['claude', 'plugin', 'eval', str(plugin), '--model', args.model, '--judge-model', args.judge_model,
                '--max-cost-usd', str(args.max_cost_usd), '--runs', str(args.runs), '--trust-plugin', '--scaffold',
-               '--no-publish', '--ablation', 'none', '--threshold', '0', '--allow-tools', 'Bash']
+               '--no-publish', '--ablation', 'none', '--threshold', '0', '--keep-temp', '--allow-tools', 'Bash']
     if args.web_fetch:
         # --allow-tools is variadic; the next token below is an option, so parsing stops there.
         command.append(WEB_FETCH_RULE)
     command += ['--json', str(out / 'result.json'), '--output-dir', str(out)]
     if args.case:
         command += ['--case', args.case]
-    if args.keep_temp:
-        command.append('--keep-temp')
     return command
 
 
@@ -160,18 +203,25 @@ def run(args):
         if args.case and not any(fnmatch.fnmatchcase(name, args.case) for name in cases):
             print(f'Warning: --case {args.case!r} matches none of: {", ".join(cases)}', file=sys.stderr)
         command = eval_command(plugin, args, out)
+        invocation = shlex.join([sys.argv[0], *sys.argv[1:]])
         print(f'Scratch: {scratch}')
         print(f'Command: {shlex.join(command)}')
         if args.dry_run:
             keep = True
             return 0
         out.mkdir(parents=True, exist_ok=True)
+        # The exact command lines, for the retained gate record.
+        (out / 'command.txt').write_text(f'runner: {invocation}\ncwd: {Path.cwd()}\neval: {shlex.join(command)}\n'
+                                         f'eval cwd: {scratch}\n')
         code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=path)).returncode
         result = out / 'result.json'
         if result.is_file():
             data = load_result(result)
             data['webFetch'] = args.web_fetch
             result.write_text(json.dumps(data, indent=2) + '\n')
+            missing = keep_reports(data, out, args.keep_temp)
+            if missing:
+                print(f'Warning: no final report text for {", ".join(missing)}', file=sys.stderr)
             summary = summarize_files([result], args.arm, args.model, args.judge_model, args.web_fetch)
             (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
             print(markdown(summary))
@@ -346,6 +396,150 @@ def markdown(summary):
     return '\n'.join(lines)
 
 
+def load_helper(plugin):
+    """The candidate's scan helper as a module, for its test-data rule."""
+    path = Path(plugin) / HELPER
+    loader = importlib.machinery.SourceFileLoader('claudit_helper', str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader('claudit_helper', loader))
+    sys.dont_write_bytecode = True  # never leave a cache in the plugin bytes
+    loader.exec_module(module)
+    return module
+
+
+def grade_report(text, scan, helper):
+    """Script checks of one report against the scan of the same tree: {check: passed}."""
+    def letter(name):
+        match = re.search(r'\*\*%s: ([A-F])\*\*' % name, text)
+        return match.group(1) if match else None
+
+    titles = [item['title'] for item in scan['plan']['items']]
+    checks = {'plan_items': re.search(plan_items_pattern(titles), text, re.I) is not None,
+              'grades': all(letter(name.capitalize()) == grade['letter'] for name, grade in scan['grades'].items()),
+              'grade_raise': re.search(GRADE_RAISE, text, re.I) is None,
+              'footer': scan['footer'] in text,
+              'no_test_data_findings': not any(helper.data_path(f['path']) for f in scan['findings'])}
+    optional = [entry['path'] for entry in scan.get('optional', [])]
+    checks['optional_not_planned'] = not any(path in title for path in optional for title in titles)
+    if scan.get('declined'):
+        refs = ['%s:%d' % (entry['path'], entry['line']) for entry in scan['declined']]
+        checks['declined_listed'] = re.search(declined_pattern(refs), text) is not None
+    return checks
+
+
+def final_reply(trace):
+    """Claude's final reply in a run trace (one JSON message per line), or None."""
+    result = reply = None
+    for line in Path(trace).read_text(errors='replace').splitlines():
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict):
+            continue
+        if message.get('type') == 'result' and isinstance(message.get('result'), str):
+            result = message['result']
+        body = message.get('message') if isinstance(message.get('message'), dict) else message
+        if message.get('type') == 'assistant' or body.get('role') == 'assistant':
+            content = body.get('content')
+            if isinstance(content, list):
+                content = '\n'.join(block.get('text', '') for block in content
+                                    if isinstance(block, dict) and block.get('type') == 'text')
+            if isinstance(content, str) and content.strip():
+                reply = content
+    return result if result and result.strip() else reply
+
+
+def keep_reports(result, out, keep_temp):
+    """Write each run's final reply to <out>/reports/<case>-run<N>.md; drop the kept sandboxes unless asked."""
+    reports, missing = out / 'reports', []
+    for case in result.get('cases', []) or []:
+        for number, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
+            name = f"{case.get('name')}-run{number}.md"
+            trace = Path(str(item.get('tracePath') or ''))
+            text = final_reply(trace) if trace.is_file() else None
+            if text is None:
+                missing.append(name)
+            else:
+                reports.mkdir(exist_ok=True)
+                (reports / name).write_text(text if text.endswith('\n') else text + '\n')
+            sandbox = trace.parent.parent
+            # claude plugin eval --keep-temp leaves <tmp>/e-XXXXXX/out/trace.jsonl; remove only that shape.
+            if not keep_temp and trace.parent.name == 'out' and re.fullmatch(r'e-[A-Za-z0-9]{6}', sandbox.name) \
+                    and sandbox.is_dir() and not sandbox.is_symlink():
+                shutil.rmtree(sandbox, ignore_errors=True)
+    return missing
+
+
+def headless(args):
+    """Fresh-clone read-only audits of one repository at one commit, each recorded and script-graded."""
+    plugin = Path(args.plugin).resolve()
+    if not (plugin / '.claude-plugin/plugin.json').is_file():
+        raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {plugin}')
+    helper = load_helper(plugin)
+    out = Path(args.output_dir).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    version = subprocess.run(['claude', '--version'], capture_output=True, text=True).stdout.strip()
+    runs = []
+    for number in range(1, args.runs + 1):
+        work = Path(tempfile.mkdtemp(prefix='claudit-headless-')).resolve()
+        for parent in work.parents:  # an instruction file above the clone would load into the audit
+            found = [n for n in ('CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md') if (parent / n).is_file()]
+            if found:
+                shutil.rmtree(work)
+                raise Failure(f'{parent / found[0]} is above the clone and would load; set TMPDIR elsewhere')
+        try:
+            clone = work / 'repo'
+            subprocess.run(['git', 'clone', '--quiet', args.repo, str(clone)], check=True)
+            subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '--detach', args.sha], check=True)
+            head = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                  check=True).stdout.strip()
+            command = ['claude', '-p', args.invoke, '--plugin-dir', str(plugin), *HEADLESS_FLAGS,
+                       '--model', args.model, '--max-budget-usd', str(args.max_budget_usd)]
+            started = dt.datetime.now(dt.timezone.utc)
+            proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
+            scan = subprocess.run([sys.executable, str(plugin / HELPER), 'scan', '--root', str(clone)],
+                                  capture_output=True, text=True)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        run_dir = out / f'run{number}'
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / 'raw.json').write_text(proc.stdout)
+        (run_dir / 'stderr.txt').write_text(proc.stderr)
+        (run_dir / 'scan.json').write_text(scan.stdout)
+        try:
+            raw = json.loads(proc.stdout)
+        except ValueError:
+            raw = {}
+        text = raw.get('result') if isinstance(raw.get('result'), str) else ''
+        (run_dir / 'report.md').write_text(text)
+        checks = grade_report(text, json.loads(scan.stdout), helper) if scan.returncode == 0 and text else {}
+        meta = {'command': shlex.join(command), 'cwd': 'fresh clone of the repository', 'repo': args.repo,
+                'sha': args.sha, 'head': head, 'plugin': str(plugin), 'claude': version, 'model': args.model,
+                'started': started.strftime('%Y-%m-%dT%H:%M:%SZ'), 'wall_seconds': round(wall, 1),
+                'exit': proc.returncode, 'cost_usd': raw.get('total_cost_usd'), 'checks': checks,
+                'passed': bool(checks) and all(checks.values())}
+        (run_dir / 'meta.json').write_text(json.dumps(meta, indent=2) + '\n')
+        runs.append(meta)
+        print(f"run{number}: exit {proc.returncode}, {wall:.0f} s, ${raw.get('total_cost_usd')}, "
+              f"{'pass' if meta['passed'] else 'FAIL'} {checks}")
+    costs = [r['cost_usd'] for r in runs if isinstance(r['cost_usd'], (int, float))]
+    summary = {'repo': args.repo, 'sha': args.sha, 'runs': len(runs), 'passed': sum(r['passed'] for r in runs),
+               'median_cost_usd': statistics.median(costs) if costs else None,
+               'median_wall_seconds': statistics.median(r['wall_seconds'] for r in runs),
+               'total_cost_usd': round(sum(costs), 6)}
+    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+    print(json.dumps(summary))
+    return 0 if summary['passed'] == len(runs) else 1
+
+
+def grade(args):
+    scan = json.loads(Path(args.scan).read_text())
+    checks = grade_report(Path(args.report).read_text(), scan, load_helper(args.plugin or DEFAULT_PLUGIN))
+    print(json.dumps(checks, indent=2))
+    return 0 if all(checks.values()) else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -362,17 +556,34 @@ def main():
                    help='also grant WebFetch to code.claude.com (--allow-tools and each case allowed_tools)')
     p.add_argument('--output-dir', help='default evals/claudit/results/<UTC timestamp>-<arm>')
     p.add_argument('--keep-scratch', action='store_true')
-    p.add_argument('--keep-temp', action='store_true', help="keep each run's temp dir and trace (claude plugin eval --keep-temp)")
+    p.add_argument('--keep-temp', action='store_true', help="keep each run's sandbox and trace after saving its report")
     p.add_argument('--dry-run', action='store_true', help='assemble the scratch, print the command, do not run')
     p = sub.add_parser('summarize', help='summarize claude plugin eval --json results (several pool one arm)')
     p.add_argument('result', nargs='+')
     p.add_argument('--arm')
     p.add_argument('--web-fetch', action='store_true', default=None,
                    help='label results that do not record whether WebFetch was granted')
+    p = sub.add_parser('headless', help='fresh-clone read-only audits of a repository at a commit, graded by script')
+    p.add_argument('--repo', required=True, help='clone URL or path')
+    p.add_argument('--sha', required=True)
+    p.add_argument('--plugin', required=True, help='the candidate plugin bytes (claude --plugin-dir)')
+    p.add_argument('--model', required=True)
+    p.add_argument('--max-budget-usd', type=positive_cost, required=True, help='per run')
+    p.add_argument('--runs', type=positive_int, default=3)
+    p.add_argument('--invoke', default='/claudit:claudit --read-only')
+    p.add_argument('--output-dir', required=True)
+    p = sub.add_parser('grade', help="script-check a report against the scan of the same tree")
+    p.add_argument('--report', required=True)
+    p.add_argument('--scan', required=True)
+    p.add_argument('--plugin', help='plugin whose test-data rule applies (default plugins/claudit)')
     args = parser.parse_args()
     try:
         if args.command == 'run':
             return run(args)
+        if args.command == 'headless':
+            return headless(args)
+        if args.command == 'grade':
+            return grade(args)
         summary = summarize_files(args.result, args.arm, web_fetch=args.web_fetch)
         print(json.dumps(summary, indent=2))
         print(markdown(summary))

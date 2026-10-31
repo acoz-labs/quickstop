@@ -1,0 +1,9 @@
+---
+type: regex
+pattern: '(?:^|\n)#{2,3}[ \t]+(?:The )?Top(?: [0-9]+)? changes[^\n]*\n(?:[ \t]*\n)*[ \t]*(?:>[ \t]*)?(?:\*\*|\*|_)?No changes worth making(?:(?!\n(?:#{3,4}[ \t]+)?(?:\*\*)?[0-9]+[.)][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*(?=\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S]))|\n?(?![\s\S]))'
+flags: i
+weight: 1
+---
+The Top changes section holds exactly the plan the scan decides for this fixture (Claudit 4.1, issue #174 requirement 1): no items ("No changes worth making").
+
+Script-graded (case-insensitive), built from the scan by `tests/test_claudit_case_graders.py`. Each item is a column-0 line `N. **<title>**` (or `N)`, bold around the number, or a `###`/`####` heading) numbered from 1 in order, with the title word for word; a word with a dot or slash may be backticked. No other column-0 numbered line may appear in the section, which ends at the next `#` or `##` heading, a `---` rule or the end of the report. With no items the first non-blank line says "No changes worth making".

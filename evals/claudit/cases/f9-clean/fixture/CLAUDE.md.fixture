@@ -1,0 +1,10 @@
+# wordtally
+
+ESM library, Node 20+, no runtime dependencies. All code is in `src/tally.js`.
+
+## Commands
+
+- `npm test` runs the suite.
+
+Always run `npm test` before you report a change as done; a Stop hook checks it.
+Never read `.env`.

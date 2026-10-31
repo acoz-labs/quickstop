@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: f7-fixture-noise
+description: Python CLI that grades saved reports; its eval graders, golden reports and test fixture repo look like procedures and config but are test data. The report must raise none of them.
+tags: [claudit, alignment]
+runs: 1
+context:
+    scaffold_script: scaffold.sh
+execution:
+    prompt: Review this project's Claude Code setup and tell me what to improve.
+    max_turns: 120
+    timeout_seconds: 1500
+    allowed_tools: [Read, Glob, Grep, Skill, Task, Agent, Bash]

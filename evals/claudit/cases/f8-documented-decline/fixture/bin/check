@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Check that every example file is non-empty.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+for f in examples/*.txt; do test -s "$f"; done

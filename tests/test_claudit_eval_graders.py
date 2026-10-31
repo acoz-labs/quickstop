@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'evals/claudit/cases'
 # Final reports from the first 4.0.1 gate run (tree af7bbfb, evals/claudit/results/4.0.1-af7bbfb-live), verbatim.
 GATE_REPORTS = Path(__file__).resolve().parent / 'claudit_gate_reports'
+SINCE_4_1 = ('structure-plan-items', 'structure-footer', 'structure-grade-raise')
 
 
 def risky_only_bypass():
@@ -430,6 +431,28 @@ for name, passes, text in [
     ('finding-oversized-claude-md', False, 'CLAUDE.md is 241 lines.\n\nRemove the `Write(src/**)` rule.'),
     ('finding-oversized-claude-md', False, '- CLAUDE.md: 41 lines; trim the stale section.'),
     ('finding-oversized-claude-md', False, '- README.md is 241 lines; cut it.'),
+    # Issue #174 (the 4.0.2 lows from #168): other citation forms and link text never diagnose, and
+    # "keep only the commands" is a cut.
+    *[('finding-project-bypass', False, risky_only_bypass().replace('   Source: [A value', form + ' [A value'))
+      for form in ('   **Source:**', '   - Source:', '   Sources:', '   _Source_:', '   > Source :', '   *Source:*')],
+    ('finding-project-bypass', False, '2. **Remove `defaultMode`**\n   Problem: `bypassPermissions` is risky; see '
+                                      '[A value you set is ignored](https://code.claude.com/docs/en/settings).\n'
+                                      '   Change: delete `defaultMode`.'),
+    ('finding-project-bypass', False, '2. **Remove `defaultMode`**\n   Problem: `bypassPermissions` is risky.\n'
+                                      '   Change: delete `defaultMode`. Source: [A value you set is ignored]'
+                                      '(https://code.claude.com/docs/en/settings)'),
+    ('finding-project-bypass', True, '2. **Remove `defaultMode`**\n   Problem: Claude Code ignores `bypassPermissions` '
+                                     'here ([A value you set is ignored](https://code.claude.com/docs/en/settings)).\n'
+                                     '   Change: delete `defaultMode`.'),
+    ('finding-project-bypass', True, risky_only_bypass().replace('   Source: [A value', '   **Source:** [A value').replace(
+        'Bypass removes every safety prompt.', 'Claude Code ignores it in project settings.')),
+    ('finding-oversized-claude-md', True, '6. **Trim CLAUDE.md** (Alignment, effort M)\n   Problem: CLAUDE.md is 241 '
+                                          'lines.\n   Change: keep only the commands and the five rules the code '
+                                          'can\'t show.'),
+    ('finding-oversized-claude-md', True, '- `CLAUDE.md` is 241 lines; leave just the commands and gotchas.'),
+    ('finding-oversized-claude-md', True, '- `CLAUDE.md` is over 200 lines; keep it to only the commands.'),
+    ('finding-oversized-claude-md', False, '- `CLAUDE.md` is 241 lines.\n- Keep only the commands in README.md.'),
+    ('finding-oversized-claude-md', False, '- `CLAUDE.md` is 241 lines; keep it.'),
 ]:
     CORPUS.setdefault(name, ([], []))[0 if passes else 1].append(text)
 
@@ -464,12 +487,13 @@ class GraderPatternTests(unittest.TestCase):
 
     def test_first_gate_reports_pass_every_regex_grader(self):
         # All 18 live reports from tree af7bbfb; the 4 recorded misses were grader false negatives.
+        # Graders for 4.1 targets (the scan's plan, footer and grade explanations) postdate them.
         reports = sorted(GATE_REPORTS.glob('*.md'))
         self.assertEqual(len(reports), 18)
         for report in reports:
             case = report.name.rsplit('-run', 1)[0]
             for path in sorted((CASES / case / 'graders').glob('*.md')):
-                if 'type: regex' in path.read_text().split('\n---\n', 1)[0]:
+                if 'type: regex' in path.read_text().split('\n---\n', 1)[0] and path.stem not in SINCE_4_1:
                     with self.subTest(report=report.name, grader=path.stem):
                         self.assertTrue(verdict(regex_grader(path), report.read_text()))
 

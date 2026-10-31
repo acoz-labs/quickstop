@@ -1,0 +1,4 @@
+[project]
+name = "reportcheck"
+version = "0.3.0"
+requires-python = ">=3.11"
