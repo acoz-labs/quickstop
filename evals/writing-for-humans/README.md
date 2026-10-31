@@ -66,7 +66,7 @@ tool is allowed.
 
 - `skill-offered`: the `init` record offers the Skill tool and lists `writing-for-humans:writing-audit`, so the next grader can't pass just because the skill or tool was missing.
 - `not-invoked`: no Skill call to `writing-audit`. Enforces `skills/writing-audit/SKILL.md:4` and `docs/acceptance/writing-for-humans.md:32` (a user-only skill Claude never invokes is the expected result; a recorded automatic call is a failure). A refused call still counts as a call.
-- `answers`: the reply names `decision-notes.md`, so Claude still dealt with the request.
+- `reads-draft`: Claude reads `docs/decision-notes.md`, so it still dealt with the request.
 
 This case exercises the skill's `disable-model-invocation: true` frontmatter
 (`SKILL.md:4`): that setting keeps the skill out of what Claude is offered to call,
@@ -106,5 +106,7 @@ passes, 2 when the cost ceiling stopped it. `summarize <result dir>` reprints a 
 anything; `--keep-temp` keeps each run's trace.
 
 Inside `claude plugin eval`, Bash runs in a sandbox that reads only the plugin under
-test and the run's home and workspace, so the scaffold uses only `bash`, `cp` and
-`git`.
+test and the run's home and workspace. On macOS, `/usr/bin/git` is an `xcrun` shim
+that fails there (it can't write its cache or read the developer tools), so the
+runner copies the real git executable into the scratch plugin (`.eval-git/`) and puts
+it first in PATH for the cases' read-only git commands.

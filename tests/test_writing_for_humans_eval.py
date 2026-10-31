@@ -117,7 +117,6 @@ REGEX_CORPUS = {
         'The draft reads fine.', 'Rewritten: line 1.', 'Kept and flagged: the hash.',
         'overwritten lines; flagpole', 'rewrites.', 'unflagged rewrites',
     ]),
-    ('audit-not-automatic', 'answers'): (['docs/decision-notes.md needs context.'], ['The note needs context.']),
 }
 
 READ = 'Read'
@@ -141,6 +140,11 @@ TOOL_CORPUS = {
          [('Bash', {'command': 'gh pr edit 3 --body "x"'})], [('Bash', {'command': 'gh pr create --fill'})],
          [('Bash', {'command': 'git rebase -i main'})], [('Bash', {'command': 'git reset --soft HEAD~1'})],
          [('Bash', {'command': 'gh pr comment 3 -b x'})], [('Bash', {'command': 'git  commit --amend'})]]),
+    ('audit-not-automatic', 'reads-draft'): (
+        [[(READ, {'file_path': '/tmp/e/home/cwd/docs/decision-notes.md'})],
+         [('Skill', {'skill': 'writing-for-humans:writing-style'}), (READ, {'file_path': 'docs/decision-notes.md'})]],
+        [[], [(READ, {'file_path': ARTIFACTS})], [('Grep', {'pattern': 'TTL', 'path': 'docs/decision-notes.md'})],
+         [(READ, {'file_path': '/tmp/e/home/cwd/docs/decision-notes-old.md'})]]),
     ('audit-not-automatic', 'not-invoked'): (
         [[], [('Skill', {'skill': 'writing-for-humans:writing-style'})], [(READ, {'file_path': 'docs/writing-audit.md'})]],
         [[('Skill', {'skill': 'writing-for-humans:writing-audit'})], [('Skill', {'skill': 'writing-audit'})],
@@ -471,6 +475,14 @@ class RunnerTests(unittest.TestCase):
                      ['run', '--model', 'm', '--max-cost-usd', '0']):
             done = subprocess.run([sys.executable, str(RUNNER), *argv], capture_output=True, text=True)
             self.assertEqual(done.returncode, 2, argv)
+
+    def test_copy_git_copies_the_real_executable(self):
+        git = we.copy_git(self.base / '.eval-git') / 'git'
+        self.assertNotEqual(git.resolve(), Path('/usr/bin/git'))
+        done = subprocess.run([str(git), '--version'], capture_output=True, text=True,
+                              env={'PATH': str(git.parent), 'HOME': str(self.base)})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(done.stdout.startswith('git version'))
 
     def test_tree_digest_ignores_bytecode_and_sees_changes(self):
         (self.base / 'a.txt').write_text('a')
