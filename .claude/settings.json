@@ -4,7 +4,7 @@
     "allow": [
       "Bash(bin/ci)",
       "Bash(bin/sdlc check)",
-      "Bash(bin/check-marketplace --base *)"
+      "Bash(bin/check-marketplace --base origin/main)"
     ]
   }
 }
