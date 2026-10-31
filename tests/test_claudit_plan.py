@@ -36,22 +36,28 @@ class DataPaths(unittest.TestCase):
                     # Bypass pass, round 1: compounds of data, test and record words, and kinds of test directory.
                     'a/unit-tests/x.md', 'a/integration_tests/x.md', 'a/test-results/x.md', 'a/eval-results/x.md',
                     'a/golden-reports/x.md', 'a/TestFixtures/x.md', 'a/FIXTURES/x.md', 'a/__tests__/x.md',
-                    'a/smoke_tests2/x.md', 'a/fixture-data/x.md'):
+                    'a/smoke_tests2/x.md', 'a/fixture-data/x.md',
+                    # Review round 2 (L7): a test or data word as a whole word of the name.
+                    'e2e-tests/x.md', 'tests-e2e/x.md', 'ui-tests/x.md', 'api-tests/x.md', 'perf-tests/x.md',
+                    'load_tests/x.md', 'old-tests/x.md', 'tests_old/x.md', 'test-cases/x.md', 'TestCases/x.md',
+                    'golden-files/x.md', 'evals-v2/x.md', 'test_data_v2/x.md', 'snapshots-old/x.md',
+                    'a/latest-tests/x.md', 'a/evalCases/x.md', 'docs/test-plans/x.md'):
             self.assertTrue(cl.data_path(rel), rel)
 
     def test_neighbouring_names_are_not_data(self):
         for rel in ('docs/operations/sdlc.md', 'docs/latest/release.md', 'docs/contest/x.md',
                     'docs/attestations/x.md', 'docs/reporting/x.md', 'docs/testing/x.md', 'docs/evaluation/x.md',
                     'reports.md', 'fixtures.md', 'tests.md', 'docs/protest/x.md', 'docs/retest-plan.md',
-                    # Review round 1 (M1): whole names only, so a word inside a name doesn't make it data.
-                    'plugins/test-runner/x.md', 'plugins/eval-kit/x.md', 'plugins/pr-reports/x.md',
-                    'docs/reports/release-procedure.md',
-                    # Bypass pass, round 1.
-                    'docs/results/x.md', 'a/data/x.md', 'a/latest-tests/x.md', 'a/testimonials/x.md',
-                    'a/attest/x.md', 'a/golden-path/x.md', 'a/snapshot-tool/x.md', 'a/fixtures-guide/x.md',
-                    'docs/test-plans/x.md', 'a/evalCases/x.md', 'a/gate-reports-2026/x.md', 'a/report-data/x.md',
-                    'a/unit/x.md', 'a/system/x.md'):
+                    # Review rounds 1 and 2: a word inside a word, or a record word alone, doesn't make it data.
+                    'plugins/pr-reports/x.md', 'docs/reports/release-procedure.md', 'docs/results/x.md',
+                    'a/data/x.md', 'a/testimonials/x.md', 'a/attest/x.md', 'a/gate-reports-2026/x.md',
+                    'a/report-data/x.md', 'a/unit/x.md', 'a/system/x.md', 'end2end/x.md', 'a/Testing/x.md',
+                    'a/evaluations/x.md', 'a/goldenrod/x.md', 'a/fixtured/x.md'):
             self.assertFalse(cl.data_path(rel), rel)
+        # A plugin named like test data is still scanned (the plugin-root rule).
+        for root in ('plugins/test-runner', 'plugins/eval-kit', 'plugins/e2e-tests'):
+            self.assertTrue(cl.data_path(root + '/x.md'))
+            self.assertFalse(cl.data_path(root + '/x.md', plugin_roots={root}))
 
     def test_a_plugin_root_is_never_data_by_its_own_name(self):
         self.assertTrue(cl.data_path('plugins/evals/skills/x/SKILL.md'))
@@ -268,7 +274,8 @@ class Declines(Project):
         result = self.scan()
         self.assertEqual(self.declined(result), [('stop-hook', 'docs/repository.md', 4)])
         self.assertEqual(result['declined'][0]['quote'],
-                         'Repository push hooks and Claude shell-match hooks have been retired;')
+                         'Repository push hooks and Claude shell-match hooks have been retired; clean-checkout '
+                         'evidence is the gate.')
         self.assertEqual(result['declined'][0]['finding_ids'], ['stop-hook'])
         self.assertNotIn('stop-hook', self.ids(result))
         status = {b['id']: b['status'] for b in result['baseline']}
@@ -277,7 +284,7 @@ class Declines(Project):
 
     def test_deliberate_negation_declines_plugin_evals(self):
         self.must_run('- This plugin is advisory, so it deliberately has no eval campaign.\n'
-                      '- Hooks were retired in 2025.\n')
+                      '- Hooks were retired.\n')
         self.write('.claude-plugin/plugin.json', {'name': 'advisor'})
         self.write('skills/advise/SKILL.md', '---\nname: advise\n---\n')
         self.write('README.md', 'Run `claude plugin validate .` in CI.\n')
@@ -295,7 +302,10 @@ class Declines(Project):
                      # Bypass pass, round 1: other forms of the feature itself.
                      'All Claude Code hooks were removed in favour of CI checks.', 'We have retired hooks.',
                      'In this repository, hooks were retired.', 'This repository deliberately uses no hooks.',
-                     'There are no hooks, by design.', 'Hooks were retired years ago, because CI covers them.'):
+                     'There are no hooks, by design.', 'Hooks were retired because CI covers them.',
+                     'Hooks were retired; CI is the gate.', 'Hooks were removed, so CI is the gate.',
+                     'Claude Code hooks were removed, and replaced them with CI checks.',
+                     'Claude Code hooks were retired here.', 'Push hooks and Claude hooks were retired.'):
             with self.subTest(text):
                 shutil.rmtree(self.root)
                 os.makedirs(self.root)
@@ -318,7 +328,33 @@ class Declines(Project):
                      'We removed hooks temporarily.', 'Hooks are disabled by default.',
                      'Without hooks, by design reviews take longer.', 'This repository deliberately uses no hooks in CI.',
                      'Hooks: removed from the template.', 'Git hooks were removed.', 'The Stop hook was retired.',
-                     'Hooks were retired? No.', 'Our hook was dropped.'):
+                     'Hooks were retired? No.', 'Our hook was dropped.',
+                     # Review round 2 (M2b): exceptions, limits, time limits and reversals.
+                     'Hooks were disabled, except the formatter.', 'All hooks are disabled, apart from the formatter.',
+                     'Hooks were disabled (temporarily).', 'Hooks were removed, for now.',
+                     'Hooks were removed \u2014 for now.', 'We disabled hooks, in CI only.',
+                     'Hooks are disabled; enable them with `--hooks`.',
+                     'Hooks were removed in 2025 but are back in the template.',
+                     # Review round 2 (L6): push hooks are Git's unless Claude is named; session hooks are one kind.
+                     'Push hooks were removed.', 'Repository push hooks have been retired.',
+                     'Session hooks were disabled.',
+                     # Bypass pass, round 2: each allowed form plus a qualifier that limits or reverses it.
+                     'Hooks were retired for most agents.', 'Hooks were mostly retired.', 'Hooks were partly removed.',
+                     'Hooks were retired by some teams.', 'Hooks were retired here only.',
+                     'Hooks were retired because they were slow, but we kept the Stop hook.',
+                     'Hooks were removed since 2.0 until the rewrite lands.',
+                     'Hooks were removed in favour of CI, except for the formatter.',
+                     'Hooks were retired; the Stop hook is the exception.',
+                     'Hooks were retired; we still keep one for formatting.', 'Hooks were retired; a few remain.',
+                     'Hooks: retired, except Stop.', 'Hooks: retired (mostly).', 'We retired hooks for agents.',
+                     'We retired hooks, then brought one back.', 'We retired most hooks.', 'We retired hooks in staging.',
+                     'This repository deliberately has no hooks yet.', 'This repository deliberately has no hooks, for now.',
+                     'This repository deliberately has no hooks except Stop.',
+                     'There are no hooks, by design, until v2.', 'There are no hooks by design in the template.',
+                     'Hooks were not deliberately retired.', 'No one retired hooks.',
+                     'Hooks were retired in this repository, but not in the template.',
+                     'Claude hooks were retired, so we now run only the formatter hook.',
+                     'Hooks were removed, so we re-added the Stop hook.', 'Hooks were retired in 2025.'):
             with self.subTest(text):
                 shutil.rmtree(self.root)
                 os.makedirs(self.root)
@@ -333,7 +369,18 @@ class Declines(Project):
                 'The flaky evals were dropped from CI and rewritten.', 'Removed the deprecated `notes` skill in 2.0.',
                 'Unused skills were removed.', 'Some skills were dropped.', 'We dropped evals for the docs site.',
                 'The allowlist was removed and rebuilt from scratch.', 'We have no evals yet.',
-                'Plugin validation was disabled for the docs build.', 'The LSP plugin was removed.')
+                'Plugin validation was disabled for the docs build.', 'The LSP plugin was removed.',
+                # Review round 2 (M2b).
+                'The evals were dropped, and new ones are being written.',
+                'Evals were removed, see the new suite in evals/v2.',
+                'Evals were retired here, but plugins/foo keeps its own.',
+                'We removed the skills, moving them into the plugin.',
+                'The allowlist was removed, replaced by a tighter one.',
+                'Pre-approvals were dropped since they kept growing; we re-add a few each release.',
+                # Bypass pass, round 2.
+                'The allowlist was retired because it grew; a new one is planned.',
+                'Evals were dropped in favour of a new suite.', 'We opted out of the allowlist for now.',
+                'Skills were removed; some came back as commands.', 'Plugin validation was dropped, then restored.')
         for text in near:
             with self.subTest(text):
                 shutil.rmtree(self.root)
@@ -346,7 +393,8 @@ class Declines(Project):
                               ('Skills were deliberately removed in favour of plain docs.', 'procedure-skill'),
                               ('Language servers were disabled here.', 'lsp'),
                               ('LSP plugins were deliberately dropped.', 'lsp'),
-                              ('Plugin validation was dropped in 2024.', 'plugin-validate')):
+                              ('Plugin validation was dropped in favour of CI.', 'plugin-validate'),
+                              ('Pre-approvals were dropped since they kept growing.', 'allowlist')):
             with self.subTest(text):
                 shutil.rmtree(self.root)
                 os.makedirs(self.root)
@@ -390,7 +438,7 @@ class Neighbours(Project):
         result = self.scan()
         self.assertEqual(result['declined'], [])
         self.assertIn('stop-hook', self.ids(result))
-        self.write('README.md', 'Claude Code hooks were retired, like the Cursor ones.\n')
+        self.write('README.md', 'Claude Code hooks were retired, so Cursor hooks run alone.\n')
         self.assertEqual([d['feature'] for d in self.scan()['declined']], ['stop-hook'])
 
     def test_an_imported_procedure_is_an_instruction_not_a_procedure(self):
