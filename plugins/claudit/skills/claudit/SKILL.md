@@ -100,8 +100,9 @@ intent, the explanations and the diffs. Use the scan's output as given:
 - **Footer**: `footer` is the footer's first line, verbatim.
 
 What the grades mean, for your one-sentence explanations: **Correctness**, does
-what's configured work (F: configuration that doesn't load; D: a high or several
-mediums; C: one medium; B: only lows). **Alignment**, does it serve the intent:
+what's configured work (F: configuration that doesn't load, such as invalid JSON or
+dropped hooks; D: a high or several mediums; C: one medium; B: only lows).
+**Alignment**, does it serve the intent:
 instructions hold what Claude can't learn from the repo, are short, current and
 point at files that exist. **Coverage**, what's missing that a project like this
 should have, against the five baseline items and each matched profile (A to D for

@@ -66,7 +66,7 @@ and the diffs. The rules:
   finding id. The first seven are the plan; any more go under Also worth knowing.
   Fewer than three come with the reason; the plan is never padded.
 - **Grades.** Correctness and Alignment: F for configuration that doesn't load
-  (Correctness only), D for a high finding or several mediums, C for one medium, B
+  (invalid JSON or a hook matcher that isn't a string; Correctness only), D for a high finding or several mediums, C for one medium, B
   for lows only, A for none; a project with no instruction file gets an Alignment
   medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
   at all.
