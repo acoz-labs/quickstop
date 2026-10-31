@@ -417,9 +417,11 @@ def grade_report(text, scan, helper):
               'grades': all(letter(name.capitalize()) == grade['letter'] for name, grade in scan['grades'].items()),
               'grade_raise': re.search(GRADE_RAISE, text, re.I) is None,
               'footer': scan['footer'] in text,
-              'no_test_data_findings': not any(helper.data_path(f['path']) for f in scan['findings'])}
-    optional = [entry['path'] for entry in scan.get('optional', [])]
-    checks['optional_not_planned'] = not any(path in title for path in optional for title in titles)
+              # A self-check of the scan, not of the report: it raised nothing on test data.
+              'scan_no_test_data_findings': not any(helper.data_path(f['path']) for f in scan['findings'])}
+    top = re.search(TOP + r'((?:(?!\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*)', text, re.I)
+    checks['optional_not_planned'] = bool(top) and not any(
+        entry['path'] in top.group(1) for entry in scan.get('optional', []))
     if scan.get('declined'):
         refs = ['%s:%d' % (entry['path'], entry['line']) for entry in scan['declined']]
         checks['declined_listed'] = re.search(declined_pattern(refs), text) is not None

@@ -70,34 +70,51 @@ and the diffs. The rules:
   for lows only, A for none; a project with no instruction file gets an Alignment
   medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
   at all.
-- **Procedures already reachable are optional.** A procedure doc that loaded
-  team instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
-  CLAUDE.local.md) already link, as a Markdown
-  link or a bare or backticked path, is reachable, so a skill for it is optional
-  rather than a change. It becomes a change when the doc, or the line linking it,
-  says the procedure should be invoked on demand ("on demand" with "skill", "slash
-  command" or "invoke" in the doc). A doc that a skill anywhere in the repository
-  links (a plugin's skill, for example) is that skill's reference material, not a
-  team procedure.
-- **Test data isn't configuration.** Files below a directory whose name contains
-  one of the words fixture(s), testdata, golden(s), snapshot(s), cassette(s),
-  eval(s), grader(s), report(s) or result(s), below a test or tests directory, or
-  inside an eval case (a directory with `case.yaml`) are data. They are never read
-  as procedures, plugin manifests, typed-code markers or secrets. Names are split
-  at punctuation and case changes and compared case-insensitively, so
-  `claudit_gate_reports`, `__fixtures__` and `TestData` all count; symlinks are
-  judged by their target too. A test directory's own `CLAUDE.md` is still an
-  instruction file. Anything else the tests load can be dismissed.
+- **Procedures already reachable are optional.** A procedure doc that loaded team
+  instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
+  CLAUDE.local.md) already link, as a Markdown link or a bare or backticked path, is
+  reachable, so a skill for it is optional rather than a change. It becomes a change
+  when the doc, or the line linking it, says it should be invoked on demand: "on
+  demand" together with "skill", "slash command" or "invoke" on the same line. A doc
+  a plugin's skill links (a `SKILL.md` under `skills/` beside `.claude-plugin/` or
+  `.codex-plugin/`, or in a skill directory the manifest names) is that skill's
+  reference material, not a team procedure. A skill elsewhere (`.cursor/skills/`,
+  `.agents/skills/`) doesn't count, so the doc is still a procedure with no project
+  skill.
+- **Test data isn't configuration.** Directory names are judged whole. A name is
+  split into words at punctuation and case changes, compared case-insensitively,
+  with trailing digits dropped. `test` or `tests` (also `__tests__`, and with unit,
+  integration, functional, acceptance, regression, smoke or system: `unit-tests`) is
+  a test directory. A name is a data directory when every word is one of fixture(s),
+  testdata, golden(s), snapshot(s), cassette(s), eval(s), grader(s), test(s), data,
+  report(s) or result(s), and at least one is not data, report(s) or result(s):
+  `fixtures`, `evals`, `__snapshots__`, `TestData`, `test_reports` and `eval-results`
+  count; `reports`, `pr-reports`, `eval-kit` and `test-runner` don't. Files below a
+  test or data directory, or inside an eval case (a directory with `case.yaml`), are
+  data. They are never read as procedures, plugin manifests, typed-code markers or
+  secrets. A plugin root (a directory holding `.claude-plugin/` or `.codex-plugin/`)
+  is never data because of its own name, symlinks are judged by their target too,
+  and a test directory's own `CLAUDE.md` is still an instruction file. Anything else
+  the tests load can be dismissed.
 - **Documented declines.** Claudit reads the loaded team instructions, the Markdown
-  files they link and the README. A sentence declines a feature (hooks, plugin evals,
-  plugin validation, pre-approved commands, procedure skills, code intelligence)
-  when a word such as retired, removed, dropped, declined, abandoned, disabled,
-  decided against or chose not to sits next to it, or when it is negated ("no eval
-  campaign") in a sentence that says the choice is deliberate (deliberately,
-  intentionally, by design, by choice, decided, decision, policy). Sentences that
-  are questions, conditional, future, negated or reversed ("if", "will be", "weren't
-  removed", "restored") don't count, nor do sentences about another tool (Git hooks,
-  Cursor skills) that don't name Claude.
+  files they link and the README. A clause declines a feature (hooks, plugin evals,
+  plugin validation, pre-approved commands, procedure skills, code intelligence) only
+  when the feature itself is declined, named as a bare noun with at most an article,
+  owner or kind ("Claude Code hooks", "the allowlist", "push hooks"):
+  - as the subject of retired, removed, dropped, declined, abandoned, phased out or
+    disabled ("Claude Code hooks were retired", "Hooks: retired");
+  - as the object of the same verbs, decided against, chose not to use or add, or
+    opted out of, said by "we", "this repository", "the project" or "maintainers";
+  - or as a deliberate absence: "no" or "without" the feature in a clause that says
+    deliberately, intentionally, on purpose, by design or by choice.
+
+  The feature must end the clause, or be followed only by "in this repository",
+  "here", a year, "in favour of", "because" or "since". So a specific instance ("the
+  old SessionStart hook was removed"), an item in it ("we removed `rm` from the
+  allowlist") or a scope ("disabled in CI", "dropped from CI", "secrets in hooks")
+  is not a decline. Sentences that are questions, conditional, future, negated or
+  reversed ("if", "will be", "weren't removed", "restored") don't count, nor do
+  sentences about another tool (Git hooks, Cursor skills) that don't name Claude.
 
 ## How it works
 

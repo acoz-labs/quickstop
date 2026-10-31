@@ -786,15 +786,21 @@ class Coverage(Project):
         self.write('tests/fixtures/release.md', '# Release\n' + steps)
         self.write('.claude/skills/ship/SKILL.md', '---\nname: ship\ndescription: Follows docs/deploy-guide.md\n---\n')
         self.write('.claude-plugin/plugin.json', {'name': 'p'})
-        self.write('skills/shipped/SKILL.md', '---\nname: shipped\n---\nFollow [the method](../../docs/method.md).\n')
-        self.write('docs/method.md', '# Release method\n' + steps)  # a shipped skill's reference material
+        self.write('skills/shipped/SKILL.md', '---\nname: shipped\n---\nFollow docs/RELEASE.md and docs/runbook.md.\n')
         self.write('docs/runbook.md', '# Runbook\n1. a\n2. b\n3. c\n')
         self.write('.claude/commands/runbook.md', 'Follow docs/runbook.md.\n')
         result = self.scan()
         docs = {d['path']: d['has_skill'] for d in result['signals']['procedure_docs']}
-        self.assertEqual(docs, {'docs/RELEASE.md': False, 'docs/deploy-guide.md': True, 'docs/runbook.md': True})
-        self.assertEqual([i for i in self.ids(result) if i.startswith('procedure')], ['procedure-skill:docs/RELEASE.md'])
+        # 4.1 reverses 4.0 here: docs/RELEASE.md, which the plugin's own skill follows, is that skill's reference
+        # material, so it is no procedure and gets no finding (4.0 flagged it). So is docs/runbook.md.
+        self.assertEqual(docs, {'docs/deploy-guide.md': True})
+        self.assertEqual([i for i in self.ids(result) if i.startswith('procedure')], [])
         self.assertIn('procedure-docs', [p['id'] for p in result['profiles']])
+        # Without the plugin manifest, skills/shipped/ is no plugin's skill and docs/RELEASE.md is a finding again.
+        os.unlink(os.path.join(self.root, '.claude-plugin/plugin.json'))
+        os.rmdir(os.path.join(self.root, '.claude-plugin'))
+        self.assertEqual([i for i in self.ids(self.scan()) if i.startswith('procedure')],
+                         ['procedure-skill:docs/RELEASE.md'])
 
     def test_plugin_repo_checks(self):
         self.write('CLAUDE.md', '# x\n')

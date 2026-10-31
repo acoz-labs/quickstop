@@ -26,11 +26,18 @@ MAX_READ = 512 * 1024
 SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '.venv', 'venv',
              'target', '.tox', '.mypy_cache', '.pytest_cache', 'coverage', '.next'}
 DEPENDENCY_DIRS = {'node_modules', 'vendor', 'venv'}  # never skill directories without a SKILL.md
-# Directory words that mark test data: fixtures, eval suites and graders, saved reports and results. A
-# directory is split into words at punctuation and case changes, lower-cased, trailing digits dropped.
+# Test data is judged by whole directory names. A name is split into words at punctuation and case changes,
+# lower-cased, trailing digits dropped. `test`/`tests` (also `__tests__`, `Tests2`, `unit-tests`) is a test
+# directory. A name
+# is a data directory when every word is a data, test or record word and at least one is a data or test word:
+# `fixtures`, `__snapshots__`, `testdata`, `TestData`, `test_reports`, `eval-results`. `reports`, `pr-reports`,
+# `eval-kit` and `test-runner` are not.
 DATA_WORDS = {'fixture', 'fixtures', 'testdata', 'golden', 'goldens', 'snapshot', 'snapshots', 'cassette', 'cassettes',
-              'eval', 'evals', 'grader', 'graders', 'report', 'reports', 'result', 'results'}
+              'eval', 'evals', 'grader', 'graders'}
 TEST_WORDS = {'test', 'tests'}
+TEST_KINDS = {'unit', 'integration', 'functional', 'acceptance', 'regression', 'smoke', 'system'}  # `unit-tests`
+RECORD_WORDS = {'data', 'report', 'reports', 'result', 'results'}
+PLUGIN_DIRS = ('.claude-plugin', '.codex-plugin')  # a directory holding one is a plugin root, never data by name
 EVAL_CASE_FILES = ('case.yaml', 'case.yml')  # a directory holding one is an eval case: everything below is data
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
 CHECK_NAMES = ('ci', 'test', 'check', 'lint', 'verify')
@@ -88,23 +95,25 @@ CHANGE_TITLES = {
     'lsp': 'Install a code-intelligence plugin',
 }
 FATAL = ('invalid-json', 'matcher-type')  # configuration that doesn't load (a file, or hooks dropped): Correctness F
-# Features a project can decline in its docs: (finding kind, label, what names the feature).
+# Features a project can decline in its docs: (finding kind, label, the feature as a bare noun). A decline is of
+# the feature itself, never of one instance ("the old SessionStart hook"), an item in it ("rm from the allowlist")
+# or a place ("disabled in CI", "secrets in hooks").
 DECLINABLE = (
-    ('stop-hook', 'Hooks', r'\bhooks?\b'),
-    ('plugin-eval', 'Plugin evals', r'\bclaude plugin eval\b|\b(?:tuning|evaluation|eval)\s+campaigns?\b'
-                                    r'|\beval(?:uation)?\s+(?:suites?|cases?|runs?)\b|\bevals?\b'),
-    ('plugin-validate', 'Plugin validation', r'\bclaude plugin validate\b|\bplugin validation\b'),
-    ('allowlist', 'Pre-approved commands', r'\ballow-?lists?\b|\ballow rules?\b|\bpre-?approv\w*'),
-    ('procedure-skill', 'Procedure skills', r'\bskills?\b'),
-    ('lsp', 'Code-intelligence plugins', r'\blsp\b|\bcode[- ]intelligence\b|\blanguage servers?\b'),
+    ('stop-hook', 'Hooks', r'hooks'),
+    ('plugin-eval', 'Plugin evals', r'evals|(?:eval(?:uation)?|tuning) (?:suites?|campaigns?|cases)|claude plugin eval'),
+    ('plugin-validate', 'Plugin validation', r'plugin validation|claude plugin validate'),
+    ('allowlist', 'Pre-approved commands', r'allow-?lists?|allow rules|pre-?approvals|pre-?approved commands'),
+    ('procedure-skill', 'Procedure skills', r'skills'),
+    ('lsp', 'Code-intelligence plugins', r'lsp(?: plugins)?|code[- ]intelligence(?: plugins)?|language servers'),
 )
-# A decline: a strong verb within 30 characters before or 60 after the feature, or a negation within 30
-# characters before it in a sentence that also says the choice is deliberate.
-DECLINE_STRONG = re.compile(r'\b(?:retired|removed|dropped|declined|abandoned|phased out|decided against|'
-                            r'chose not to|choose not to|opted out of|opt out of|disabled)\b', re.I)
-DECLINE_WEAK = re.compile(r"\b(?:no|without|not|never|don['’]t|doesn['’]t|do not|does not)\b", re.I)
-DELIBERATE = re.compile(r'\b(?:deliberate(?:ly)?|intentional(?:ly)?|on purpose|by design|by choice|decided|decision|'
-                        r'policy)\b', re.I)
+# Words that may qualify the feature without making it an instance: articles, owners and the kind of hook.
+QUALIFIER = (r'(?:the|all|any|our|its|this|these|a|an|repository|repo|project|claude|code|claude-code|plugin|'
+             r'procedure|agent|stop|push|shell-match|session)')
+DECLINED = r'(?:retired|removed|dropped|declined|abandoned|phased out|disabled)'
+# Where a decline may say it applies: the whole project, a time or a reason. Anything else scopes it.
+DECLINE_TAIL = (r'(?=\s*$|\s*[,(—–]|\s+(?:in this (?:repository|repo|project)|here|for good|in favou?r of|'
+                r'because|since|years ago|(?:in|since) [0-9]{4}|and replaced)\b)')
+DELIBERATE = r'(?:deliberately|intentionally|on purpose|by design|by choice)'
 # Sentences that only consider, plan or reverse a decline never count.
 UNSURE = re.compile(r'\?|\b(?:if|unless|whether|would|could|might|maybe|perhaps|until|consider\w*|todo)\b'
                     r'|\b(?:will|to|going to) be\b|\b(?:restored|reinstated|re-?enabled|re-?added|brought back|again)\b'
@@ -114,6 +123,29 @@ UNSURE = re.compile(r'\?|\b(?:if|unless|whether|would|could|might|maybe|perhaps|
 OTHER_TOOLS = re.compile(r'\b(?:git|pre-commit|pre-push|commit-msg|husky|lefthook|webhooks?|cursor|codex|copilot|'
                          r'windsurf|gemini|aider|eslint|prettier)\b', re.I)
 CLAUDE_NAMED = re.compile(r'\bclaude\b', re.I)
+
+
+def decline_forms(feature):
+    """The three decline forms for one feature, each matched against a whole clause.
+
+    1. The feature is the subject: "Claude Code hooks were retired", "Push hooks and Claude hooks have been removed".
+    2. The feature is the object: "We retired hooks", "We decided against the allowlist".
+    3. A deliberate absence: "deliberately has no eval campaign", "no hooks, by design".
+    Each ends at the feature or a DECLINE_TAIL, so a scoped or specific remark is not a decline.
+    """
+    noun = r'(?:%s\s+){0,3}(?:%s)' % (QUALIFIER, feature)
+    subject = r'^(?:here,?\s+|in this (?:repository|repo|project),?\s+)?%s(?:\s+and\s+%s)*' % (noun, noun)
+    return [re.compile(subject + r'\s*(?::\s*|\s+(?:(?:have|has|had)\s+been|were|was|are|is|stay|stays|remain|'
+                       r'remains)\s+(?:%s\s+|permanently\s+)?)%s\b%s' % (DELIBERATE, DECLINED, DECLINE_TAIL), re.I),
+            re.compile(r"^(?:we|this (?:repository|repo|project)|the project|maintainers)\s+(?:have\s+|deliberately\s+)?"
+                       r"(?:retired|removed|dropped|declined|abandoned|phased out|disabled|decided against(?: using| adding)?"
+                       r"|chose not to (?:use|add|adopt|run)|opted out of)\s+%s\b%s" % (noun, DECLINE_TAIL), re.I),
+            re.compile(r"(?:%s\b.*\b(?:no|without)\s+%s\b%s|\b(?:no|without)\s+%s\b[\s,]*%s\s*$)"
+                       % (DELIBERATE, noun, DECLINE_TAIL, noun, DELIBERATE), re.I)]
+
+
+DECLINE_FORMS = [(feature, label, re.compile(r'\b(?:%s)\b' % pattern, re.I), decline_forms(pattern))
+                 for feature, label, pattern in DECLINABLE]
 LIST_ITEM = re.compile(r'^\s*(?:[-*+]|[0-9]+[.)])\s+')
 
 
@@ -348,15 +380,28 @@ def dir_words(segment):
     return {w for w in words if w}
 
 
-def data_path(rel, nested_instruction=False, eval_cases=()):
-    """True for test data: a path below a data directory (DATA_WORDS), an eval case or a test directory.
+def dir_kind(name):
+    """'test' for a test directory, 'data' for a data directory (see DATA_WORDS), else None."""
+    words = dir_words(name)
+    if words & TEST_WORDS and words <= TEST_WORDS | TEST_KINDS:
+        return 'test'
+    if words and words <= DATA_WORDS | TEST_WORDS | RECORD_WORDS and words & (DATA_WORDS | TEST_WORDS):
+        return 'data'
+    return None
 
-    A test directory's own CLAUDE.md is a nested instruction file; one any deeper is data.
+
+def data_path(rel, nested_instruction=False, eval_cases=(), plugin_roots=()):
+    """True for test data: a path below a data directory, a test directory or an eval case.
+
+    A test directory's own CLAUDE.md is a nested instruction file; one any deeper is data. A plugin root's own
+    name never makes it data.
     """
     dirs = rel.split('/')[:-1]
     for index, name in enumerate(dirs):
-        words = dir_words(name)
-        if words & DATA_WORDS or (words & TEST_WORDS and (not nested_instruction or index < len(dirs) - 1)):
+        kind = dir_kind(name)
+        if not kind or '/'.join(dirs[:index + 1]) in plugin_roots:
+            continue
+        if kind == 'data' or not nested_instruction or index < len(dirs) - 1:
             return True
     return any(rel.startswith(case + '/') for case in eval_cases)
 
@@ -375,6 +420,8 @@ class Scan:
         self.fileset = set(self.files)
         self.eval_cases = sorted({f.rsplit('/', 1)[0] for f in self.files
                                   if '/' in f and f.split('/')[-1] in EVAL_CASE_FILES})
+        self.plugin_roots = {d.rsplit('/', 1)[0] if '/' in d else '' for d in self.dirs
+                             if d.split('/')[-1] in PLUGIN_DIRS}
 
     # -- filesystem -------------------------------------------------------
     def walk(self):
@@ -453,12 +500,12 @@ class Scan:
 
     def data(self, rel, nested_instruction=False):
         """True when a project file is test data (see data_path), also through a symlink, or a link out of the project."""
-        if data_path(rel, nested_instruction, self.eval_cases):
+        if data_path(rel, nested_instruction, self.eval_cases, self.plugin_roots):
             return True
         if not os.path.islink(self.abs(rel)):
             return False
         real = os.path.relpath(os.path.realpath(self.abs(rel)), self.root).replace(os.sep, '/')
-        return real.startswith('../') or real == '..' or data_path(real, nested_instruction, self.eval_cases)
+        return real.startswith('../') or real == '..' or data_path(real, nested_instruction, self.eval_cases, self.plugin_roots)
 
     def inside(self, path):
         real = os.path.realpath(path)
@@ -752,18 +799,20 @@ class Scan:
         pattern = r'(?<![\w/.-])(?:\./)?' + re.escape(strip_dot(command)) + r'(?![\w-])'
         return re.search(pattern, corpus_text) is not None
 
-    def procedure_docs(self, instructions):
+    def procedure_docs(self, instructions, skill_dirs=()):
         """Numbered procedure docs outside test data, whether a skill covers each, and where loaded instructions link it."""
         reached = {}
         for item in team_instructions(instructions):
             for ident, number, line, _ in self.references(item['text'], os.path.dirname(item['abs'])):
                 reached.setdefault(ident, (item['path'], number, line))
-        # Project skills and commands cover a doc by path or name. A doc a shipped skill (a plugin's) links is
-        # that skill's reference material, product content rather than a team procedure.
+        # Project skills and commands cover a doc by path or name. A doc a plugin's skill links (a SKILL.md in
+        # skills/ beside .claude-plugin/ or .codex-plugin/, or in a manifest's skill directory) is that skill's
+        # reference material, product content rather than a team procedure.
         project_skills = [self.text(f) or '' for f in self.files
                           if re.fullmatch(r'\.claude/skills/[^/]+/SKILL\.md|\.claude/commands/.+\.md', f)]
-        product = {ident for f in self.files if f.split('/')[-1] == 'SKILL.md' and not f.startswith('.claude/')
-                   and not self.data(f)
+        plugin_skills = {(root + '/' if root else '') + 'skills' for root in self.plugin_roots} | set(skill_dirs)
+        product = {ident for f in self.files if f.split('/')[-1] == 'SKILL.md' and not self.data(f)
+                   and any(f.startswith(d + '/') for d in plugin_skills)
                    for ident, _, _, _ in self.references(self.text(f) or '', os.path.dirname(self.abs(f)))}
         paths = {i['path'] for i in instructions}
         docs = []
@@ -791,8 +840,8 @@ class Scan:
                 via = reached.get(ident)
                 docs.append({'path': rel, 'steps': steps, 'title': title[:120], 'has_skill': has_skill,
                              'linked_from': '%s:%d' % via[:2] if via else None,
-                             'on_demand': bool(via and ON_DEMAND.search(via[2])) or any(
-                                 ON_DEMAND.search(line) and SKILL_WORDS.search(line) for _, line in prose(text))})
+                             'on_demand': any(ON_DEMAND.search(line) and SKILL_WORDS.search(line)
+                                              for line in [via[2] if via else ''] + [l for _, l in prose(text)])})
         return docs
 
     def declines(self, instructions):
@@ -815,19 +864,19 @@ class Scan:
         found = {}
         for path, text in sources:
             for sentence, line_at in sentences(text):
-                if UNSURE.search(sentence):
+                if UNSURE.search(sentence) or (OTHER_TOOLS.search(sentence) and not CLAUDE_NAMED.search(sentence)):
                     continue
-                for feature, label, pattern in DECLINABLE:
-                    if feature in found or (OTHER_TOOLS.search(sentence) and not CLAUDE_NAMED.search(sentence)):
-                        continue
-                    for match in re.finditer(pattern, sentence, re.I):
-                        before = sentence[max(0, match.start() - 30):match.start()]
-                        after = sentence[match.end():match.end() + 60]
-                        if DECLINE_STRONG.search(before) or DECLINE_STRONG.search(after) or (
-                                DECLINE_WEAK.search(before) and DELIBERATE.search(sentence)):
+                # The whole sentence ("Hooks: retired.") and each clause ("X were retired; Y is the gate").
+                parts, offset = [(0, sentence)], 0
+                for clause in re.split(r'(?<=[;:])\s+', sentence):
+                    offset = sentence.index(clause, offset)
+                    parts.append((offset, clause))
+                for start, part in parts:
+                    for feature, label, noun, forms in DECLINE_FORMS:
+                        if feature not in found and any(form.search(part.rstrip(';:.!')) for form in forms):
                             found[feature] = {'feature': feature, 'label': label, 'path': path,
-                                              'line': line_at(match.start()), 'quote': sentence[:240]}
-                            break
+                                              'line': line_at(start + noun.search(part).start()),
+                                              'quote': sentence[:240]}
         return [found[feature] for feature, _, _ in DECLINABLE if feature in found]
 
     # -- correctness checks -----------------------------------------------
@@ -1031,7 +1080,7 @@ class Scan:
         for c in checks:
             c['documented'] = c['command'] in documented
         skills = sorted(f for f in self.files if re.fullmatch(r'\.claude/skills/[^/]+/SKILL\.md', f))
-        procedures = self.procedure_docs(instructions)
+        procedures = self.procedure_docs(instructions, [d for m in manifests for d in m['skill_dirs']])
         project_settings = [s for s in settings if s['scope'] == 'project']
         # Coverage that depends on settings contents is not judged when a project settings file was not read.
         blind = ['%s (%s)' % (s['path'], s['state'] if s['state'] != 'ok' else 'not an object')
@@ -1452,9 +1501,10 @@ def audited(root, git):
     sha = proc.stdout.strip() if proc is not None and proc.returncode == 0 else ''
     if not re.fullmatch(r'[0-9a-f]{40,64}', sha):
         return 'Claudit %s; git repo with no commits' % VERSION
-    status = run(['git', '-C', root, 'status', '--porcelain'])
-    dirty = status is not None and status.returncode == 0 and bool(status.stdout.strip())
-    return 'Claudit %s; audited commit %s%s' % (VERSION, sha, ' plus uncommitted changes' if dirty else '')
+    status = run(['git', '-c', 'core.fsmonitor=false', '-C', root, 'status', '--porcelain'])
+    state = ('' if status.stdout.strip() == '' else ' plus uncommitted changes') if (
+        status is not None and status.returncode == 0) else ' (uncommitted changes unknown)'
+    return 'Claudit %s; audited commit %s%s' % (VERSION, sha, state)
 
 
 def path_tokens(line):
