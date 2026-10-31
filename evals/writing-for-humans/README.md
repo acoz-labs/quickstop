@@ -30,10 +30,12 @@ $0 (the runner fails a command whose result reports any cost). No login is neede
    record then reports that style as active. Control: an unknown name,
    `writing-for-humans:no-such-style`, is refused and saves nothing.
 
-The runner hashes the real `~/.claude/settings.json` and `~/.claude.json` before and
-after, and fails if either changed. Other live Claude sessions also write
-`~/.claude.json`; if that check fails, rerun before suspecting the runner. It
-deletes only the temp dir it created. `bin/writing-for-humans-eval host` runs just
+The runner hashes the real `~/.claude/settings.json` and
+`~/.claude/plugins/{installed_plugins,known_marketplaces}.json` before and after,
+and fails if any changed. Other live Claude sessions rewrite `~/.claude.json` every
+few seconds, so a byte comparison of it fails for reasons unrelated to the runner.
+Instead the runner fails if that file mentions its temp dir, which is what a leaked
+session would add as a project entry. It deletes only the temp dir it created. `bin/writing-for-humans-eval host` runs just
 these checks.
 
 ## Eval cases (model runs)

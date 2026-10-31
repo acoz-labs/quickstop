@@ -25,7 +25,11 @@ STYLE = f'{NAME}:{NAME}'
 SKILLS = (f'{NAME}:writing-audit', f'{NAME}:writing-style')
 MARKETPLACE = 'wfh-eval'
 # Real configuration the host check must leave alone; it runs with HOME and CLAUDE_CONFIG_DIR in a temp dir.
-REAL_CONFIG = ('.claude/settings.json', '.claude.json')
+# These files change only on install, marketplace or settings changes, so they must stay byte-identical.
+REAL_CONFIG = ('.claude/settings.json', '.claude/plugins/installed_plugins.json',
+               '.claude/plugins/known_marketplaces.json')
+# Other live sessions rewrite this file constantly; a leak would add a project entry for the temp workspace.
+REAL_STATE = '.claude.json'
 
 
 class Failure(Exception):
@@ -187,7 +191,11 @@ def host_check(plugin_source, claude='claude'):
     after = {name: file_digest(real_home / name) for name in REAL_CONFIG}
     for name in REAL_CONFIG:
         checks.append((f'real-config-unchanged: ~/{name}', before[name] == after[name],
-                       'compared by SHA-256 before and after; other live Claude sessions also write ~/.claude.json'))
+                       'SHA-256 before and after'))
+    state = real_home / REAL_STATE
+    leaked = state.is_file() and str(temp) in state.read_text(errors='replace')
+    checks.append((f'real-state-untouched: ~/{REAL_STATE}', not leaked,
+                   f'does not mention the temp dir {temp.name}'))
     return {'passed': all(ok for _, ok, _ in checks), 'commands': commands,
             'checks': [{'name': name, 'passed': ok, 'detail': detail} for name, ok, detail in checks]}
 
