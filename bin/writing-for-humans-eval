@@ -210,6 +210,26 @@ def host_table(host):
 
 # Model-run cases via `claude plugin eval`.
 
+def real_git():
+    """The git executable itself; macOS's /usr/bin/git is an xcrun shim that fails inside the eval sandbox."""
+    git = shutil.which('git')
+    if not git:
+        raise Failure('git is not on PATH')
+    if sys.platform == 'darwin' and Path(git).resolve() == Path('/usr/bin/git'):
+        found = subprocess.run(['xcrun', '--find', 'git'], capture_output=True, text=True)
+        if found.returncode or not found.stdout.strip():
+            raise Failure(f'cannot locate the real git behind the /usr/bin/git shim: {found.stderr.strip()}')
+        git = found.stdout.strip()
+    return Path(git).resolve()
+
+
+def copy_git(target):
+    """Sandboxed Bash reads only the plugin under test, so the cases' git goes inside it."""
+    target.mkdir(parents=True)
+    shutil.copy2(real_git(), target / 'git')
+    return target
+
+
 def copy_suite(target):
     shutil.copytree(SUITE, target, ignore=lambda directory, names: {
         name for name in names
@@ -265,6 +285,8 @@ def run(args):
         if (plugin / 'evals').exists():
             raise Failure('the plugin ships its own evals/; this runner would replace them')
         cases = copy_suite(plugin / 'evals')
+        git_dir = copy_git(plugin / '.eval-git')
+        env = dict(os.environ, PATH=f'{git_dir}{os.pathsep}{os.environ.get("PATH", "")}')
         command = eval_command(plugin, args, out)
         print(f'Scratch: {scratch}')
         print(f'Cases: {", ".join(cases)}')
@@ -280,7 +302,7 @@ def run(args):
         if not host['passed']:
             print('Host checks failed; the paid eval was not started.', file=sys.stderr)
             return 1
-        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL).returncode
+        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL, env=env).returncode
         result = out / 'result.json'
         if not result.is_file():
             print(f'No result.json was written to {out}', file=sys.stderr)
