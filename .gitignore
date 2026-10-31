@@ -11,3 +11,6 @@ dist/
 
 # Claudit eval run outputs
 evals/claudit/results/
+
+# Writing for Humans eval run outputs
+evals/writing-for-humans/results/
