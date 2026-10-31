@@ -70,23 +70,48 @@ and the diffs. The rules:
   for lows only, A for none; a project with no instruction file gets an Alignment
   medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
   at all.
-- **Only commands written as calls are pre-approved.** The allowlist suggestion and
-  its Coverage gap count a check command only where the instructions write it as a
-  call:
-  - a fenced block with no language or a shell one (only its prompt lines in a
-    `console` block), or an indented code block;
-  - a line starting with a `$`, `%` or `>` prompt;
-  - a backticked command that begins a list item ("- `bin/ci`: runs the suite") or
-    fills a table cell;
-  - a backticked command after run, execute, invoke or call ("Run `bin/ci`", "Run:
-    `x`", "Run the tests with `x`"), and the commands chained to it by a comma, and,
-    or or then, but not after "never run" or "do not run";
-  - a backticked command after a label such as "Commands:" or "Test:".
+- **Only commands written as calls are pre-approved.** Which test runner or check a
+  project uses is read from every mention. Which exact calls the allowlist suggests,
+  and whether a gap is counted, come only from these forms, and nothing else:
+  1. **Code blocks.** Each line of a fenced block with no language or a shell one
+     (sh, bash, zsh, shell, powershell, …). In a `console`, `shell-session` or
+     `terminal` block, only its prompt lines. Each line of an indented code block
+     that doesn't continue a list item.
+  2. **Prompt lines.** A line starting with `$ ` or `% `, or `> ` followed only by a
+     command and flag or path arguments (`> bin/ci --fast`, not `> bin/ci is slow`).
+  3. **List leads.** A list item that starts with a backticked command followed by
+     the end of the line, `:`, a dash or `(` ("- `bin/ci`: runs the suite").
+  4. **Table cells.** A cell that is exactly one backticked command.
+  5. **Instructions.** A backticked command after run, execute, invoke or call
+     (directly, after "the command", or after up to four words and with/using/via:
+     "Run the tests with `x`"). The run word must start a sentence, clause, list
+     item, quote, table cell or label ("Tests: run with `x`"), or follow
+     please/then/first/also/always/now/just/next/finally, "make sure to", "remember
+     to", "be sure to", or you/we/agents/contributors/maintainers + can/must/should/
+     may/need to/have to. A run phrase may wrap onto the next line.
+  6. **Labels.** A backticked command after "Commands:", "Checks:", "Test(s):",
+     "Usage:", "Verify:", "Validation:", "Lint:" or "Build:".
+  7. **Chains.** Commands joined to a counted one by a comma, and, or, then or
+     "(or", and a run word coordinated with one ("Execute `a`, invoke `b` or call
+     `c`").
 
-  A command named in a sentence ("`bin/ci` finds the pinned Python"), a heading, a
-  `text` or `output` fence, or after "use" or "before you push," is not a call.
+  These never count:
+  - A run word after never, not, don't, doesn't, avoid or "no need to", with an
+    optional ever/even/again/once ("Don't ever run `x`").
+  - A run word with will, would, could, might, shall, does, did, "used to" or
+    "automatically" earlier in its sentence ("CI will run `x`", "The hook will call
+    `x`").
+  - Any form whose command is followed by is, was, were, has been, used to, no
+    longer, removed, deprecated, obsolete, gone, replaced, broken, don't, never or
+    do not, or a table row saying no longer/deprecated/obsolete/removed/is gone/used
+    to/don't run/never run/do not run.
+  - Headings, and inline code anywhere else ("`bin/ci` finds the pinned Python",
+    "use `x`", "CI runs `x`", "Running `x`").
+
   Mutating calls (`--write`, `apply`, `release`) and placeholder arguments
-  (`PRE_CHANGE_SHA`, `<sha>`) are never suggested, and no suggestion uses a wildcard.
+  (`PRE_CHANGE_SHA`, `<sha>`) are never suggested, and no suggestion uses a
+  wildcard. An unlabelled fence counts as commands, so put output in a `text` or
+  `console` fence.
 - **Procedures already reachable are optional.** A procedure doc that loaded team
   instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
   CLAUDE.local.md) already link, as a Markdown link or a bare or backticked path, is

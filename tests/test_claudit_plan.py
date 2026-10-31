@@ -468,7 +468,7 @@ class CommandContexts(Project):
             'wrapped run': ('Run one file with\n  `npm test -- test/a.test.js`.', ['npm test -- test/a.test.js']),
             'execute/invoke/call': ('Execute `bin/a`, invoke `bin/b` or call `bin/c`.', ['bin/a', 'bin/b', 'bin/c']),
             'list item': ('- `bin/ci`: runs the suite', ['bin/ci']),
-            'numbered item': ('1. `bin/ci` runs the suite', ['bin/ci']),
+            'numbered item': ('1. `bin/ci`: runs the suite', ['bin/ci']),
             'label': ('- Test: `python3 -m unittest`', ['python3 -m unittest']),
             'commands label': ('Commands: `bin/ci`, `bin/lint`', ['bin/ci', 'bin/lint']),
             'table cell': ('| `bin/ci` | runs tests |', ['bin/ci']),
@@ -485,6 +485,27 @@ class CommandContexts(Project):
             'bare fence': ('```\nbin/ci\n```', ['bin/ci']),
             'console prompts only': ('```console\n$ bin/ci\nbin/ci: 3 tests OK\n```', ['bin/ci']),
             'indented block': ('Text.\n\n    bin/ci\n', ['bin/ci']),
+            # Review round 4 (M3, M4): "run with", list leads that end or explain, and imperatives.
+            'run with': ('Run with `pytest`.', ['pytest']),
+            'label then run with': ('Tests: run with `python3 -m pytest -q`.', ['python3 -m pytest -q']),
+            'list lead, dash': ('- `bin/ci` - runs the suite', ['bin/ci']),
+            'list lead, em dash': ('- `bin/ci` \u2014 runs the suite', ['bin/ci']),
+            'list lead, parenthesis': ('- `bin/ci` (the full suite)', ['bin/ci']),
+            'list lead alone': ('- `bin/ci`', ['bin/ci']),
+            'you can run': ('You can run `bin/ci` any time.', ['bin/ci']),
+            'we must run': ('We must run `bin/ci` first.', ['bin/ci']),
+            'agents should run': ('Agents should run `bin/ci`.', ['bin/ci']),
+            'always run': ('Always run `bin/ci`.', ['bin/ci']),
+            'please run': ('Please run `bin/ci`.', ['bin/ci']),
+            'then run': ('Then run `bin/ci`.', ['bin/ci']),
+            'first, run': ('First, run `bin/ci`.', ['bin/ci']),
+            'after an if clause': ('If CI fails, run `bin/ci` locally.', ['bin/ci']),
+            'make sure to run': ('Make sure to run `bin/ci`.', ['bin/ci']),
+            'before you push, run': ('Before you push, run `bin/ci`.', ['bin/ci']),
+            'clause, then run': ('Build it, then run `bin/ci`.', ['bin/ci']),
+            'next sentence': ('CI will run `bin/x`. Then run `bin/ci`.', ['bin/ci']),
+            'list item imperative': ('- Run `bin/ci` to run the suite.', ['bin/ci']),
+            'quote prompt with flags': ('> bin/ci --fast', ['bin/ci --fast']),
         }
         no = {
             'descriptive prose (repository.md:30)': self.SENTENCE,
@@ -504,6 +525,38 @@ class CommandContexts(Project):
             'console output line': '```console\nbin/ci: 3 tests OK\n```',
             'indented list continuation': '- item\n\n    bin/ci\n',
             'link in a list item': '- [`bin/ci`](bin/ci) runs the suite',
+            # Review round 4 (M4a): a list lead followed by a verb describes the command.
+            'list lead, and ... find': '- `bin/ci` and `bin/check-marketplace` find the pinned version themselves.',
+            'list lead, is': '- `bin/ci` is slow on macOS; prefer the container.',
+            'list lead, was': '* `bin/deploy` was removed in 2.0.',
+            'list lead, used to': '1. `bin/check` used to be the gate; it is gone now.',
+            'list lead, runs': '1. `bin/ci` runs the suite',
+            # Review round 4 (M4b): a run word with a non-instruction subject.
+            'CI will run': 'CI will run `bin/ci` on every push.',
+            'this will run': 'This will run `bin/ci` for you.',
+            'merges run': 'Merges run `bin/ci` automatically.',
+            'GitHub Actions run': 'GitHub Actions run `bin/ci` nightly.',
+            'the hook will call': 'The hook will call `bin/check` after each turn.',
+            'you could run': 'If you want, you could run `bin/ci`, but CI does it anyway.',
+            # Review round 4 (L11): negation with an adverb.
+            "don't ever run": "Don't ever run `bin/release`.",
+            'never, ever run': 'Never, ever run `bin/release`.',
+            'do not, ever, run': 'Do not, ever, run `bin/release`.',
+            # Bypass pass, round 4: allowed forms with a descriptive continuation or non-instruction subject.
+            'list lead, colon, history': '- `bin/ci`: removed in 2.0.',
+            'list lead, parenthesis, history': '- `bin/ci` (deprecated)',
+            'list lead, dash, history': '- `bin/ci` \u2014 no longer used',
+            'table row, history': '| `bin/old` | removed in 2.0 |',
+            'run, history': 'Run `bin/old` was the old way, no longer needed.',
+            'label, history': 'Commands: `bin/ci` (deprecated)',
+            'label, obsolete': 'Tests: `bin/old` is obsolete',
+            'quote sentence': '> bin/ci is slow',
+            'will then run': 'The script will then run `bin/ci`.',
+            'will, first, run': 'Each PR will, first, run `bin/ci`.',
+            'our CI can run': 'Our CI can run `bin/ci` too.',
+            'it used to run': 'It used to run `bin/ci`.',
+            'hooks run': 'Hooks run `bin/ci`.',
+            'GitHub runs': 'When merged, GitHub runs `bin/ci`.',
         }
         for name, (text, want) in yes.items():
             with self.subTest(name):
@@ -531,6 +584,31 @@ class CommandContexts(Project):
                    ['Bash(bin/ci)', 'Bash(bin/check-marketplace --base origin/main)'])
         fix = self.finding(self.scan(), 'allowlist')['fix']
         self.assertIn('"Bash(bin/check-marketplace)"', fix)
+
+    def test_a_runner_named_outside_a_call_is_still_the_runner(self):
+        # Review round 4 (M3): which test runner a project uses is read from every mention, not only calls.
+        self.write('pyproject.toml', '[project]\nname = "x"\n')
+        self.write('tests/test_a.py', 'import unittest\n')
+        self.write('AGENTS.md', '# x\n\nTests: run with `python3 -m pytest -q`.\n')
+        result = self.scan()
+        self.assertEqual([(c['command'], c['documented']) for c in result['signals']['check_commands']],
+                         [('python3 -m pytest', True)])
+        self.assertEqual(self.ids(result), ['allowlist'])
+        self.assertIn('"Bash(python3 -m pytest -q)"', self.finding(result, 'allowlist')['fix'])
+        self.assertNotIn('unittest', json.dumps(result['findings']))
+        self.assertEqual({k: v['letter'] for k, v in result['grades'].items()},
+                         {'correctness': 'A', 'alignment': 'A', 'coverage': 'B'})
+        self.write('AGENTS.md', '# x\n\nWe test with `pytest` in CI.\n')  # a mention, not a call
+        self.assertEqual([c['command'] for c in self.scan()['signals']['check_commands']], ['pytest'])
+
+    def test_a_listed_description_is_not_a_call(self):
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.write('bin/check-marketplace', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\n```sh\nbin/ci\nbin/check-marketplace --base origin/main\n```\n\n'
+                                '- `bin/ci` and `bin/check-marketplace` find the pinned version themselves.\n')
+        self.write('.claude/settings.json', {'permissions': {'allow': [
+            'Bash(bin/ci)', 'Bash(bin/check-marketplace --base origin/main)']}})
+        self.assertNotIn('allowlist', self.ids(self.scan()))
 
     def test_run_phrasing_is_a_call(self):
         self.write('bin/ci', '#!/bin/sh\n', 0o755)

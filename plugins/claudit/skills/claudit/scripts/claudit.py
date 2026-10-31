@@ -155,12 +155,34 @@ LIST_ITEM = re.compile(r'^\s*(?:[-*+]|[0-9]+[.)])\s+')
 SHELL_FENCES = {'', 'sh', 'bash', 'zsh', 'fish', 'shell', 'console', 'shell-session', 'shellsession', 'terminal',
                 'powershell', 'pwsh', 'ps1', 'bat', 'cmd'}
 CONSOLE_FENCES = {'console', 'shell-session', 'shellsession', 'terminal'}  # prompts mixed with output
-PROMPT = re.compile(r'^\s*[$%>]\s+(\S.*)$')
+# `$` and `%` start a prompt line. `>` is also Markdown's quote, so a `>` line counts only when it is just a command
+# with flag or path arguments (`> bin/ci --fast`), never a sentence (`> bin/ci is slow`).
+PROMPT = re.compile(r'^\s*(?:[$%]\s+(\S.*)|>\s+(\S+(?:\s+(?:-\S+|\S*[/.=]\S*))*)\s*)$')
+# A run word followed by what may stand between it and the command.
 RUN_WORDS = re.compile(r'\b(?:run|execute|invoke|call)(?:\s*:\s*|\s+(?:the\s+)?(?:command|script)\s+|'
-                       r'(?:\s+[\w-]+){1,4}\s+(?:with|using|via)\s+|\s+)$', re.I)
-NEGATED = re.compile(r"\b(?:not|never|don['\u2019]t|doesn['\u2019]t|avoid|no need to)\s+$", re.I)
+                       r'(?:\s+[\w-]+){0,4}\s+(?:with|using|via)\s+|\s+)$', re.I)
+# ... counts only as an instruction: at the start of a sentence, clause, list item or label, after
+# please/then/first/also/always/now/just/next/finally or make sure to/remember to/be sure to, or after a
+# reader or agent subject with a modal ("you can", "agents must").
+IMPERATIVE = re.compile(r"(?:^[\s>|]*|[.!?;:(|]\s*|,\s+|(?:^|[.!?;:(|,]\s*)then\s+)(?:(?:please|then|first|also|always|now|just|next|finally|"
+                        r"simply)\s+)?(?:(?:make sure|remember|be sure) to\s+)?$"
+                        r"|\b(?:you|we|agents?|contributors?|maintainers?)\s+(?:can|must|should|may|need to|have to)\s+"
+                        r"(?:(?:always|also|first|then|just)\s+)?$", re.I)
+# A future, conditional or past auxiliary earlier in the sentence makes a run word a description ("CI will, first,
+# run `x`"), whatever punctuation follows it.
+DESCRIBING = re.compile(r"\b(?:will|would|could|might|shall|does|did|used to|automatically)\b", re.I)
+NEGATED = re.compile(r"\b(?:not|never|don['’]t|doesn['’]t|avoid|no need to)(?:,?\s+(?:ever|even|again|once))?,?\s+$",
+                     re.I)
 COMMAND_LABEL = re.compile(r'\b(?:commands?|checks?|tests?|usage|verify|verification|validation|lint|build)\s*:\s*$',
                            re.I)
+# A list item led by a command is a call only when the command is followed by the end, `:`, a dash or `(`.
+LIST_LEAD_END = re.compile('\\s*(?:$|:|-\\s|–|—|\\()')
+# Words right after a command that make the line describe it rather than call it.
+DESCRIBED = re.compile(r"\b(?:is|was|were|has been|had|used to|no longer|removed|deprecated|obsolete|gone|replaced|"
+                       r"broken|don['’]t|never|do not)\b", re.I)
+# Anywhere after a command (or in its table row): it is history or a warning.
+HISTORY = re.compile(r"\b(?:no longer|deprecated|obsolete|removed|is gone|used to|don['\u2019]t run|never run|do not run)\b",
+                     re.I)
 CHAIN = re.compile(r'\s*(?:,\s*(?:and\s+|or\s+|then\s+)?|\s(?:and|or|then)\s+|\s*\(or\s+)\s*', re.I)
 
 
@@ -221,6 +243,21 @@ def prose(text):
             yield number, line
 
 
+def code_spans(text):
+    """Every inline code span and fenced code line: where a project names its tools, called or not."""
+    fence = None
+    for line in text.splitlines():
+        match = FENCE.match(line)
+        if match:
+            fence = match.group(1) if fence is None else (None if line.strip().startswith(fence) else fence)
+            continue
+        if fence is not None:
+            yield line.strip()
+        else:
+            for span in re.findall(r'`([^`\n]+)`', line):
+                yield span.strip()
+
+
 def code_snippets(text):
     """The commands a Markdown text documents as calls, from command contexts only.
 
@@ -246,7 +283,7 @@ def code_snippets(text):
             continue
         if fence is not None:
             if info in SHELL_FENCES:
-                prompt = PROMPT.match(line)
+                prompt = re.match(r'^\s*[$%>]\s+(\S.*)$', line)  # inside a shell block, any prompt counts
                 if prompt or info not in CONSOLE_FENCES:
                     yield (prompt.group(1) if prompt else line).strip()
             continue
@@ -264,14 +301,16 @@ def code_snippets(text):
         if body.startswith('#'):
             continue  # a heading names things; it doesn't run them
         prompt = PROMPT.match(line)
-        if prompt and '`' not in prompt.group(1):  # `> Run \`x\`` is a quote of prose, `$ x` a prompt
-            yield prompt.group(1).strip()
+        if prompt and '`' not in line:
+            yield (prompt.group(1) or prompt.group(2)).strip()
             continue
         if body.startswith('|'):
-            for cell in body.strip('|').split('|'):
-                cell = re.fullmatch(r'\s*`([^`\n]+)`\s*', cell)
-                if cell:
-                    yield cell.group(1).strip()
+            cells = body.strip('|').split('|')
+            if not any(HISTORY.search(cell) for cell in cells):  # | `bin/old` | removed in 2.0 | is history
+                for cell in cells:
+                    cell = re.fullmatch(r'\s*`([^`\n]+)`\s*', cell)
+                    if cell:
+                        yield cell.group(1).strip()
         item = LIST_ITEM.match(line)
         start = item.end() if item else 0
         called = False
@@ -280,9 +319,17 @@ def code_snippets(text):
             if start == 0 and not before.strip() and wrapped.strip() and not wrapped.lstrip().startswith(('#', '|')):
                 before = wrapped.strip() + ' '
             run = RUN_WORDS.search(before)
-            if (item and not line[item.end():span.start()].strip() and start == item.end()) \
-                    or (run and not NEGATED.search(before[:run.start()])) or COMMAND_LABEL.search(before) \
-                    or (called and CHAIN.fullmatch(before)):
+            after = re.split(r'[.!?;]\s', line[span.end():], maxsplit=1)[0]
+            lead = item and start == item.end() and not line[item.end():span.start()].strip() \
+                and LIST_LEAD_END.match(line[span.end():])
+            # "Execute `a`, invoke `b` or call `c`": a run word coordinated with a call is an instruction too.
+            sentence = re.split(r'[.!?;:]\s', before[:run.start()])[-1] if run else ''
+            instructed = run and not DESCRIBING.search(sentence) and (IMPERATIVE.search(before[:run.start()]) or (
+                called and re.fullmatch(r'\s*,?\s*(?:and|or)?\s*', before[:run.start()]))) \
+                and not NEGATED.search(before[:run.start()])
+            if (lead or instructed or COMMAND_LABEL.search(before) or (called and CHAIN.fullmatch(before))) \
+                    and not DESCRIBED.match(after.lstrip(' :(–—-')) \
+                    and not HISTORY.search(after):
                 called = True
                 yield span.group(1).strip()
             else:
@@ -811,7 +858,8 @@ class Scan:
             python_markers = ['tests/']
         if python_markers:
             mentioned = None
-            for snippet in [s for text in corpus.values() for s in code_snippets(text)] + ci_text.splitlines():
+            # Which runner the project uses is read from every mention; only calls become rules (below).
+            for snippet in [s for text in corpus.values() for s in code_spans(text)] + ci_text.splitlines():
                 match = re.search(r'(python3?(?:\.\d+)? -m (?:pytest|unittest)|\bpytest)\b', snippet)
                 if match:
                     mentioned = match.group(1)
