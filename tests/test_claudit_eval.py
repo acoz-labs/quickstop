@@ -469,6 +469,22 @@ class ReportRetentionTests(RunTests):
                 self.assertEqual((self.tmp / 'e-Ab12Cd').exists(), keep)
                 shutil.rmtree(self.tmp / 'e-Ab12Cd', ignore_errors=True)
 
+    def test_read_only_sandboxes_are_removed(self):
+        trace = self.tmp / 'e-Zz99Yy' / 'out' / 'trace.jsonl'
+        trace.parent.mkdir(parents=True)
+        trace.write_text(json.dumps({'type': 'result', 'result': 'r'}) + '\n')
+        sealed = self.tmp / 'e-Zz99Yy' / 'sealed'
+        (sealed / 'inner').mkdir(parents=True)
+        (sealed / 'inner' / 'f').write_text('x')
+        (sealed / 'inner').chmod(0o500)
+        sealed.chmod(0o200)  # what claude plugin eval leaves behind: write-only, unlistable
+        (self.tmp / 'e-Zz99Yy').chmod(0o500)
+        out = self.base / 'out-sealed'
+        out.mkdir()
+        ce.keep_reports({'cases': [{'name': 'c', 'arms': {'with': [{'tracePath': str(trace)}]}}]}, out, False)
+        self.assertFalse((self.tmp / 'e-Zz99Yy').exists())
+        self.assertEqual((out / 'reports/c-run1.md').read_text(), 'r\n')
+
     def test_final_reply_prefers_the_result(self):
         trace = self.base / 'trace.jsonl'
         trace.write_text('not json\n[1]\n' + json.dumps({'role': 'assistant', 'content': 'plain reply'}) + '\n')
@@ -638,6 +654,11 @@ class SuiteStructureTests(unittest.TestCase):
             with self.subTest(case=case.name):
                 text = (case / 'case.yaml').read_text()
                 self.assertEqual(text.split('\n').count(CANONICAL), 1)
+                # A plain YAML scalar can't hold ': ' (f9's description once failed to load in claude plugin eval).
+                for line in text.split('\n'):
+                    key, sep, value = line.strip().partition(': ')
+                    if sep and value and value[0] not in '"\'[{':
+                        self.assertNotIn(': ', value, line)
                 self.assertRegex(text, r'(?m)^\s+scaffold_script: scaffold\.sh\s*$')
                 self.assertTrue(os.access(case / 'scaffold.sh', os.X_OK))
                 fixture = case / 'fixture'

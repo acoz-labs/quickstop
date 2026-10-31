@@ -451,9 +451,24 @@ def final_reply(trace):
     return result if result and result.strip() else reply
 
 
+def remove_sandbox(path):
+    """Remove a kept eval sandbox. claude plugin eval leaves some directories unreadable (`sealed`), so make each
+    directory the operator's own writable one first. Returns False when it can't be removed."""
+    for directory, subdirs, _ in os.walk(path):
+        for name in subdirs:
+            child = os.path.join(directory, name)
+            if not os.path.islink(child):
+                os.chmod(child, 0o700)
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        return False
+    return True
+
+
 def keep_reports(result, out, keep_temp):
     """Write each run's final reply to <out>/reports/<case>-run<N>.md; drop the kept sandboxes unless asked."""
-    reports, missing = out / 'reports', []
+    reports, missing, stuck = out / 'reports', [], []
     for case in result.get('cases', []) or []:
         for number, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
             name = f"{case.get('name')}-run{number}.md"
@@ -468,7 +483,11 @@ def keep_reports(result, out, keep_temp):
             # claude plugin eval --keep-temp leaves <tmp>/e-XXXXXX/out/trace.jsonl; remove only that shape.
             if not keep_temp and trace.parent.name == 'out' and re.fullmatch(r'e-[A-Za-z0-9]{6}', sandbox.name) \
                     and sandbox.is_dir() and not sandbox.is_symlink():
-                shutil.rmtree(sandbox, ignore_errors=True)
+                os.chmod(sandbox, 0o700)
+                if not remove_sandbox(sandbox):
+                    stuck.append(str(sandbox))
+    if stuck:
+        print(f'Warning: could not remove eval sandboxes: {", ".join(stuck)}', file=sys.stderr)
     return missing
 
 

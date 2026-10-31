@@ -449,6 +449,95 @@ class Neighbours(Project):
         self.assertEqual(result['optional'], [])
 
 
+class CommandContexts(Project):
+    """Requirement 3: only command contexts document a call to pre-approve; a command named in prose is not one."""
+
+    SENTENCE = ('`bin/ci` and `bin/check-marketplace` find the pinned version themselves: they try the version '
+                'named in `.python-version` first.')
+
+    def calls(self, text):
+        return list(cl.code_snippets(text))
+
+    def test_decided_forms(self):
+        yes = {
+            'run': ('Run `bin/ci` before you finish.', ['bin/ci']),
+            'you can run': ('You can run `bin/ci` at any time.', ['bin/ci']),
+            'run colon': ('Run: `bin/ci`', ['bin/ci']),
+            'run with': ('Run the tests with `npm test`.', ['npm test']),
+            'run the command': ('Run the command `bin/ci`.', ['bin/ci']),
+            'wrapped run': ('Run one file with\n  `npm test -- test/a.test.js`.', ['npm test -- test/a.test.js']),
+            'execute/invoke/call': ('Execute `bin/a`, invoke `bin/b` or call `bin/c`.', ['bin/a', 'bin/b', 'bin/c']),
+            'list item': ('- `bin/ci`: runs the suite', ['bin/ci']),
+            'numbered item': ('1. `bin/ci` runs the suite', ['bin/ci']),
+            'label': ('- Test: `python3 -m unittest`', ['python3 -m unittest']),
+            'commands label': ('Commands: `bin/ci`, `bin/lint`', ['bin/ci', 'bin/lint']),
+            'table cell': ('| `bin/ci` | runs tests |', ['bin/ci']),
+            'run in a table cell': ('| Tests | Run `bin/ci` first |', ['bin/ci']),
+            'multi-command': ('Run `bin/ci` and `bin/sdlc check`; `bin/lint` is optional.', ['bin/ci', 'bin/sdlc check']),
+            'or in parentheses': ('Run `bin/ci` (or `bin/container bin/ci` where supported).',
+                                  ['bin/ci', 'bin/container bin/ci']),
+            'then': ('Run `bin/build`, then `bin/ci`.', ['bin/build', 'bin/ci']),
+            'not chained': ('Run `bin/ci`, not `bin/release`.', ['bin/ci']),
+            'prompt': ('$ bin/ci', ['bin/ci']),
+            'percent prompt': ('% bin/ci --fast', ['bin/ci --fast']),
+            'quoted run': ('> Run `bin/ci` first.', ['bin/ci']),
+            'sh fence': ('```sh\nbin/check-marketplace\n```', ['bin/check-marketplace']),
+            'bare fence': ('```\nbin/ci\n```', ['bin/ci']),
+            'console prompts only': ('```console\n$ bin/ci\nbin/ci: 3 tests OK\n```', ['bin/ci']),
+            'indented block': ('Text.\n\n    bin/ci\n', ['bin/ci']),
+        }
+        no = {
+            'descriptive prose (repository.md:30)': self.SENTENCE,
+            'heading': '## `bin/ci`',
+            'use': 'Use `bin/ci` to check a change.',
+            'before you push': 'Before you push, `bin/ci`.',
+            'other label': 'Before pushing: `bin/ci`',
+            'do not run': 'Do not run `bin/release` by hand.',
+            'never run': 'Never run `bin/deploy`.',
+            "don't run, chained": "Don't run `bin/ci` and `bin/lint` together.",
+            'wrapped never': 'Do not run\n`bin/deploy`.',
+            'runs (description)': 'CI runs `bin/ci` on every push.',
+            'running (description)': 'Running `bin/ci` takes a minute.',
+            'text fence (output)': '```text\nbin/ci passed\n```',
+            'output fence': '```output\nbin/ci: OK\n```',
+            'json fence': '```json\n{"bin/ci": 1}\n```',
+            'console output line': '```console\nbin/ci: 3 tests OK\n```',
+            'indented list continuation': '- item\n\n    bin/ci\n',
+            'link in a list item': '- [`bin/ci`](bin/ci) runs the suite',
+        }
+        for name, (text, want) in yes.items():
+            with self.subTest(name):
+                self.assertEqual(self.calls(text), want)
+        for name, text in no.items():
+            with self.subTest(name):
+                self.assertEqual(self.calls(text), [])
+
+    def setup(self, doc, allow):
+        for script in ('ci', 'check-marketplace'):
+            self.write('bin/' + script, '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\n@docs/repository.md\n')
+        self.write('docs/repository.md', doc)
+        self.write('.claude/settings.json', {'permissions': {'allow': allow}})
+
+    def test_a_command_named_in_prose_is_not_a_call_to_pre_approve(self):
+        self.setup('# Repo\n\n```sh\nbin/ci\nbin/check-marketplace --base origin/main\n```\n\n%s\n' % self.SENTENCE,
+                   ['Bash(bin/ci)', 'Bash(bin/check-marketplace --base origin/main)'])
+        result = self.scan()
+        self.assertNotIn('allowlist', self.ids(result))
+        self.assertEqual({b['id']: b['status'] for b in result['baseline']}['allowlist'], 'met')
+
+    def test_a_fenced_bare_call_still_needs_its_rule(self):
+        self.setup('# Repo\n\n```sh\nbin/ci\nbin/check-marketplace --base origin/main\nbin/check-marketplace\n```\n',
+                   ['Bash(bin/ci)', 'Bash(bin/check-marketplace --base origin/main)'])
+        fix = self.finding(self.scan(), 'allowlist')['fix']
+        self.assertIn('"Bash(bin/check-marketplace)"', fix)
+
+    def test_run_phrasing_is_a_call(self):
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\nrun `bin/ci` before you finish.\n')
+        self.assertIn('Bash(bin/ci)', self.finding(self.scan(), 'allowlist')['fix'])
+
+
 class Plan(unittest.TestCase):
     """Requirement 1: which findings become changes, their order and the plan length."""
 

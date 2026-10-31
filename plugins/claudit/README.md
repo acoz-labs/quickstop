@@ -70,6 +70,23 @@ and the diffs. The rules:
   for lows only, A for none; a project with no instruction file gets an Alignment
   medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
   at all.
+- **Only commands written as calls are pre-approved.** The allowlist suggestion and
+  its Coverage gap count a check command only where the instructions write it as a
+  call:
+  - a fenced block with no language or a shell one (only its prompt lines in a
+    `console` block), or an indented code block;
+  - a line starting with a `$`, `%` or `>` prompt;
+  - a backticked command that begins a list item ("- `bin/ci`: runs the suite") or
+    fills a table cell;
+  - a backticked command after run, execute, invoke or call ("Run `bin/ci`", "Run:
+    `x`", "Run the tests with `x`"), and the commands chained to it by a comma, and,
+    or or then, but not after "never run" or "do not run";
+  - a backticked command after a label such as "Commands:" or "Test:".
+
+  A command named in a sentence ("`bin/ci` finds the pinned Python"), a heading, a
+  `text` or `output` fence, or after "use" or "before you push," is not a call.
+  Mutating calls (`--write`, `apply`, `release`) and placeholder arguments
+  (`PRE_CHANGE_SHA`, `<sha>`) are never suggested, and no suggestion uses a wildcard.
 - **Procedures already reachable are optional.** A procedure doc that loaded team
   instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
   CLAUDE.local.md) already link, as a Markdown link or a bare or backticked path, is
