@@ -27,6 +27,8 @@ bin/check-marketplace --base origin/main
 ```
 
 Without mise, install the pinned Python and run the same commands directly.
+`.claude/settings.json` pre-approves only `bin/ci`, `bin/sdlc check` and `bin/check-marketplace --base <ref>`, run bare.
+Claude Code always asks before a command that changes PATH, so start an agent session with the pinned Python already first in PATH.
 `AGENTS.md` offers `bin/container bin/ci` where supported; this repository
 provides no `bin/container`, so verification runs `bin/ci` directly on the
 pinned Python.
