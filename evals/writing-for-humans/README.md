@@ -31,8 +31,9 @@ $0 (the runner fails a command whose result reports any cost). No login is neede
    `writing-for-humans:no-such-style`, is refused and saves nothing.
 
 The runner hashes the real `~/.claude/settings.json` and
-`~/.claude/plugins/{installed_plugins,known_marketplaces}.json` before and after,
-and fails if any changed. Other live Claude sessions rewrite `~/.claude.json` every
+`~/.claude/plugins/{installed_plugins,known_marketplaces}.json` before and after
+the host checks, and again across the whole `run` including the paid eval, and
+fails if any changed. Other live Claude sessions rewrite `~/.claude.json` every
 few seconds, so a byte comparison of it fails for reasons unrelated to the runner.
 Instead the runner fails if that file mentions its temp dir, which is what a leaked
 session would add as a project entry. It deletes only the temp dir it created. `bin/writing-for-humans-eval host` runs just
@@ -56,8 +57,8 @@ subcommands. No edit tool is granted, so the audit is review-only.
 - `reads-artifacts-reference`: a Read of `skills/writing-style/references/artifacts.md`. Enforces `skills/writing-audit/SKILL.md:13` and the table row at `:17` (read the reference for each surface; the draft is a workflow artifact, `:35`). A pass also shows `${CLAUDE_PLUGIN_ROOT}` expands to a readable file.
 - `reads-output-style`: a Read of `output-styles/writing-for-humans.md`. Enforces `skills/writing-audit/SKILL.md:25` (when the style's rules are not present, read the style file); the eval session's style is `default`.
 - `names-draft`: the report names `decision-notes.md`.
-- `report-structure`: the report says what was rewritten (or would be) and what was kept or flagged. Enforces `skills/writing-audit/SKILL.md:65`, with `:61` for the review-only form.
-- `no-external-action`: no Bash call that commits, rebases, resets, pushes or changes a PR. Enforces `skills/writing-audit/SKILL.md:61`, `:53` and `:63`. A denied attempt still fails.
+- `report-structure`: the report says what was rewritten (or would be) and what was kept or flagged. Enforces `skills/writing-audit/SKILL.md:65`, with `:61` for the review-only form. The "deleted" part of `:65` is not required, because a review-only audit deletes nothing.
+- `no-external-action`: no Bash call that commits, rebases, resets, pushes or changes a PR, including `git` with global options before the subcommand and writing `gh api` calls. Enforces `skills/writing-audit/SKILL.md:61`, `:53` and `:63`. A denied attempt still fails.
 
 ### `audit-not-automatic`
 
@@ -76,7 +77,11 @@ for one prompt and model, not a triggering guarantee.
 
 ## Pass rule
 
-Each grader is binary. A case run passes only if every grader scored and passed. An
+The runner compares the result with the suite it copied (`suite.json` in the
+result dir): every case must be present with `--runs` runs, and every grader file
+on disk must have scored in each run. A missing case, a missing grader or a short
+run count fails. A `--case` run is a subset and never a suite pass. Each grader is
+binary. A case run passes only if every grader scored and passed. An
 agent error, timeout, cost-ceiling stop or skipped grader is a failure. A suite pass
 needs every host check and every case run to pass. The kit's baseline is 3 of 3
 suite passes, each a separate `run`, with no selective retries. The only rerun
@@ -98,7 +103,7 @@ bin/writing-for-humans-eval run --model claude-sonnet-5-5 --max-cost-usd 2
 (`claude plugin eval` accepts only an eval dir inside the plugin root), so plugin
 bytes never change; it also fails the pass if the source plugin's bytes changed
 during the run. It writes `CANDIDATE.txt` (head, tree, plugin tree and bytes
-digest), `host.json`, `result.json` and `summary.json` under
+digest), `suite.json`, `host.json`, `result.json` and `summary.json` under
 `evals/writing-for-humans/results/<UTC timestamp>/` (git-ignored) and prints a table
 of each case run, its failed graders and its cost. It exits 0 only when the suite
 passes, 2 when the cost ceiling stopped it. `summarize <result dir>` reprints a run;

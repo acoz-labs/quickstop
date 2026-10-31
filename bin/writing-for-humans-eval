@@ -64,6 +64,11 @@ def file_digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
+def real_config_digests():
+    home = Path.home()
+    return {name: file_digest(home / name) for name in REAL_CONFIG}
+
+
 def copy_plugin(source, target):
     source = Path(source).resolve()
     manifest = source / '.claude-plugin/plugin.json'
@@ -143,7 +148,7 @@ def host_check(plugin_source, claude='claude'):
     """Install the plugin copy from a temp marketplace and select its style; costs nothing."""
     claude = shutil.which(claude) or claude
     real_home = Path.home()
-    before = {name: file_digest(real_home / name) for name in REAL_CONFIG}
+    before = real_config_digests()
     temp = Path(tempfile.mkdtemp(prefix='wfh-eval-host-')).resolve()
     checks, commands = [], []
     try:
@@ -188,7 +193,7 @@ def host_check(plugin_source, claude='claude'):
         checks += grade_fresh(records)
     finally:
         shutil.rmtree(temp, ignore_errors=True)
-    after = {name: file_digest(real_home / name) for name in REAL_CONFIG}
+    after = real_config_digests()
     for name in REAL_CONFIG:
         checks.append((f'real-config-unchanged: ~/{name}', before[name] == after[name],
                        'SHA-256 before and after'))
@@ -240,6 +245,13 @@ def copy_suite(target):
     return cases
 
 
+def expected_suite(evals, runs, case_filter=None):
+    """What a complete pass must contain: every copied case, its on-disk graders, and --runs runs each."""
+    cases = {path.parent.name: sorted(grader.stem for grader in path.parent.glob('graders/*.md'))
+             for path in sorted(Path(evals).glob('cases/*/case.yaml'))}
+    return {'cases': cases, 'runs': runs, 'case_filter': case_filter}
+
+
 def eval_command(plugin, args, out):
     command = ['claude', 'plugin', 'eval', str(plugin), '--model', args.model,
                '--max-cost-usd', str(args.max_cost_usd), '--runs', str(args.runs), '--trust-plugin', '--scaffold',
@@ -285,6 +297,7 @@ def run(args):
         if (plugin / 'evals').exists():
             raise Failure('the plugin ships its own evals/; this runner would replace them')
         cases = copy_suite(plugin / 'evals')
+        expected = expected_suite(plugin / 'evals', args.runs, args.case)
         git_dir = copy_git(plugin / '.eval-git')
         env = dict(os.environ, PATH=f'{git_dir}{os.pathsep}{os.environ.get("PATH", "")}')
         command = eval_command(plugin, args, out)
@@ -296,6 +309,8 @@ def run(args):
             return 0
         out.mkdir(parents=True, exist_ok=True)
         (out / 'CANDIDATE.txt').write_text(candidate(source))
+        (out / 'suite.json').write_text(json.dumps(expected, indent=2) + '\n')
+        config_before = real_config_digests()
         host = host_check(source)
         (out / 'host.json').write_text(json.dumps(host, indent=2) + '\n')
         print(host_table(host))
@@ -307,10 +322,12 @@ def run(args):
         if not result.is_file():
             print(f'No result.json was written to {out}', file=sys.stderr)
             return code or 1
-        summary = summarize(load_result(result), host, args.model)
+        changes = []
         if tree_digest(source) != digest:
-            summary['passed'] = False
-            summary['plugin_bytes_changed'] = True
+            changes.append('plugin bytes changed during the run')
+        changes += [f'~/{name} changed during the run' for name, value in real_config_digests().items()
+                    if value != config_before[name]]
+        summary = summarize(load_result(result), expected, host, args.model, changes)
         (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
         print(markdown(summary))
         print(f'Summary: {out / "summary.json"}')
@@ -331,31 +348,52 @@ def number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
 
-def case_rows(result):
-    """One row per case run. A run passes only if it has no error and every defined grader scored and passed."""
+def case_rows(result, expected):
+    """One row per case run. A run passes only if it has no error and every on-disk grader scored and passed."""
     rows = []
     for case in result.get('cases') or []:
-        defined = sorted({str(g.get('name')) for g in case.get('graders') or [] if isinstance(g, dict)})
+        names = expected['cases'].get(case.get('name'))
         for index, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
             graded = {str(g.get('name')): g for g in item.get('graders') or []}
-            names = defined or sorted(graded)
-            failed = [name for name in names
+            wanted = names if names is not None else sorted(graded)
+            failed = [name for name in wanted
                       if not (graded.get(name, {}).get('scored') is not False
                               and graded.get(name, {}).get('passed') is True)]
             error = item.get('error')
-            rows.append({'case': case.get('name'), 'run': index, 'passed': not error and not failed and bool(names),
+            rows.append({'case': case.get('name'), 'run': index, 'passed': not error and not failed and bool(wanted),
                          'failed_graders': failed, 'error': error, 'cost_usd': round(number(item.get('costUsd')), 6),
                          'wall_seconds': number(item.get('durationSeconds')), 'turns': item.get('turns')})
     return rows
 
 
-def summarize(result, host=None, model=None):
-    rows = case_rows(result)
+def suite_problems(result, expected):
+    """Ways the result falls short of a complete pass of the copied suite."""
+    problems = []
+    if expected.get('case_filter'):
+        problems.append(f"subset run (--case {expected['case_filter']}): never a suite pass")
+    counts = {}
+    for case in result.get('cases') or []:
+        counts[case.get('name')] = counts.get(case.get('name'), 0) + len(case.get('arms', {}).get('with', []) or [])
+    for name in expected['cases']:
+        if name not in counts:
+            problems.append(f'case {name} is missing from the result')
+        elif counts[name] != expected['runs']:
+            problems.append(f"case {name} has {counts[name]} runs, expected {expected['runs']}")
+    problems += [f'case {name} is not in the suite' for name in counts if name not in expected['cases']]
+    return problems
+
+
+def summarize(result, expected, host=None, model=None, changes=()):
+    rows = case_rows(result, expected)
+    problems = suite_problems(result, expected) + list(changes)
+    if result.get('partial'):
+        problems.append('partial result (cost ceiling)')
+    if host is not None and host.get('passed') is not True:
+        problems.append('host checks failed')
     suite = result.get('suite') if isinstance(result.get('suite'), dict) else {}
     plugins = suite.get('plugins') if isinstance(suite.get('plugins'), list) else []
-    passed = (bool(rows) and all(row['passed'] for row in rows) and not result.get('partial')
-              and (host is None or host.get('passed') is True))
-    return {'passed': passed,
+    passed = bool(rows) and all(row['passed'] for row in rows) and not problems
+    return {'passed': passed, 'problems': problems,
             'model': suite.get('modelOverride') or result.get('model') or model,
             'claude_version': result.get('claudeVersion'),
             'plugins': sorted(f"{p.get('name')}@{p.get('version')}" for p in plugins if isinstance(p, dict)),
@@ -372,6 +410,7 @@ def markdown(summary):
     lines = [f"Suite: {'PASS' if summary['passed'] else 'FAIL'} | host checks: {host} | model: {summary['model']} "
              f"| plugins: {', '.join(summary['plugins']) or '-'} | claude {summary['claude_version']} "
              f"| cost ${summary['cost_usd']:.4f} | wall {summary['wall_seconds']} s | partial: {summary['partial']}",
+             *[f'Problem: {problem}' for problem in summary['problems']],
              '', '| Case | Run | Result | Failed graders | Error | Agent $ | Wall s | Turns |',
              '|---|---|---|---|---|---|---|---|']
     for row in summary['runs']:
@@ -418,7 +457,8 @@ def main():
             return run(args)
         directory = Path(args.result_dir)
         host = json.loads((directory / 'host.json').read_text()) if (directory / 'host.json').is_file() else None
-        summary = summarize(load_result(directory / 'result.json'), host)
+        expected = json.loads((directory / 'suite.json').read_text())
+        summary = summarize(load_result(directory / 'result.json'), expected, host)
         print(markdown(summary))
         return 0 if summary['passed'] else 1
     except (Failure, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
