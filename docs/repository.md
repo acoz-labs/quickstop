@@ -17,20 +17,25 @@ this repository.
 ## Local verification
 
 Requires Git, Bash and Python **3.11.15**, pinned in `.python-version` (standard
-library only; no downloaded Python dependencies). Put that interpreter first in
-PATH before running verification; `bin/ci` rejects a different version. With mise:
+library only; no downloaded Python dependencies). Install it with mise
+(`mise install python@3.11.15`) or put it on PATH under a version name, then run
+the bare commands:
 
 ```sh
-export PATH="$(mise where python@3.11.15)/bin:$PATH"
 bin/ci
 bin/check-marketplace --base origin/main
+bin/sdlc check
 ```
 
-Without mise, install the pinned Python and run the same commands directly.
-`.claude/settings.json` pre-approves only `bin/ci`, `bin/sdlc check` and
-`bin/check-marketplace --base origin/main`, run bare. Claude Code always asks
-before a command that changes PATH, so start an agent session with the pinned
-Python already first in PATH.
+`bin/ci` and `bin/check-marketplace` find the pinned version themselves: they try
+`python3.11`, `python3` and `python` in every PATH directory, then `mise where
+python@3.11.15`, so another `python3` earlier on PATH does not matter. If none
+reports exactly 3.11.15 they name the version and exit 1. `bin/ci` runs its
+checks and tests on that interpreter. `bin/sdlc` is SDLC-managed and runs on
+whichever `python3` comes first; `bin/sdlc check` passes on Python 3.9.6 as well,
+and `bin/ci` runs it on the pinned version.
+`.claude/settings.json` pre-approves exactly these three bare commands, so they
+run without a prompt; any other arguments, or a PATH change, still prompt.
 `AGENTS.md` offers `bin/container bin/ci` where supported; this repository
 provides no `bin/container`, so verification runs `bin/ci` directly on the
 pinned Python.

@@ -3,8 +3,37 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Keep bytecode caches out of the distributed plugin tree.
 export PYTHONDONTWRITEBYTECODE=1
-python3 -c 'import pathlib, platform; expected = pathlib.Path(".python-version").read_text().strip(); actual = platform.python_version(); assert actual == expected, f"Use Python {expected}; found {actual}"'
+
+# Find the Python pinned in .python-version wherever it is on PATH or in mise,
+# so the bare command works even when another python3 comes first.
+expected="$(tr -d '[:space:]' < .python-version)"
+pinned=""
+try_python() {
+  local found
+  [ -x "$1" ] && [ ! -d "$1" ] || return 1
+  found="$("$1" -c 'import platform, sys; print(platform.python_version(), sys.executable)' 2>/dev/null)" || return 1
+  [ "${found%% *}" = "$expected" ] || return 1
+  pinned="${found#* }"
+}
+find_python() {
+  local dir name
+  local IFS=:
+  for dir in $PATH; do
+    for name in "python${expected%.*}" python3 python; do
+      try_python "${dir:-.}/$name" && return 0
+    done
+  done
+  command -v mise >/dev/null 2>&1 && try_python "$(mise where "python@$expected" 2>/dev/null)/bin/python3"
+}
+if ! find_python; then
+  echo "Python $expected (pinned in .python-version) not found on PATH or through mise; install it, for example with: mise install python@$expected" >&2
+  exit 1
+fi
+# Put the pinned interpreter first for every python3 shebang below.
+export PATH="$(dirname "$pinned"):$PATH"
+echo "Using Python $expected at $pinned"
+
 bin/sdlc check
 bin/validate-solution-plans
 bin/check-marketplace
-python3 -m unittest discover -s tests -p 'test_*.py'
+"$pinned" -m unittest discover -s tests -p 'test_*.py'
