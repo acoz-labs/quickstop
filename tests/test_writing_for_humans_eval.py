@@ -4,7 +4,9 @@ Regex graders run as JavaScript regexes inside `claude plugin eval`; these tests
 Python's re and, when node is installed, with node too. `tool_used` graders match `input_match`
 as an unanchored regex against the tool input's JSON text, which these tests reproduce.
 """
+import contextlib
 import importlib.machinery
+import io
 import importlib.util
 import json
 import os
@@ -135,11 +137,17 @@ TOOL_CORPUS = {
     ('audit-typed', 'no-external-action'): (
         [[], [('Bash', {'command': 'git log --oneline main..HEAD'}), ('Bash', {'command': 'git diff main...HEAD'})],
          [('Bash', {'command': 'git show HEAD --stat'})], [('Bash', {'command': 'gh pr view --json body'})],
-         [(READ, {'file_path': '/tmp/git commit notes.md'})]],
+         [(READ, {'file_path': '/tmp/git commit notes.md'})], [('Bash', {'command': 'git -C . log --oneline'})],
+         [('Bash', {'command': 'git --no-pager diff main...HEAD'})], [('Bash', {'command': 'gh api repos/o/r/pulls/1'})],
+         [('Bash', {'command': 'git log --grep commit'})]],
         [[('Bash', {'command': 'git commit -m "tidy"'})], [('Bash', {'command': 'git push origin HEAD'})],
          [('Bash', {'command': 'gh pr edit 3 --body "x"'})], [('Bash', {'command': 'gh pr create --fill'})],
          [('Bash', {'command': 'git rebase -i main'})], [('Bash', {'command': 'git reset --soft HEAD~1'})],
-         [('Bash', {'command': 'gh pr comment 3 -b x'})], [('Bash', {'command': 'git  commit --amend'})]]),
+         [('Bash', {'command': 'gh pr comment 3 -b x'})], [('Bash', {'command': 'git  commit --amend'})],
+         [('Bash', {'command': 'git -C . commit -m x'})], [('Bash', {'command': 'git -c commit.gpgsign=false commit'})],
+         [('Bash', {'command': 'git --no-pager push'})], [('Bash', {'command': 'gh api -X PATCH repos/o/r/pulls/1'})],
+         [('Bash', {'command': 'gh api --method=POST repos/o/r/issues/1/comments'})],
+         [('Bash', {'command': 'gh api repos/o/r/pulls/1 -f body=x'})], [('Bash', {'command': 'gh pr merge 3'})]]),
     ('audit-not-automatic', 'reads-draft'): (
         [[(READ, {'file_path': '/tmp/e/home/cwd/docs/decision-notes.md'})],
          [('Skill', {'skill': 'writing-for-humans:writing-style'}), (READ, {'file_path': 'docs/decision-notes.md'})]],
@@ -408,31 +416,79 @@ def run_item(passed=True, error=None, scored=True, names=('a', 'b')):
                         for name in names]}
 
 
-def result(*items, partial=False, defined=('a', 'b')):
+def case(name, *items, defined=('a', 'b')):
+    return {'name': name, 'graders': [{'name': n} for n in defined], 'arms': {'with': list(items)}}
+
+
+def result(*items, partial=False, defined=('a', 'b'), cases=None):
     return {'claudeVersion': '2.1.316', 'costUsd': 0.5, 'durationSeconds': 80, 'partial': partial,
             'suite': {'modelOverride': 'claude-sonnet-5-5', 'plugins': [{'name': 'writing-for-humans',
                                                                          'version': '0.3.1'}]},
-            'cases': [{'name': 'c', 'graders': [{'name': n} for n in defined], 'arms': {'with': list(items)}}]}
+            'cases': cases if cases is not None else [case('c', *items, defined=defined)]}
+
+
+def expected(runs=1, cases=None, case_filter=None):
+    return {'cases': cases or {'c': ['a', 'b']}, 'runs': runs, 'case_filter': case_filter}
 
 
 class SummaryTests(unittest.TestCase):
     HOST = {'passed': True}
 
+    def summary(self, res, exp=None, host=HOST, changes=()):
+        return we.summarize(res, exp or expected(), host, None, changes)
+
     def test_miss_counting_rule(self):
-        self.assertTrue(we.summarize(result(run_item()), self.HOST)['passed'])
+        self.assertTrue(self.summary(result(run_item()))['passed'])
         # A failed grader, an error, an unscored grader, a missing grader, a partial run or failed host checks fail.
-        self.assertFalse(we.summarize(result(run_item(), run_item(passed=False)), self.HOST)['passed'])
-        self.assertFalse(we.summarize(result(run_item(error='timeout')), self.HOST)['passed'])
-        self.assertFalse(we.summarize(result(run_item(scored=False)), self.HOST)['passed'])
-        self.assertFalse(we.summarize(result(run_item(names=('a',))), self.HOST)['passed'])
-        self.assertFalse(we.summarize(result(run_item(), partial=True), self.HOST)['passed'])
-        self.assertFalse(we.summarize(result(run_item()), {'passed': False})['passed'])
-        self.assertFalse(we.summarize(result(), self.HOST)['passed'])
-        summary = we.summarize(result(run_item(), run_item(passed=False)), self.HOST)
+        self.assertFalse(self.summary(result(run_item(), run_item(passed=False)), expected(runs=2))['passed'])
+        self.assertFalse(self.summary(result(run_item(error='timeout')))['passed'])
+        self.assertFalse(self.summary(result(run_item(scored=False)))['passed'])
+        self.assertFalse(self.summary(result(run_item(names=('a',))))['passed'])
+        self.assertFalse(self.summary(result(run_item(), partial=True))['passed'])
+        self.assertFalse(self.summary(result(run_item()), host={'passed': False})['passed'])
+        self.assertFalse(self.summary(result())['passed'])
+        summary = self.summary(result(run_item(), run_item(passed=False)), expected(runs=2))
         self.assertEqual([row['failed_graders'] for row in summary['runs']], [[], ['b']])
         self.assertEqual(summary['agent_cost_usd'], 0.5)
         self.assertEqual(summary['plugins'], ['writing-for-humans@0.3.1'])
         self.assertIn('| c | 2 | FAIL | b |', we.markdown(summary))
+
+    def test_a_case_missing_from_the_result_fails(self):
+        exp = expected(cases={'c': ['a', 'b'], 'd': ['x']})
+        summary = self.summary(result(run_item()), exp)
+        self.assertFalse(summary['passed'])
+        self.assertEqual(summary['problems'], ['case d is missing from the result'])
+        self.assertIn('Problem: case d is missing from the result', we.markdown(summary))
+
+    def test_a_grader_missing_from_the_result_and_the_case_fails(self):
+        # The result's own grader list dropped `b` too, so only the on-disk suite knows about it.
+        summary = self.summary(result(run_item(names=('a',)), defined=('a',)))
+        self.assertFalse(summary['passed'])
+        self.assertEqual(summary['runs'][0]['failed_graders'], ['b'])
+
+    def test_a_short_run_count_fails(self):
+        summary = self.summary(result(run_item(), run_item()), expected(runs=3))
+        self.assertFalse(summary['passed'])
+        self.assertEqual(summary['problems'], ['case c has 2 runs, expected 3'])
+
+    def test_a_case_run_is_never_a_suite_pass(self):
+        summary = self.summary(result(run_item()), expected(case_filter='c'))
+        self.assertFalse(summary['passed'])
+        self.assertEqual(summary['problems'], ['subset run (--case c): never a suite pass'])
+
+    def test_an_unexpected_case_and_run_changes_fail(self):
+        res = result(cases=[case('c', run_item()), case('extra', run_item())])
+        self.assertEqual(self.summary(res)['problems'], ['case extra is not in the suite'])
+        summary = self.summary(result(run_item()), changes=['~/.claude/settings.json changed during the run'])
+        self.assertFalse(summary['passed'])
+
+    def test_expected_suite_lists_every_case_and_its_grader_files(self):
+        exp = we.expected_suite(SUITE, 3, None)
+        self.assertEqual(exp['runs'], 3)
+        self.assertEqual(exp['cases'], {
+            'audit-not-automatic': ['not-invoked', 'reads-draft', 'skill-offered'],
+            'audit-typed': ['loads', 'names-draft', 'no-external-action', 'reads-artifacts-reference',
+                            'reads-output-style', 'report-structure']})
 
 
 class RunnerTests(unittest.TestCase):
@@ -492,6 +548,63 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(we.tree_digest(self.base), digest)
         (self.base / 'a.txt').write_text('b')
         self.assertNotEqual(we.tree_digest(self.base), digest)
+
+
+class RunTests(unittest.TestCase):
+    """run() end to end with the host check and `claude plugin eval` replaced; nothing is spent."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name).resolve()
+        self.home = self.base / 'home'
+        (self.home / '.claude').mkdir(parents=True)
+        (self.home / '.claude/settings.json').write_text('{}\n')
+        self.tmp = self.base / 'tmp'
+        self.tmp.mkdir()
+
+    def run_eval(self, case=None, touch_config=False):
+        out = self.base / 'out'
+        suite = we.expected_suite(SUITE, 1)
+        real_run = subprocess.run
+
+        def fake_eval(command, **kwargs):
+            if command[:3] != ['claude', 'plugin', 'eval']:
+                return real_run(command, **kwargs)
+            names = [case] if case else list(suite['cases'])
+            res = result(cases=[{'name': name, 'graders': [{'name': g} for g in suite['cases'][name]],
+                                 'arms': {'with': [run_item(names=tuple(suite['cases'][name]))]}} for name in names])
+            Path(command[command.index('--json') + 1]).write_text(json.dumps(res))
+            if touch_config:
+                (self.home / '.claude/settings.json').write_text('{"enabledPlugins": {}}\n')
+            return subprocess.CompletedProcess(command, 0)
+
+        args = we.argparse.Namespace(plugin=None, output_dir=str(out), keep_scratch=False, runs=1, case=case,
+                                     model='claude-sonnet-5-5', max_cost_usd=2.0, keep_temp=False, dry_run=False)
+        with mock.patch.dict(os.environ, {'HOME': str(self.home), 'TMPDIR': str(self.tmp)}), \
+                mock.patch.object(tempfile, 'tempdir', None), \
+                mock.patch.object(we, 'host_check', return_value={'passed': True, 'checks': [], 'commands': []}), \
+                mock.patch.object(we.subprocess, 'run', side_effect=fake_eval), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = we.run(args)
+        self.assertEqual(list(self.tmp.iterdir()), [])
+        return code, json.loads((out / 'summary.json').read_text()), out
+
+    def test_a_complete_pass_passes_and_records_the_suite(self):
+        code, summary, out = self.run_eval()
+        self.assertEqual((code, summary['passed'], summary['problems']), (0, True, []))
+        self.assertEqual(json.loads((out / 'suite.json').read_text())['runs'], 1)
+        self.assertIn('tree: ', (out / 'CANDIDATE.txt').read_text())
+
+    def test_a_case_run_exits_nonzero(self):
+        code, summary, _ = self.run_eval(case='audit-typed')
+        self.assertEqual(code, 1)
+        self.assertIn('subset run (--case audit-typed): never a suite pass', summary['problems'])
+
+    def test_a_real_config_change_during_the_eval_fails(self):
+        code, summary, _ = self.run_eval(touch_config=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(summary['problems'], ['~/.claude/settings.json changed during the run'])
 
 
 class ScaffoldTests(unittest.TestCase):
