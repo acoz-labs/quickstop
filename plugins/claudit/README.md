@@ -81,26 +81,25 @@ and the diffs. The rules:
   reference material, not a team procedure. A skill elsewhere (`.cursor/skills/`,
   `.agents/skills/`) doesn't count, so the doc is still a procedure with no project
   skill.
-- **Test data isn't configuration.** Directory names are judged whole. A name is
-  split into words at punctuation and case changes, compared case-insensitively,
-  with trailing digits dropped. `test` or `tests` (also `__tests__`, and with unit,
-  integration, functional, acceptance, regression, smoke or system: `unit-tests`) is
-  a test directory. A name is a data directory when every word is one of fixture(s),
-  testdata, golden(s), snapshot(s), cassette(s), eval(s), grader(s), test(s), data,
-  report(s) or result(s), and at least one is not data, report(s) or result(s):
-  `fixtures`, `evals`, `__snapshots__`, `TestData`, `test_reports` and `eval-results`
-  count; `reports`, `pr-reports`, `eval-kit` and `test-runner` don't. Files below a
-  test or data directory, or inside an eval case (a directory with `case.yaml`), are
-  data. They are never read as procedures, plugin manifests, typed-code markers or
-  secrets. A plugin root (a directory holding `.claude-plugin/` or `.codex-plugin/`)
-  is never data because of its own name, symlinks are judged by their target too,
-  and a test directory's own `CLAUDE.md` is still an instruction file. Anything else
-  the tests load can be dismissed.
+- **Test data isn't configuration.** A directory name is split into words at
+  punctuation and case changes, compared case-insensitively, with trailing digits
+  dropped. A name with test or tests as a whole word is a test directory (`tests`,
+  `e2e-tests`, `tests_old`, `TestCases`); one with fixture(s), testdata, golden(s),
+  snapshot(s), cassette(s), eval(s) or grader(s) is a data directory (`fixtures`,
+  `__snapshots__`, `golden-files`, `evals-v2`). A word inside a word doesn't count
+  (`testimonials`, `attest`, `latest`), and reports, results or data alone aren't
+  data (`docs/reports` is scanned). Files below a test or data directory, or inside an
+  eval case (a directory with `case.yaml`), are data. They are never read as
+  procedures, plugin manifests, typed-code markers or secrets. A plugin root (a
+  directory holding `.claude-plugin/` or `.codex-plugin/`) is never data because of its
+  own name, so `plugins/test-runner` is scanned. Symlinks are judged by their target
+  too, and a test directory's own `CLAUDE.md` is still an instruction file. Anything
+  else the tests load can be dismissed.
 - **Documented declines.** Claudit reads the loaded team instructions, the Markdown
-  files they link and the README. A clause declines a feature (hooks, plugin evals,
+  files they link and the README. A sentence declines a feature (hooks, plugin evals,
   plugin validation, pre-approved commands, procedure skills, code intelligence) only
   when the feature itself is declined, named as a bare noun with at most an article,
-  owner or kind ("Claude Code hooks", "the allowlist", "push hooks"):
+  owner or kind ("Claude Code hooks", "the allowlist", "Stop hooks"):
   - as the subject of retired, removed, dropped, declined, abandoned, phased out or
     disabled ("Claude Code hooks were retired", "Hooks: retired");
   - as the object of the same verbs, decided against, chose not to use or add, or
@@ -108,13 +107,18 @@ and the diffs. The rules:
   - or as a deliberate absence: "no" or "without" the feature in a clause that says
     deliberately, intentionally, on purpose, by design or by choice.
 
-  The feature must end the clause, or be followed only by "in this repository",
-  "here", a year, "in favour of", "because" or "since". So a specific instance ("the
+  After the decline (and an optional "in this repository" or "here"), the sentence
+  must end or give a reason: "because", "since", "in favour of", ", so", ", and
+  replaced them with", "by design", or a clause after ";" or ":". A sentence with an
+  exception, limit, partial scope, time limit or reversal anywhere (except, apart
+  from, but, only, for now, temporarily, then, back, still, some, most, re-add,
+  enable, replaced by, a new one) is never a decline. So a specific instance ("the
   old SessionStart hook was removed"), an item in it ("we removed `rm` from the
-  allowlist") or a scope ("disabled in CI", "dropped from CI", "secrets in hooks")
-  is not a decline. Sentences that are questions, conditional, future, negated or
-  reversed ("if", "will be", "weren't removed", "restored") don't count, nor do
-  sentences about another tool (Git hooks, Cursor skills) that don't name Claude.
+  allowlist"), a scope ("disabled in CI", "dropped from CI", "secrets in hooks") or a
+  limit ("removed, for now") is not a decline, and the quote is the whole sentence.
+  Questions, conditionals, future, negated or reversed sentences ("if", "will be",
+  "weren't removed", "restored") don't count, nor do sentences about another tool
+  (Git or push hooks, Cursor skills) that don't name Claude.
 
 ## How it works
 

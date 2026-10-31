@@ -26,17 +26,14 @@ MAX_READ = 512 * 1024
 SKIP_DIRS = {'.git', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '.venv', 'venv',
              'target', '.tox', '.mypy_cache', '.pytest_cache', 'coverage', '.next'}
 DEPENDENCY_DIRS = {'node_modules', 'vendor', 'venv'}  # never skill directories without a SKILL.md
-# Test data is judged by whole directory names. A name is split into words at punctuation and case changes,
-# lower-cased, trailing digits dropped. `test`/`tests` (also `__tests__`, `Tests2`, `unit-tests`) is a test
-# directory. A name
-# is a data directory when every word is a data, test or record word and at least one is a data or test word:
-# `fixtures`, `__snapshots__`, `testdata`, `TestData`, `test_reports`, `eval-results`. `reports`, `pr-reports`,
-# `eval-kit` and `test-runner` are not.
+# Test data is judged by the words of a directory name: split at punctuation and case changes, lower-cased,
+# trailing digits dropped. A name with a test word as a whole word is a test directory (`tests`, `e2e-tests`,
+# `tests_old`, `TestCases`); one with a data word is a data directory (`fixtures`, `__snapshots__`, `golden-files`,
+# `evals-v2`). A word inside a word doesn't count (`testimonials`, `attest`, `latest`), and record words alone
+# (`reports`, `results`, `data`) aren't data. A plugin root is exempt (see PLUGIN_DIRS).
 DATA_WORDS = {'fixture', 'fixtures', 'testdata', 'golden', 'goldens', 'snapshot', 'snapshots', 'cassette', 'cassettes',
               'eval', 'evals', 'grader', 'graders'}
 TEST_WORDS = {'test', 'tests'}
-TEST_KINDS = {'unit', 'integration', 'functional', 'acceptance', 'regression', 'smoke', 'system'}  # `unit-tests`
-RECORD_WORDS = {'data', 'report', 'reports', 'result', 'results'}
 PLUGIN_DIRS = ('.claude-plugin', '.codex-plugin')  # a directory holding one is a plugin root, never data by name
 EVAL_CASE_FILES = ('case.yaml', 'case.yml')  # a directory holding one is an eval case: everything below is data
 STOP_EVENTS = ('Stop', 'SubagentStop', 'TaskCompleted')
@@ -108,34 +105,41 @@ DECLINABLE = (
 )
 # Words that may qualify the feature without making it an instance: articles, owners and the kind of hook.
 QUALIFIER = (r'(?:the|all|any|our|its|this|these|a|an|repository|repo|project|claude|code|claude-code|plugin|'
-             r'procedure|agent|stop|push|shell-match|session)')
+             r'procedure|agent|stop|push|shell-match)')
 DECLINED = r'(?:retired|removed|dropped|declined|abandoned|phased out|disabled)'
-# Where a decline may say it applies: the whole project, a time or a reason. Anything else scopes it.
-DECLINE_TAIL = (r'(?=\s*$|\s*[,(—–]|\s+(?:in this (?:repository|repo|project)|here|for good|in favou?r of|'
-                r'because|since|years ago|(?:in|since) [0-9]{4}|and replaced)\b)')
 DELIBERATE = r'(?:deliberately|intentionally|on purpose|by design|by choice)'
+# What may follow a decline, and nothing else: an optional project scope, then the end of the sentence, a reason
+# ("because", "since", "in favour of", ", so", ", and replaced them with", "by design") or a ";" or ":" clause.
+DECLINE_TAIL = (r'(?:\s+(?:in this (?:repository|repo|project)|here))?(?:\s*$|,?\s+(?:because|since|in favou?r of)\s'
+                r'|,\s+so\s|,\s+and replaced (?:them|it) with\s|,?\s+%s\s*$|\s*[;:]\s)' % DELIBERATE)
+# An exception, limit, partial scope, time limit or reversal anywhere in the sentence means it is no decline.
+DECLINE_LIMIT = re.compile(r'\b(?:except\w*|apart from|other than|but|only|for now|temporar\w*|for the time being|'
+                           r'then|back|re-?add\w*|re-?enabl\w*|enabl\w*|replaced by|being (?:written|rebuilt|reworked)|'
+                           r'new (?:ones?|suite|set|version)|moving (?:them|it)|moved (?:them|it)|keeps? (?:its|their) own|'
+                           r'still|a few|some|several|one of|most|mostly|partly|partially|yet)\b', re.I)
 # Sentences that only consider, plan or reverse a decline never count.
 UNSURE = re.compile(r'\?|\b(?:if|unless|whether|would|could|might|maybe|perhaps|until|consider\w*|todo)\b'
                     r'|\b(?:will|to|going to) be\b|\b(?:restored|reinstated|re-?enabled|re-?added|brought back|again)\b'
                     r"|(?:\b(?:not|never|no longer)|n['’]t)\s+(?:been\s+|be\s+)?"
                     r'(?:retired|removed|dropped|declined|disabled|abandoned)\b', re.I)
-# A sentence about another tool's hooks, skills or evals declines nothing in Claude Code unless it names Claude.
-OTHER_TOOLS = re.compile(r'\b(?:git|pre-commit|pre-push|commit-msg|husky|lefthook|webhooks?|cursor|codex|copilot|'
+# A sentence about another tool's hooks, skills or evals (push hooks are Git's) declines nothing in Claude Code
+# unless it names Claude.
+OTHER_TOOLS = re.compile(r'\b(?:git|push|pre-commit|pre-push|commit-msg|husky|lefthook|webhooks?|cursor|codex|copilot|'
                          r'windsurf|gemini|aider|eslint|prettier)\b', re.I)
 CLAUDE_NAMED = re.compile(r'\bclaude\b', re.I)
 
 
 def decline_forms(feature):
-    """The three decline forms for one feature, each matched against a whole clause.
+    """The three decline forms for one feature, each matched against a whole sentence.
 
-    1. The feature is the subject: "Claude Code hooks were retired", "Push hooks and Claude hooks have been removed".
+    1. The feature is the subject: "Claude Code hooks were retired", "Hooks: retired".
     2. The feature is the object: "We retired hooks", "We decided against the allowlist".
     3. A deliberate absence: "deliberately has no eval campaign", "no hooks, by design".
-    Each ends at the feature or a DECLINE_TAIL, so a scoped or specific remark is not a decline.
+    Each is followed only by a DECLINE_TAIL, so a scoped, specific or limited remark is not a decline.
     """
     noun = r'(?:%s\s+){0,3}(?:%s)' % (QUALIFIER, feature)
     subject = r'^(?:here,?\s+|in this (?:repository|repo|project),?\s+)?%s(?:\s+and\s+%s)*' % (noun, noun)
-    return [re.compile(subject + r'\s*(?::\s*|\s+(?:(?:have|has|had)\s+been|were|was|are|is|stay|stays|remain|'
+    return [re.compile(subject + r'(?:\s*:\s*|\s+(?:(?:have|has|had)\s+been|were|was|are|is|stay|stays|remain|'
                        r'remains)\s+(?:%s\s+|permanently\s+)?)%s\b%s' % (DELIBERATE, DECLINED, DECLINE_TAIL), re.I),
             re.compile(r"^(?:we|this (?:repository|repo|project)|the project|maintainers)\s+(?:have\s+|deliberately\s+)?"
                        r"(?:retired|removed|dropped|declined|abandoned|phased out|disabled|decided against(?: using| adding)?"
@@ -381,13 +385,9 @@ def dir_words(segment):
 
 
 def dir_kind(name):
-    """'test' for a test directory, 'data' for a data directory (see DATA_WORDS), else None."""
+    """'data' for a directory name with a data word, 'test' for one with a test word, else None."""
     words = dir_words(name)
-    if words & TEST_WORDS and words <= TEST_WORDS | TEST_KINDS:
-        return 'test'
-    if words and words <= DATA_WORDS | TEST_WORDS | RECORD_WORDS and words & (DATA_WORDS | TEST_WORDS):
-        return 'data'
-    return None
+    return 'data' if words & DATA_WORDS else 'test' if words & TEST_WORDS else None
 
 
 def data_path(rel, nested_instruction=False, eval_cases=(), plugin_roots=()):
@@ -866,17 +866,12 @@ class Scan:
             for sentence, line_at in sentences(text):
                 if UNSURE.search(sentence) or (OTHER_TOOLS.search(sentence) and not CLAUDE_NAMED.search(sentence)):
                     continue
-                # The whole sentence ("Hooks: retired.") and each clause ("X were retired; Y is the gate").
-                parts, offset = [(0, sentence)], 0
-                for clause in re.split(r'(?<=[;:])\s+', sentence):
-                    offset = sentence.index(clause, offset)
-                    parts.append((offset, clause))
-                for start, part in parts:
-                    for feature, label, noun, forms in DECLINE_FORMS:
-                        if feature not in found and any(form.search(part.rstrip(';:.!')) for form in forms):
-                            found[feature] = {'feature': feature, 'label': label, 'path': path,
-                                              'line': line_at(start + noun.search(part).start()),
-                                              'quote': sentence[:240]}
+                if DECLINE_LIMIT.search(sentence):
+                    continue
+                for feature, label, noun, forms in DECLINE_FORMS:
+                    if feature not in found and any(form.search(sentence.rstrip('.!')) for form in forms):
+                        found[feature] = {'feature': feature, 'label': label, 'path': path,
+                                          'line': line_at(noun.search(sentence).start()), 'quote': sentence[:400]}
         return [found[feature] for feature, _, _ in DECLINABLE if feature in found]
 
     # -- correctness checks -----------------------------------------------
@@ -1424,7 +1419,7 @@ def sentences(text):
             joined += ' ' if joined else ''
             marks.append((len(joined), number))
             joined += body
-        for match in re.finditer(r'(?:[^.!?;]|[.!?;](?=\S))+[.!?;]?', joined):
+        for match in re.finditer(r'(?:[^.!?]|[.!?](?=\S))+[.!?]?', joined):
             start = match.start() + len(match.group()) - len(match.group().lstrip())
             sentence = match.group().strip()
             if sentence:
