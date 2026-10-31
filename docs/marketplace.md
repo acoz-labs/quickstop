@@ -124,7 +124,7 @@ The marketplace generator generates indexes, not plugin code or behavior.
 
 ```sh
 bin/check-marketplace --write
-bin/check-marketplace
+bin/check-marketplace --base origin/main
 bin/check-marketplace --base PRE_CHANGE_SHA
 bin/ci
 ```
