@@ -1,0 +1,400 @@
+#!/usr/bin/env python3
+"""Run the Writing for Humans regression check: free host checks, then the `claude plugin eval` suite."""
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit('writing-for-humans-eval requires Python 3.11+; put the pinned interpreter first in PATH')
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parent.parent
+SUITE = ROOT / 'evals/writing-for-humans'
+PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+NAME = 'writing-for-humans'
+STYLE = f'{NAME}:{NAME}'
+SKILLS = (f'{NAME}:writing-audit', f'{NAME}:writing-style')
+MARKETPLACE = 'wfh-eval'
+# Real configuration the host check must leave alone; it runs with HOME and CLAUDE_CONFIG_DIR in a temp dir.
+REAL_CONFIG = ('.claude/settings.json', '.claude.json')
+
+
+class Failure(Exception):
+    pass
+
+
+def positive_cost(value):
+    cost = float(value)
+    if not (math.isfinite(cost) and cost > 0):
+        raise argparse.ArgumentTypeError('cost ceiling must be greater than 0')
+    return cost
+
+
+def positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError('must be at least 1')
+    return number
+
+
+def tree_digest(root):
+    """Digest of every file's path and bytes under root, ignoring bytecode caches."""
+    digest = hashlib.sha256()
+    for path in sorted(Path(root).rglob('*')):
+        if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
+            digest.update(str(path.relative_to(root)).encode() + b'\0' + path.read_bytes() + b'\0')
+    return digest.hexdigest()
+
+
+def file_digest(path):
+    path = Path(path)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def copy_plugin(source, target):
+    source = Path(source).resolve()
+    manifest = source / '.claude-plugin/plugin.json'
+    if not manifest.is_file():
+        raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {source}')
+    links = [path for path in source.rglob('*') if path.is_symlink()]
+    if links:
+        raise Failure(f'plugin contains symlinks: {links[0].relative_to(source)}')
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    return json.loads(manifest.read_text())
+
+
+# Host checks: model-free `claude` commands in an isolated HOME and CLAUDE_CONFIG_DIR.
+
+def parse_stream(text):
+    records = []
+    for line in text.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def first(records, kind, subtype=None):
+    return next((r for r in records if r.get('type') == kind and (subtype is None or r.get('subtype') == subtype)),
+                {})
+
+
+def grade_load(records, version):
+    """Init record lists the installed plugin at the manifest version and both skills."""
+    init = first(records, 'system', 'init')
+    plugins = [p for p in init.get('plugins') or [] if isinstance(p, dict) and p.get('name') == NAME]
+    skills = init.get('skills') or []
+    checks = [('plugin-listed', bool(plugins), f'plugins: {[p.get("source") for p in plugins]}'),
+              ('plugin-version', any(p.get('version') == version for p in plugins),
+               f'expected {version}, found {[p.get("version") for p in plugins]}'),
+              ('plugin-installed', any(p.get('source') == f'{NAME}@{MARKETPLACE}' for p in plugins),
+               f'expected source {NAME}@{MARKETPLACE}')]
+    checks += [(f'skill-{skill.split(":")[1]}', skill in skills, f'{skill} in init skills') for skill in SKILLS]
+    return checks
+
+
+def grade_select(records, settings_text):
+    result = first(records, 'result')
+    try:
+        selected = json.loads(settings_text).get('outputStyle') if settings_text else None
+    except (ValueError, AttributeError):
+        selected = None
+    return [('style-select-command', result.get('result') == f'Output style set to {STYLE}',
+             f'result: {result.get("result")!r}'),
+            ('style-saved', selected == STYLE, f'.claude/settings.local.json outputStyle: {selected!r}')]
+
+
+def grade_fresh(records):
+    init = first(records, 'system', 'init')
+    return [('style-active-fresh-session', init.get('output_style') == STYLE,
+             f'init output_style: {init.get("output_style")!r}')]
+
+
+def grade_unknown(records, settings_exists):
+    result = first(records, 'result')
+    text = str(result.get('result') or '')
+    return [('style-unknown-refused', text.startswith(f'Unknown output style "{NAME}:no-such-style"')
+             and not settings_exists, f'result: {text!r}; settings written: {settings_exists}')]
+
+
+def model_free(records):
+    """Every host command must finish without a model call."""
+    result = first(records, 'result')
+    return result.get('total_cost_usd') == 0
+
+
+def host_check(plugin_source, claude='claude'):
+    """Install the plugin copy from a temp marketplace and select its style; costs nothing."""
+    claude = shutil.which(claude) or claude
+    real_home = Path.home()
+    before = {name: file_digest(real_home / name) for name in REAL_CONFIG}
+    temp = Path(tempfile.mkdtemp(prefix='wfh-eval-host-')).resolve()
+    checks, commands = [], []
+    try:
+        home, config, market, workspace = (temp / name for name in ('home', 'config', 'market', 'workspace'))
+        for path in (home, config, market / '.claude-plugin', workspace):
+            path.mkdir(parents=True)
+        manifest = copy_plugin(plugin_source, market / NAME)
+        (market / '.claude-plugin/marketplace.json').write_text(json.dumps(
+            {'name': MARKETPLACE, 'owner': {'name': 'writing-for-humans-eval'},
+             'plugins': [{'name': NAME, 'source': f'./{NAME}'}]}, indent=2) + '\n')
+        env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR=str(config), GIT_CONFIG_NOSYSTEM='1',
+                   GIT_CONFIG_GLOBAL='/dev/null')
+        for key in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'):
+            env.pop(key, None)
+
+        def call(*args, cwd=temp):
+            command = [claude, *args]
+            commands.append(shlex.join(args))
+            done = subprocess.run(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                  text=True, timeout=120)
+            return done
+
+        def session(prompt):
+            done = call('-p', prompt, '--strict-mcp-config', '--output-format', 'stream-json', '--verbose',
+                        cwd=workspace)
+            records = parse_stream(done.stdout)
+            if done.returncode or not model_free(records):
+                checks.append((f'model-free: {prompt}', False,
+                               f'exit {done.returncode}; stderr {done.stderr[-300:]!r}'))
+            return records
+
+        for args in (('plugin', 'marketplace', 'add', str(market)), ('plugin', 'install', f'{NAME}@{MARKETPLACE}')):
+            done = call(*args)
+            checks.append((' '.join(args[:2]), done.returncode == 0, (done.stdout + done.stderr).strip()[-300:]))
+        subprocess.run(['git', 'init', '-q'], cwd=workspace, env=env, check=True)
+        settings = workspace / '.claude/settings.local.json'
+        checks += grade_unknown(session(f'/output-style {NAME}:no-such-style'), settings.exists())
+        records = session(f'/output-style {STYLE}')
+        checks += grade_select(records, settings.read_text() if settings.is_file() else None)
+        records = session('/output-style')
+        checks += grade_load(records, manifest.get('version'))
+        checks += grade_fresh(records)
+    finally:
+        shutil.rmtree(temp, ignore_errors=True)
+    after = {name: file_digest(real_home / name) for name in REAL_CONFIG}
+    for name in REAL_CONFIG:
+        checks.append((f'real-config-unchanged: ~/{name}', before[name] == after[name],
+                       'compared by SHA-256 before and after; other live Claude sessions also write ~/.claude.json'))
+    return {'passed': all(ok for _, ok, _ in checks), 'commands': commands,
+            'checks': [{'name': name, 'passed': ok, 'detail': detail} for name, ok, detail in checks]}
+
+
+def host_table(host):
+    lines = ['| Host check | Result | Detail |', '|---|---|---|']
+    for check in host['checks']:
+        detail = check['detail'].replace('|', '\\|').replace('\n', ' ')
+        lines.append(f"| {check['name']} | {'pass' if check['passed'] else 'FAIL'} | {detail} |")
+    return '\n'.join(lines)
+
+
+# Model-run cases via `claude plugin eval`.
+
+def copy_suite(target):
+    shutil.copytree(SUITE, target, ignore=lambda directory, names: {
+        name for name in names
+        if name == '__pycache__' or (Path(directory) == SUITE and name == 'results')})
+    cases = sorted(path.parent.name for path in target.glob('cases/*/case.yaml'))
+    if not cases:
+        raise Failure(f'no cases found under {SUITE}/cases')
+    return cases
+
+
+def eval_command(plugin, args, out):
+    command = ['claude', 'plugin', 'eval', str(plugin), '--model', args.model,
+               '--max-cost-usd', str(args.max_cost_usd), '--runs', str(args.runs), '--trust-plugin', '--scaffold',
+               '--no-publish', '--ablation', 'none', '--threshold', '0', '--allow-tools', 'Bash',
+               '--json', str(out / 'result.json'), '--output-dir', str(out)]
+    if args.case:
+        command += ['--case', args.case]
+    if args.keep_temp:
+        command.append('--keep-temp')
+    return command
+
+
+def git(*args):
+    done = subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def candidate(plugin_source):
+    plugin_rel = os.path.relpath(Path(plugin_source).resolve(), ROOT)
+    return '\n'.join([
+        f'head: {git("rev-parse", "HEAD")}',
+        f'tree: {git("rev-parse", "HEAD^{tree}")}',
+        f'plugin tree ({plugin_rel} at HEAD): {git("rev-parse", f"HEAD:{plugin_rel}")}',
+        f'plugin bytes digest (working tree): {tree_digest(plugin_source)}',
+        f'working tree clean: {not git("status", "--porcelain")}',
+    ]) + '\n'
+
+
+def default_output():
+    stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return SUITE / 'results' / stamp
+
+
+def run(args):
+    source = Path(args.plugin).resolve() if args.plugin else PLUGIN
+    out = Path(args.output_dir).resolve() if args.output_dir else default_output()
+    digest = tree_digest(source)
+    scratch = Path(tempfile.mkdtemp(prefix='wfh-eval-')).resolve()
+    keep = args.keep_scratch
+    try:
+        plugin = scratch / 'plugin'
+        copy_plugin(source, plugin)
+        if (plugin / 'evals').exists():
+            raise Failure('the plugin ships its own evals/; this runner would replace them')
+        cases = copy_suite(plugin / 'evals')
+        command = eval_command(plugin, args, out)
+        print(f'Scratch: {scratch}')
+        print(f'Cases: {", ".join(cases)}')
+        print(f'Command: {shlex.join(command)}')
+        if args.dry_run:
+            keep = True
+            return 0
+        out.mkdir(parents=True, exist_ok=True)
+        (out / 'CANDIDATE.txt').write_text(candidate(source))
+        host = host_check(source)
+        (out / 'host.json').write_text(json.dumps(host, indent=2) + '\n')
+        print(host_table(host))
+        if not host['passed']:
+            print('Host checks failed; the paid eval was not started.', file=sys.stderr)
+            return 1
+        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL).returncode
+        result = out / 'result.json'
+        if not result.is_file():
+            print(f'No result.json was written to {out}', file=sys.stderr)
+            return code or 1
+        summary = summarize(load_result(result), host, args.model)
+        if tree_digest(source) != digest:
+            summary['passed'] = False
+            summary['plugin_bytes_changed'] = True
+        (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+        print(markdown(summary))
+        print(f'Summary: {out / "summary.json"}')
+        if code == 2:
+            print('Cost ceiling reached (--max-cost-usd): the eval stopped early and its results are PARTIAL.',
+                  file=sys.stderr)
+            return 2
+        if code:
+            print(f'claude plugin eval exited with status {code}', file=sys.stderr)
+            return code
+        return 0 if summary['passed'] else 1
+    finally:
+        if not keep:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+def number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+
+def case_rows(result):
+    """One row per case run. A run passes only if it has no error and every defined grader scored and passed."""
+    rows = []
+    for case in result.get('cases') or []:
+        defined = sorted({str(g.get('name')) for g in case.get('graders') or [] if isinstance(g, dict)})
+        for index, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
+            graded = {str(g.get('name')): g for g in item.get('graders') or []}
+            names = defined or sorted(graded)
+            failed = [name for name in names
+                      if not (graded.get(name, {}).get('scored') is not False
+                              and graded.get(name, {}).get('passed') is True)]
+            error = item.get('error')
+            rows.append({'case': case.get('name'), 'run': index, 'passed': not error and not failed and bool(names),
+                         'failed_graders': failed, 'error': error, 'cost_usd': round(number(item.get('costUsd')), 6),
+                         'wall_seconds': number(item.get('durationSeconds')), 'turns': item.get('turns')})
+    return rows
+
+
+def summarize(result, host=None, model=None):
+    rows = case_rows(result)
+    suite = result.get('suite') if isinstance(result.get('suite'), dict) else {}
+    plugins = suite.get('plugins') if isinstance(suite.get('plugins'), list) else []
+    passed = (bool(rows) and all(row['passed'] for row in rows) and not result.get('partial')
+              and (host is None or host.get('passed') is True))
+    return {'passed': passed,
+            'model': suite.get('modelOverride') or result.get('model') or model,
+            'claude_version': result.get('claudeVersion'),
+            'plugins': sorted(f"{p.get('name')}@{p.get('version')}" for p in plugins if isinstance(p, dict)),
+            'host_passed': None if host is None else host.get('passed'),
+            'partial': result.get('partial'),
+            'cost_usd': round(number(result.get('costUsd')), 6),
+            'agent_cost_usd': round(sum(row['cost_usd'] for row in rows), 6),
+            'wall_seconds': number(result.get('durationSeconds')),
+            'runs': rows}
+
+
+def markdown(summary):
+    host = {True: 'pass', False: 'FAIL', None: '-'}[summary['host_passed']]
+    lines = [f"Suite: {'PASS' if summary['passed'] else 'FAIL'} | host checks: {host} | model: {summary['model']} "
+             f"| plugins: {', '.join(summary['plugins']) or '-'} | claude {summary['claude_version']} "
+             f"| cost ${summary['cost_usd']:.4f} | wall {summary['wall_seconds']} s | partial: {summary['partial']}",
+             '', '| Case | Run | Result | Failed graders | Error | Agent $ | Wall s | Turns |',
+             '|---|---|---|---|---|---|---|---|']
+    for row in summary['runs']:
+        lines.append(f"| {row['case']} | {row['run']} | {'pass' if row['passed'] else 'FAIL'} "
+                     f"| {', '.join(row['failed_graders']) or '-'} | {row['error'] or '-'} "
+                     f"| {row['cost_usd']:.4f} | {row['wall_seconds']} | {row['turns']} |")
+    return '\n'.join(lines)
+
+
+def load_result(path):
+    try:
+        result = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        raise Failure(f'cannot read eval result {path}: {exc}') from exc
+    if not isinstance(result, dict):
+        raise Failure(f'eval result is not a JSON object: {path}')
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('host', help='run only the free install and style-selection checks')
+    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p = sub.add_parser('run', help='host checks, then the eval suite in a scratch plugin copy')
+    p.add_argument('--model', required=True)
+    p.add_argument('--max-cost-usd', type=positive_cost, required=True)
+    p.add_argument('--runs', type=positive_int, default=1)
+    p.add_argument('--case', help='case name glob passed to claude plugin eval')
+    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--output-dir', help='default evals/writing-for-humans/results/<UTC timestamp>')
+    p.add_argument('--keep-scratch', action='store_true')
+    p.add_argument('--keep-temp', action='store_true', help="keep each run's temp dir and trace")
+    p.add_argument('--dry-run', action='store_true', help='assemble the scratch, print the command, run nothing')
+    p = sub.add_parser('summarize', help='reprint a run: summarize <result dir>')
+    p.add_argument('result_dir')
+    args = parser.parse_args()
+    try:
+        if args.command == 'host':
+            host = host_check(Path(args.plugin).resolve() if args.plugin else PLUGIN)
+            print(host_table(host))
+            return 0 if host['passed'] else 1
+        if args.command == 'run':
+            return run(args)
+        directory = Path(args.result_dir)
+        host = json.loads((directory / 'host.json').read_text()) if (directory / 'host.json').is_file() else None
+        summary = summarize(load_result(directory / 'result.json'), host)
+        print(markdown(summary))
+        return 0 if summary['passed'] else 1
+    except (Failure, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+        print(f'writing-for-humans-eval: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
