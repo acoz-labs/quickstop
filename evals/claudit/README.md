@@ -118,10 +118,12 @@ bin/claudit-eval headless --repo https://github.com/acoz-labs/quickstop.git --sh
 
 Each `run<N>/` keeps `report.md`, the raw JSON, stderr, the scan of the same clone
 and `meta.json` with the exact command line, commit, Claude Code version, cost,
-wall time and the script checks: the report's plan, grade letters and footer
-match the scan, every grade below A names its items, the scan raised nothing on
-test data, optional procedures aren't planned, and declines are listed with their
-`path:line`. `summary.json` gives the medians. `grade --report R --scan S` runs the
+wall time and the script checks. Of the report: its plan, grade letters and footer
+match the scan, every grade below A names its items, no optional procedure's path
+appears under Top changes, and declines are listed with their `path:line`. Of the
+scan itself (`scan_no_test_data_findings`): it raised nothing on test data, so a
+test-data finding outside Top changes can only come from the model and is not
+script-checked. `summary.json` gives the medians. `grade --report R --scan S` runs the
 same checks on any saved report.
 
 ## Sandbox limits

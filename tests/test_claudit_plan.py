@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_claudit import Project, cl  # noqa: E402
@@ -31,15 +32,32 @@ class DataPaths(unittest.TestCase):
                     'test/fixtures/a.md', 'src/__fixtures__/a.md', 'pkg/TestData/a.md', 'pkg/testdata/a.md',
                     'a/Fixtures2/x.md', 'a/.fixtures/x.md', 'a/test-data/x.md', 'a/test_reports/x.md',
                     'a/snapshots/x.md', 'a/__snapshots__/x.md', 'a/golden/x.md', 'a/Goldens/x.md',
-                    'a/cassettes/x.md', 'a/results/x.md', 'a/Reports/x.md', 'a/b/c/d/e/fixtures/x.md',
-                    'TESTS/x.md', 'a/evalCases/x.md', 'a/gate-reports-2026/x.md', 'Tests/unit/x.md'):
+                    'a/cassettes/x.md', 'a/b/c/d/e/fixtures/x.md', 'TESTS/x.md', 'Tests/unit/x.md',
+                    # Bypass pass, round 1: compounds of data, test and record words, and kinds of test directory.
+                    'a/unit-tests/x.md', 'a/integration_tests/x.md', 'a/test-results/x.md', 'a/eval-results/x.md',
+                    'a/golden-reports/x.md', 'a/TestFixtures/x.md', 'a/FIXTURES/x.md', 'a/__tests__/x.md',
+                    'a/smoke_tests2/x.md', 'a/fixture-data/x.md'):
             self.assertTrue(cl.data_path(rel), rel)
 
     def test_neighbouring_names_are_not_data(self):
         for rel in ('docs/operations/sdlc.md', 'docs/latest/release.md', 'docs/contest/x.md',
                     'docs/attestations/x.md', 'docs/reporting/x.md', 'docs/testing/x.md', 'docs/evaluation/x.md',
-                    'reports.md', 'fixtures.md', 'tests.md', 'docs/protest/x.md', 'docs/retest-plan.md'):
+                    'reports.md', 'fixtures.md', 'tests.md', 'docs/protest/x.md', 'docs/retest-plan.md',
+                    # Review round 1 (M1): whole names only, so a word inside a name doesn't make it data.
+                    'plugins/test-runner/x.md', 'plugins/eval-kit/x.md', 'plugins/pr-reports/x.md',
+                    'docs/reports/release-procedure.md',
+                    # Bypass pass, round 1.
+                    'docs/results/x.md', 'a/data/x.md', 'a/latest-tests/x.md', 'a/testimonials/x.md',
+                    'a/attest/x.md', 'a/golden-path/x.md', 'a/snapshot-tool/x.md', 'a/fixtures-guide/x.md',
+                    'docs/test-plans/x.md', 'a/evalCases/x.md', 'a/gate-reports-2026/x.md', 'a/report-data/x.md',
+                    'a/unit/x.md', 'a/system/x.md'):
             self.assertFalse(cl.data_path(rel), rel)
+
+    def test_a_plugin_root_is_never_data_by_its_own_name(self):
+        self.assertTrue(cl.data_path('plugins/evals/skills/x/SKILL.md'))
+        self.assertFalse(cl.data_path('plugins/evals/skills/x/SKILL.md', plugin_roots={'plugins/evals'}))
+        self.assertTrue(cl.data_path('plugins/evals/tests/fixtures/x.md', plugin_roots={'plugins/evals'}))
+        self.assertTrue(cl.data_path('tests/fixtures/p/x.md', plugin_roots={'tests/fixtures/p'}))
 
     def test_a_test_directorys_own_claude_md_is_an_instruction_file(self):
         self.assertFalse(cl.data_path('tests/CLAUDE.md', nested_instruction=True))
@@ -97,6 +115,22 @@ class FixtureNoise(Project):
         self.write('docs/deploy.md', '# Deploy\n' + STEPS)
         result = self.scan()
         self.assertEqual([d['path'] for d in result['signals']['procedure_docs']], ['docs/deploy.md'])
+
+    def test_plugins_and_docs_named_like_test_data_are_scanned(self):
+        self.write('CLAUDE.md', '# x\n')
+        for name in ('good-plugin', 'test-runner', 'eval-kit', 'pr-reports', 'evals'):
+            self.write('plugins/%s/.claude-plugin/plugin.json' % name, {'name': name})
+            self.write('plugins/%s/skills/run/SKILL.md' % name, '---\nname: run\ndescription: Run.\n---\n')
+        self.write('plugins/codex-only/.codex-plugin/plugin.json', {'name': 'codex-only'})
+        self.write('plugins/codex-only/skills/go/SKILL.md', 'Follow [the method](../../references/method.md).\n')
+        self.write('plugins/codex-only/references/method.md', '# Method\n' + STEPS)
+        self.write('docs/reports/release-procedure.md', '# Release\n' + STEPS)
+        result = self.scan()
+        self.assertEqual(sorted(p['path'] for p in result['inventory']['plugins']),
+                         ['plugins/%s/.claude-plugin/plugin.json' % n
+                          for n in ('eval-kit', 'evals', 'good-plugin', 'pr-reports', 'test-runner')])
+        self.assertEqual([d['path'] for d in result['signals']['procedure_docs']], ['docs/reports/release-procedure.md'])
+        self.assertIn('plugin-eval', self.ids(result))
 
     def test_real_procedures_next_to_test_data_still_count(self):
         self.noise()
@@ -181,7 +215,9 @@ class Reachable(Project):
                 self.assertEqual(self.outcome(self.scan()), 'change')
 
     def test_on_demand_procedures_are_changes(self):
-        self.write('AGENTS.md', 'Follow `docs/operations/sdlc.md`.\nRun `docs/release.md` on demand.\n')
+        self.write('AGENTS.md', 'Follow `docs/operations/sdlc.md`.\nInvoke `docs/release.md` as a skill on demand.\n'
+                                'See `docs/pricing.md` for on-demand pricing releases.\n')
+        self.procedure('docs/pricing.md')
         self.procedure(extra='\nAgents should invoke this as a skill on demand.\n')
         self.procedure('docs/release.md')
         self.procedure('docs/deploy.md', extra='\nStaging is available on demand.\n')
@@ -190,18 +226,28 @@ class Reachable(Project):
         self.assertEqual(self.outcome(result), 'change')
         self.assertEqual(self.outcome(result, 'docs/release.md'), 'change')
         self.assertEqual(self.outcome(result, 'docs/deploy.md'), 'optional')
+        self.assertEqual(self.outcome(result, 'docs/pricing.md'), 'optional')  # review round 1 (L1)
 
     def test_skills_cover_or_own_a_doc(self):
         self.write('CLAUDE.md', '# x\n')
         self.procedure('docs/method.md')
+        self.write('plugins/p/.claude-plugin/plugin.json', {'name': 'p'})
         self.write('plugins/p/skills/run/SKILL.md', 'Read [the method](../../../../docs/method.md).\n')
+        # Review round 1 (L2): only a plugin's skill makes a doc product content.
+        self.procedure('docs/cursor-owned.md')
+        self.write('.cursor/skills/rel/SKILL.md', 'Follow docs/cursor-owned.md.\n')
+        self.procedure('docs/agents-owned.md')
+        self.write('.agents/skills/rel/SKILL.md', 'Follow docs/agents-owned.md.\n')
+        self.procedure('docs/unrooted.md')
+        self.write('tools/skills/x/SKILL.md', 'Follow docs/unrooted.md.\n')
         self.procedure('docs/review.md')
         self.write('.claude/skills/review/SKILL.md', 'Follow docs/review.md.\n')
         self.procedure('docs/fixture-owned.md')
         self.write('tests/fixtures/skills/x/SKILL.md', 'Follow docs/fixture-owned.md.\n')
         result = self.scan()
         docs = {d['path']: d['has_skill'] for d in result['signals']['procedure_docs']}
-        self.assertEqual(docs, {'docs/fixture-owned.md': False, 'docs/review.md': True})
+        self.assertEqual(docs, {'docs/agents-owned.md': False, 'docs/cursor-owned.md': False,
+                                'docs/fixture-owned.md': False, 'docs/review.md': True, 'docs/unrooted.md': False})
 
 
 class Declines(Project):
@@ -245,8 +291,11 @@ class Declines(Project):
 
     def test_strong_verbs_either_side(self):
         for text in ('We decided against Claude Code hooks.', 'Claude hooks are dropped here.',
-                     'We chose not to add hooks for agents.', 'Stop hooks were removed from the setup.',
-                     '> Hooks: retired.'):
+                     'We chose not to add hooks.', 'Stop hooks were removed.', '> Hooks: retired.',
+                     # Bypass pass, round 1: other forms of the feature itself.
+                     'All Claude Code hooks were removed in favour of CI checks.', 'We have retired hooks.',
+                     'In this repository, hooks were retired.', 'This repository deliberately uses no hooks.',
+                     'There are no hooks, by design.', 'Hooks were retired years ago, because CI covers them.'):
             with self.subTest(text):
                 shutil.rmtree(self.root)
                 os.makedirs(self.root)
@@ -259,7 +308,17 @@ class Declines(Project):
                      'Should we drop hooks?', 'Git pre-commit hooks were removed.', 'There are no hooks yet.',
                      'Hooks could be removed later.', 'Never use hooks that mutate files without review.',
                      'We removed the old release notes, so hooks run on every change now and the CI script stays.',
-                     '```\nHooks were retired.\n```'):
+                     '```\nHooks were retired.\n```',
+                     # Review round 1 (M2): an instance, an item or a scope is not the feature.
+                     'The old SessionStart hook was removed; the Stop hook stays.', 'No secrets in hooks, per policy.',
+                     'Hooks are disabled in CI runners only.',
+                     # Bypass pass, round 1.
+                     'Two hooks were removed last week.', 'Hooks that mutated files were removed.',
+                     'Hooks were removed from the release script.', 'Policy: no hooks in production.',
+                     'We removed hooks temporarily.', 'Hooks are disabled by default.',
+                     'Without hooks, by design reviews take longer.', 'This repository deliberately uses no hooks in CI.',
+                     'Hooks: removed from the template.', 'Git hooks were removed.', 'The Stop hook was retired.',
+                     'Hooks were retired? No.', 'Our hook was dropped.'):
             with self.subTest(text):
                 shutil.rmtree(self.root)
                 os.makedirs(self.root)
@@ -267,6 +326,32 @@ class Declines(Project):
                 result = self.scan()
                 self.assertEqual(self.declined(result), [])
                 self.assertIn('stop-hook', self.ids(result))
+
+    def test_other_features_need_the_feature_itself(self):
+        near = ('We removed `rm` from the allowlist after an incident.',
+                'Never put tokens in allow rules: this is a security policy.',
+                'The flaky evals were dropped from CI and rewritten.', 'Removed the deprecated `notes` skill in 2.0.',
+                'Unused skills were removed.', 'Some skills were dropped.', 'We dropped evals for the docs site.',
+                'The allowlist was removed and rebuilt from scratch.', 'We have no evals yet.',
+                'Plugin validation was disabled for the docs build.', 'The LSP plugin was removed.')
+        for text in near:
+            with self.subTest(text):
+                shutil.rmtree(self.root)
+                os.makedirs(self.root)
+                self.must_run(text + '\n')
+                self.assertEqual(self.declined(self.scan()), [])
+        for text, feature in (('We decided against the allowlist.', 'allowlist'),
+                              ('The project opted out of the allowlist.', 'allowlist'),
+                              ('Maintainers decided against plugin evals.', 'plugin-eval'),
+                              ('Skills were deliberately removed in favour of plain docs.', 'procedure-skill'),
+                              ('Language servers were disabled here.', 'lsp'),
+                              ('LSP plugins were deliberately dropped.', 'lsp'),
+                              ('Plugin validation was dropped in 2024.', 'plugin-validate')):
+            with self.subTest(text):
+                shutil.rmtree(self.root)
+                os.makedirs(self.root)
+                self.must_run(text + '\n')
+                self.assertEqual([d[0] for d in self.declined(self.scan())], [feature])
 
     def test_only_loaded_linked_or_readme_sources_count(self):
         self.must_run('See [delivery](delivery.md).\n')
@@ -305,7 +390,7 @@ class Neighbours(Project):
         result = self.scan()
         self.assertEqual(result['declined'], [])
         self.assertIn('stop-hook', self.ids(result))
-        self.write('README.md', 'Cursor and Claude Code hooks were both retired.\n')
+        self.write('README.md', 'Claude Code hooks were retired, like the Cursor ones.\n')
         self.assertEqual([d['feature'] for d in self.scan()['declined']], ['stop-hook'])
 
     def test_an_imported_procedure_is_an_instruction_not_a_procedure(self):
@@ -420,6 +505,17 @@ class Footer(Project):
         self.write('new.md', 'x\n')
         self.assertEqual(cl.audited(self.root, True),
                          'Claudit %s; audited commit %s plus uncommitted changes' % (cl.VERSION, sha))
+
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_unreadable_status_is_not_called_clean(self):
+        self.write('CLAUDE.md', '# x\n')
+        self.git('init', '-q')
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'add', '-A')
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false',
+                 'commit', '-q', '-m', 'x')
+        real = cl.run
+        with mock.patch.object(cl, 'run', side_effect=lambda argv, *a, **k: None if 'status' in argv else real(argv, *a, **k)):
+            self.assertTrue(cl.audited(self.root, True).endswith(' (uncommitted changes unknown)'))
 
     def test_version_matches_the_manifest(self):
         manifest = os.path.join(os.path.dirname(cl.__file__), '..', '..', '..', '.claude-plugin', 'plugin.json')

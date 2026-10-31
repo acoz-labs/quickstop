@@ -543,13 +543,15 @@ class GradeTests(Temp):
         good = conforming(scan)
         checks = ce.grade_report(good, scan, helper)
         self.assertEqual(checks, {'plan_items': True, 'grades': True, 'grade_raise': True, 'footer': True,
-                                  'no_test_data_findings': True, 'optional_not_planned': True,
+                                  'scan_no_test_data_findings': True, 'optional_not_planned': True,
                                   'declined_listed': True})
         bad = {'plan_items': good.replace('1. **Pre-approve', '1. **Allow'),
                'grades': good.replace('**Coverage: C**', '**Coverage: B**'),
                'grade_raise': good.replace('Items 1, 2 would raise it.', 'Two gaps.'),
                'footer': good.replace(scan['footer'], 'Claudit 4.1.0'),
-               'declined_listed': good.replace('## Declined by the project', '## Declined')}
+               'declined_listed': good.replace('## Declined by the project', '## Declined'),
+               'optional_not_planned': good.replace('2. **Add a skill for docs/release.md**',
+                                                    '2. **Add a skill for docs/release.md** and docs/operations/sdlc.md')}
         for check, text in bad.items():
             with self.subTest(check=check):
                 self.assertNotEqual(text, good)

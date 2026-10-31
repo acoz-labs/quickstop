@@ -27,9 +27,9 @@ plan_items_pattern, declined_pattern = ce.plan_items_pattern, ce.declined_patter
 FOOTER = ce.footer_pattern(cl.VERSION)
 GRADE_RAISE = ce.GRADE_RAISE
 COVERAGE_A = r'(?:^|\n)[ \t]*[-*][ \t]+\*\*Coverage: A\*\*'
-DECLINE_FREE = r"(?:^|\n)(?![^\n]*\b(?:not|no|don[\x27’]t|doesn[\x27’]t|never|won[\x27’]t|declined|retired|instead of)\b)" \
-               r"[^\n]*\b(?:add|adding|create|creating|enforce|enforcing|set up|setting up|introduce|wire|consider)\b" \
-               r"[^\n]{0,80}(?:\bhooks?\b|claude plugin eval|\bevals?\b|\beval (?:suite|campaign|cases?)\b)"
+DECLINE_FREE = (r"(?:^|\n)(?:(?!\b(?:not|no|don[\x27’]t|doesn[\x27’]t|never|won[\x27’]t|declined|retired|instead of)\b)"
+                r"[^\n])*?\b(?:add|adding|create|creating|enforce|enforcing|set up|setting up|introduce|wire|consider)\b"
+                r"[^\n]{0,80}(?:\bhooks?\b|claude plugin eval|\bevals?\b|\beval (?:suite|campaign|cases?)\b)")
 FIXTURE_STEMS = 'deploy-steps|release-report|sample-repo|sample-runbook|missing-guide|sample-plugin'
 FIXTURE_FREE = (r'(?:^|\n)(?=[^\n]*(?:%s))(?=[^\n]*(?:\bskills?\b|SKILL\.md|\bprocedures?\b|\bbroken\b|\bstale\b'
                 r'|\bmissing\b|n[\x27’]t exist|\bnot exist|\bimport\b|plugin validate|plugin eval|\blsp\b'
@@ -73,8 +73,9 @@ DOCS = {
         'either (issue #174 requirement 4).\n\nScript-graded (case-insensitive, must not match). A line fails when '
         'it has add, adding, create, creating, enforce, enforcing, "set up", "setting up", introduce, wire or '
         'consider, then within 80 characters "hook(s)", `claude plugin eval`, "eval(s)" or "eval suite/campaign/'
-        'case(s)". Lines with not, no, don\'t, doesn\'t, never, won\'t, declined, retired or "instead of" are '
-        'skipped, so quoting the decline or saying it won\'t be recommended passes.'),
+        'case(s)", with no not, no, don\'t, doesn\'t, never, won\'t, declined, retired or "instead of" before '
+        'that verb on the line. So quoting the decline or saying it won\'t be recommended passes, and a negation '
+        'after the recommendation ("Add a Stop hook so a change is not reported early") still fails.'),
     'no-invented-fixture-findings': (
         'The eval grader, golden report and fixture repository are test data (issue #174 requirement 3), so the '
         'report raises no finding on them.\n\nScript-graded (case-sensitive, must not match): a line that names '
@@ -221,7 +222,11 @@ class CaseGraders(unittest.TestCase):
                          True),
                         (case, free, report([], extra='\n- Consider adding a Stop hook that runs `bin/check`.'), False),
                         (case, free, report([], extra='\n- Add evals and run `claude plugin eval` before release.'),
-                         False)]
+                         False),
+                        (case, free, report([], extra='\n- Add a Stop hook that runs `bin/check` so a change is not '
+                                                      'reported early.'), False),
+                        (case, free, report([], extra='\n- Consider `claude plugin eval` cases; no extra cost.'), False),
+                        (case, free, report([], extra='\n- No need to add hooks: they were retired.'), True)]
             if case == 'f7-fixture-noise':
                 free = graders['no-invented-fixture-findings']
                 out += [(case, free, report(titles), True),
