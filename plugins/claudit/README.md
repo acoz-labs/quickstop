@@ -169,9 +169,10 @@ and the diffs. The rules:
   is advisory, so it deliberately has no evals", "Because …, we deliberately …"). A
   reason in another sentence isn't read, and a sentence with neither says "no reason
   given".
-- **Worth reconsidering, only on evidence.** A declined item gets a note only when its
-  whole reason clause (after because, since or so) is one of these, word for word up to
-  case, quotes and backticks, and the evidence exists:
+- **Worth reconsidering, only on evidence.** A declined item gets a note only when one
+  of its reason clauses (the clause after the decline, from because, since or so or after
+  `;` or `:`, or the clause leading a deliberate absence) is one of these as a whole,
+  word for word up to case, quotes and backticks, and the evidence exists:
 
   | Declined | Stated reason | Evidence |
   |---|---|---|
