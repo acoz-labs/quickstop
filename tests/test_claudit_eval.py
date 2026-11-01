@@ -617,6 +617,10 @@ class GradeTests(Temp):
             with self.subTest(check=name):
                 self.assertNotEqual(text, good)
                 self.assertFalse(ce.grade_report(text, scan, helper)[check])
+        for text in ('- Why not reconsider the hooks decision?', '- Is it not worth revisiting the hooks decision?'):
+            with self.subTest(refused=text):  # review round 2 (L3)
+                self.assertFalse(ce.grade_report(good.replace('## Also worth knowing\n', '## Also worth knowing\n\n%s\n'
+                                                              % text), scan, helper)['reconsider_notes'])
         for text in ('- Hooks are not worth reconsidering.', '- No need to revisit the hooks decision.'):
             with self.subTest(allowed=text):
                 self.assertTrue(ce.grade_report(good.replace('## Also worth knowing\n', '## Also worth knowing\n\n%s\n'
