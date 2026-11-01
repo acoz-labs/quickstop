@@ -1,4 +1,4 @@
-"""Claudit 4.1 script graders that follow each case's scan: plan items, footer, grade explanations, declines.
+"""Claudit 4.1 and 4.2 script graders that follow each case's scan: plan items, footer, grade explanations, declines.
 
 The plan-items grader of every case is built from the scan of that case's scaffolded fixture, so the committed
 pattern is the deterministic plan. Rebuild them after changing a fixture or the plan rules:
@@ -76,6 +76,40 @@ DOCS = {
         'case(s)", with no not, no, don\'t, doesn\'t, never, won\'t, declined, retired or "instead of" before '
         'that verb on the line. So quoting the decline or saying it won\'t be recommended passes, and a negation '
         'after the recommendation ("Add a Stop hook so a change is not reported early") still fails.'),
+    'structure-grades': (
+        'The grade letters are the scan\'s: {letters} (Claudit 4.2, issue #184 requirements 3 and 4).\n\n'
+        'Script-graded (case-sensitive): grade lines `**Correctness: X**`, `**Alignment: X**` and `**Coverage: X**` '
+        'with these letters, anywhere in the report.'),
+    'structure-declined-listed': (
+        'The report lists each decline under "Declined by the project" with its source line: {refs}.\n\n'
+        'Script-graded (case-sensitive): a `##` or `###` heading "Declined by the project", then, before the next '
+        '`#` or `##` heading, each `path:line` (optionally backticked).'),
+    'structure-declined-reason': (
+        'Each declined entry gives the reason the scan captured (issue #184 requirement 1): {reasons}.\n\n'
+        'Script-graded (case-insensitive): in the Declined by the project section, after each entry\'s `path:line` '
+        'and before the next column-0 bullet or section end, "Reason:" (optionally bold) then the first six words of '
+        'the reason (any quotes, backticks, emphasis or line breaks between words; straight or curly apostrophes), '
+        'or "no reason given".'),
+    'structure-reconsider': (
+        'Each declined entry the scan marks gets a Worth reconsidering note citing its evidence (issue #184 '
+        'requirement 2): {notes}.\n\nScript-graded (case-insensitive): in that entry, "Worth reconsidering" and '
+        'then, before the entry ends, the evidence URL or `path:line` (optionally backticked).'),
+    'no-invented-reconsider': (
+        'No declined entry has evidence that its reason no longer holds, so nothing may be offered for '
+        'reconsideration (issue #184 requirement 2).\n\nScript-graded (case-insensitive, must not match): a line '
+        'with reconsider... or revisit... and none of no, not, nothing, none or never fails.'),
+    'structure-defect-cited': (
+        'The defect the decline left behind is in the plan and cites the decline (issue #184 requirement 3): '
+        '{items}.\n\nScript-graded (case-insensitive): in Top changes, item N with its title word for word, then '
+        'before the next item or section end a line that isn\'t a `Source:` line naming the decline\'s '
+        '`path:line` (optionally backticked).'),
+    'no-invented-hooks-recommendation': (
+        'The project retired Claude Code hooks and no evidence says the reason no longer holds, so the report must '
+        'not recommend hooks (issue #184 requirement 2).\n\nScript-graded (case-insensitive, must not match), the '
+        'same pattern as F8\'s no-invented-declined-recommendation: a line with add, adding, create, creating, '
+        'enforce, enforcing, "set up", "setting up", introduce, wire or consider, then within 80 characters a hook '
+        'or eval word, with no not, no, don\'t, doesn\'t, never, won\'t, declined, retired or "instead of" before '
+        'that verb on the line, fails.'),
     'no-invented-fixture-findings': (
         'The eval grader, golden report and fixture repository are test data (issue #174 requirement 3), so the '
         'report raises no finding on them.\n\nScript-graded (case-sensitive, must not match): a line that names '
@@ -121,6 +155,40 @@ def case_graders(case, scan):
                 ('no-invented-declined-recommendation', DECLINE_FREE, 'i', 'not_contains', {})]
     if case == 'f9-clean':
         out.append(('structure-coverage-a', COVERAGE_A, '', '', {'why': 'nothing is missing.'}))
+    if case in DECLINE_CASES:
+        out += decline_graders(case, scan)
+    return out
+
+
+DECLINE_CASES = ('f10-stale-decline', 'f11-valid-decline', 'f12-unsafe-decline', 'f13-no-reason-decline')
+
+
+def decline_graders(case, scan):
+    """Issue #184: grades, each decline's reason and note, and the defects a decline left behind."""
+    declined = scan['declined']
+    letters = {name: grade['letter'] for name, grade in scan['grades'].items()}
+    out = [('structure-grades', ''.join(r'(?=[\s\S]*?\*\*%s: %s\*\*)' % (name.capitalize(), letter)
+                                        for name, letter in letters.items()), '', '',
+            {'letters': ', '.join('%s %s' % (name.capitalize(), letter) for name, letter in letters.items())}),
+           ('structure-declined-listed', declined_pattern(['%s:%d' % (d['path'], d['line']) for d in declined]), '', '',
+            {'refs': ', '.join('`%s:%d`' % (d['path'], d['line']) for d in declined)}),
+           ('structure-declined-reason', ce.declined_cues(ce.reason_cue(d) for d in declined), 'i', '',
+            {'reasons': '; '.join('`%s:%d` "%s"' % (d['path'], d['line'], d['reason']) for d in declined)})]
+    notes = [d for d in declined if d['reconsider']]
+    if notes:
+        out.append(('structure-reconsider', ce.declined_cues(ce.reconsider_cue(d) for d in notes), 'i', '',
+                    {'notes': '; '.join('`%s:%d` cites %s' % (d['path'], d['line'], ce.evidence_text(d['reconsider']))
+                                        for d in notes)}))
+    else:
+        out.append(('no-invented-reconsider', ce.RECONSIDER_FREE, 'i', 'not_contains', {}))
+    cited = [(n, item) for n, item in enumerate(scan['plan']['items'], 1) if item.get('declined')]
+    if cited:
+        out.append(('structure-defect-cited', ''.join('(?=[\s\S]*?%s)' % ce.defect_cited_pattern(n, item)
+                                                      for n, item in cited), 'i', '',
+                    {'items': '; '.join('%d. %s cites `%s:%d`' % (n, item['title'], item['declined']['path'],
+                                                                   item['declined']['line']) for n, item in cited)}))
+    if any(d['feature'] == 'stop-hook' and not d['reconsider'] for d in declined):
+        out.append(('no-invented-hooks-recommendation', DECLINE_FREE, 'i', 'not_contains', {}))
     return out
 
 
@@ -227,6 +295,8 @@ class CaseGraders(unittest.TestCase):
                                                       'reported early.'), False),
                         (case, free, report([], extra='\n- Consider `claude plugin eval` cases; no extra cost.'), False),
                         (case, free, report([], extra='\n- No need to add hooks: they were retired.'), True)]
+            if case in DECLINE_CASES:
+                out += self.decline_checks(case, scan, titles, graders)
             if case == 'f7-fixture-noise':
                 free = graders['no-invented-fixture-findings']
                 out += [(case, free, report(titles), True),
@@ -239,6 +309,105 @@ class CaseGraders(unittest.TestCase):
                         (case, free, report(titles, extra='\n- `deploy-steps.md` is a procedure with no skill.'),
                          False)]
         return out
+
+    def decline_checks(self, case, scan, titles, graders):
+        """Issue #184 graders against a conforming report and its near misses."""
+        declined = scan['declined']
+        letters = tuple(scan['grades'][g]['letter'] for g in ('correctness', 'alignment', 'coverage'))
+
+        def section(entries, note=True, reason=True):
+            text = '## Declined by the project\n\n'
+            for d in entries:
+                text += '- **%s** (`%s:%d`): "%s"\n' % (d['label'], d['path'], d['line'], d['quote'])
+                if reason:
+                    text += ('  Reason: no reason given.\n' if d['reason'] == 'no reason given'
+                             else '  Reason: "%s"\n' % d['reason'])
+                if note and d['reconsider']:
+                    text += '  Worth reconsidering: %s. Evidence: %s\n' % (d['reconsider']['claim'], (
+                        '[%s](%s)' % (d['reconsider']['evidence']['heading'], d['reconsider']['evidence']['url'])
+                        if 'url' in d['reconsider']['evidence'] else ce.evidence_text(d['reconsider'])))
+            return text + '\n'
+
+        def good(**changes):
+            body = report(titles, grades=letters, declined=changes.pop('declined', section(declined)),
+                          extra=changes.pop('extra', ''))
+            for n, item in enumerate(scan['plan']['items'], 1):
+                if item.get('declined'):
+                    body = body.replace('   Source: [Permission rule syntax](https://code.claude.com/docs/en/permissions)'
+                                        '\n\n', '   Source: [Permission rule syntax](https://code.claude.com/docs/en/'
+                                        'permissions)\n   Declined: %s (`%s:%d`)\n\n' % (
+                                            item['declined']['label'], item['declined']['path'],
+                                            item['declined']['line']), 1)
+            return body
+
+        g = graders
+        out = [(case, g['structure-grades'], good(), True),
+               (case, g['structure-grades'], report(titles, grades=('A', 'B', 'A') if letters != ('A', 'B', 'A')
+                                                  else ('A', 'A', 'A'), declined=section(declined)), False),
+               (case, g['structure-declined-listed'], good(), True),
+               (case, g['structure-declined-listed'], good(declined=section(declined[1:])) if len(declined) > 1
+                else good(declined=''), False),
+               (case, g['structure-declined-reason'], good(), True),
+               (case, g['structure-declined-reason'], good().replace("'", '\u2019'), True),
+               (case, g['structure-declined-reason'], good(declined=section(declined, reason=False)), False),
+               (case, g['structure-declined-reason'], good(declined=section(declined, reason=False),
+                                                           extra='\n- ' + ' '.join('Reason: "%s"' % d['reason']
+                                                                                   for d in declined)), False)]
+        if len(declined) > 1:  # each reason must sit in its own entry
+            swapped = [dict(declined[0], reason=declined[1]['reason']), dict(declined[1], reason=declined[0]['reason'])]
+            if declined[0]['reason'] != declined[1]['reason']:
+                out.append((case, g['structure-declined-reason'], good(declined=section(swapped)), False))
+        if 'structure-reconsider' in g:
+            r = g['structure-reconsider']
+            out += [(case, r, good(), True),
+                    (case, r, good(declined=section(declined, note=False)), False),
+                    (case, r, good(declined=section(declined, note=False), extra='\n- Worth reconsidering: '
+                                   + ' '.join(ce.evidence_text(d['reconsider']) for d in declined if d['reconsider'])),
+                     False),
+                    (case, r, good(declined=section(declined).replace('Evidence: ', 'Evidence: none. Source: ', 0)
+                                   .replace('Worth reconsidering', 'Note', 1)), False)]
+        else:
+            free = g['no-invented-reconsider']
+            out += [(case, free, good(), True),
+                    (case, free, good(extra='\n- Nothing here is worth reconsidering.'), True),
+                    (case, free, good(extra='\n- Worth reconsidering: hooks now block stopping.'), False),
+                    (case, free, good(extra='\n- You may want to revisit the hooks decision.'), False)]
+        if 'structure-defect-cited' in g:
+            cite = g['structure-defect-cited']
+            out += [(case, cite, good(), True),
+                    (case, cite, report(titles, grades=letters, declined=section(declined)), False),
+                    (case, cite, good().replace('   Declined: ', '   Source: declined ', 1), False)]
+        if 'no-invented-hooks-recommendation' in g:
+            free = g['no-invented-hooks-recommendation']
+            out += [(case, free, good(), True),
+                    (case, free, good(extra='\n- Consider adding a Stop hook that runs the check.'), False)]
+        return out
+
+    def test_decline_cases(self):
+        """Issue #184: what the scan decides for each new decline fixture."""
+        def entries(case):
+            return [(d['feature'], d['line'], d['reason'], bool(d['reconsider'])) for d in self.scans[case]['declined']]
+        self.assertEqual(entries('f10-stale-decline'),
+                         [('stop-hook', 3, "because hooks can't block Claude from finishing", True),
+                          ('allowlist', 4, 'because there is no check command', True)])
+        self.assertEqual([d['reconsider']['evidence'] for d in self.scans['f10-stale-decline']['declined']],
+                         [{'url': 'https://code.claude.com/docs/en/hooks', 'heading': 'Stop'},
+                          {'path': 'CLAUDE.md', 'line': 5}])
+        self.assertEqual(entries('f11-valid-decline'),
+                         [('stop-hook', 3, 'in favour of the review checklist in the pull request template', False),
+                          ('lsp', 4, 'because the project has no typed code', False)])
+        self.assertEqual(entries('f12-unsafe-decline'),
+                         [('allowlist', 3, 'in favour of bypassPermissions in the project settings', False)])
+        self.assertEqual(entries('f13-no-reason-decline'),
+                         [('stop-hook', 3, 'no reason given', False), ('lsp', 4, 'no reason given', False)])
+        unsafe = self.scans['f12-unsafe-decline']
+        self.assertEqual([(i['title'], i.get('declined')) for i in unsafe['plan']['items']],
+                         [('Remove defaultMode from .claude/settings.json',
+                           {'label': 'Pre-approved commands', 'path': 'docs/decisions.md', 'line': 3})])
+        self.assertEqual(unsafe['grades']['correctness']['letter'], 'D')
+        for case in ('f10-stale-decline', 'f11-valid-decline', 'f13-no-reason-decline'):
+            self.assertEqual(self.scans[case]['plan']['items'], [])
+            self.assertEqual({g['letter'] for g in self.scans[case]['grades'].values()}, {'A'})
 
     def test_graders_pass_and_fail(self):
         for case, grader, text, want in self.checks():

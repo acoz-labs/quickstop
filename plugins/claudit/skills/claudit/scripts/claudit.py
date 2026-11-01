@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claudit 4.1 helper: a deterministic, read-only scan of a project's Claude Code setup.
+"""Claudit 4.2 helper: a deterministic, read-only scan of a project's Claude Code setup.
 
 Subcommands: scan, new-pages, dismiss. Standard library only; Python 3.9+.
 The only write is `dismiss`, to <root>/.claude/claudit-dismissed.json. The
@@ -16,7 +16,7 @@ import sys
 import tempfile
 import urllib.parse
 
-VERSION = '4.1.0'
+VERSION = '4.2.0'
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(HERE, '..', 'catalog.json')
 CAP = 40
@@ -110,8 +110,9 @@ DECLINED = r'(?:retired|removed|dropped|declined|abandoned|phased out|disabled)'
 DELIBERATE = r'(?:deliberately|intentionally|on purpose|by design|by choice)'
 # What may follow a decline, and nothing else: an optional project scope, then the end of the sentence, a reason
 # ("because", "since", "in favour of", ", so", ", and replaced them with", "by design") or a ";" or ":" clause.
-DECLINE_TAIL = (r'(?:\s+(?:in this (?:repository|repo|project)|here))?(?:\s*$|,?\s+(?:because|since|in favou?r of)\s'
-                r'|,\s+so\s|,\s+and replaced (?:them|it) with\s|,?\s+%s\s*$|\s*[;:]\s)' % DELIBERATE)
+# The empty group `why` marks where the stated reason starts (see decline_reason).
+DECLINE_TAIL = (r'(?:\s+(?:in this (?:repository|repo|project)|here))?(?:\s*$|(?:,?\s+(?=(?:because|since|in favou?r of)\s)'
+                r'|,\s+(?=so\s|and replaced (?:them|it) with\s)|\s*[;:](?=\s)\s*)(?P<why>)|,?\s+%s\s*$)' % DELIBERATE)
 # An exception, limit, partial scope, time limit or reversal anywhere in the sentence means it is no decline.
 DECLINE_LIMIT = re.compile(r'\b(?:except\w*|apart from|other than|but|only|for now|temporar\w*|for the time being|'
                            r'then|back|re-?add\w*|re-?enabl\w*|enabl\w*|replaced by|being (?:written|rebuilt|reworked)|'
@@ -127,6 +128,69 @@ UNSURE = re.compile(r'\?|\b(?:if|unless|whether|would|could|might|maybe|perhaps|
 OTHER_TOOLS = re.compile(r'\b(?:git|push|pre-commit|pre-push|commit-msg|husky|lefthook|webhooks?|cursor|codex|copilot|'
                          r'windsurf|gemini|aider|eslint|prettier)\b', re.I)
 CLAUDE_NAMED = re.compile(r'\bclaude\b', re.I)
+# A reason may also lead a deliberate absence: "<reason>, so it deliberately has no evals", "Because <reason>, we
+# deliberately run without hooks". At most three words stand between it and the decline.
+LEAD_REASON = re.compile(r'^(?:(?P<so>.+?),?\s+so|(?P<because>(?:because|since)\s+.+?),)\s+(?:\S+\s+){0,3}$', re.I)
+# Stated reasons that current Claude Code or the project itself contradicts. Each pattern must match a whole reason
+# clause (after its because, since or so), so a clause with any other word (a limit such as "in CI" or "on Windows",
+# a reversal, a time, an aside) never matches and gets no note: allow-only. Evidence is a catalog doc key (a page
+# showing the limitation is gone) or a scan fact ('check': a check command exists; 'typed': typed code exists).
+CANT = r"(?:can ?not|can't|are unable to|is unable to)"
+CC = r'(?:claude code|claude)'
+NO_RUNNER = (r'(?:%s (?:has|offers|provides) no|there is no) (?:way to run (?:plugin )?evals|(?:built-in )?(?:plugin )?'
+             r'evals? runner)' % CC)
+NO_VALIDATOR = (r'(?:%s (?:has|offers|provides) no|there is no) (?:way to validate plugins|(?:built-in )?plugin '
+                r'validator)' % CC)
+NO_CHECK = (r'(?:there (?:is|are) no|(?:the )?(?:project|repository|repo) has no) (?:check(?: command| script)?s?|tests?|'
+            r'test suite)(?: to run)?|there is nothing to (?:check|run)')
+UNTYPED = r'(?:the )?(?:project|repository|repo|code|codebase) (?:is untyped|is not typed|has no typed code)|there is no typed code'
+STALE_REASONS = (
+    ('stop-hook', r'(?:%s )?(?:hooks|a hook|stop hooks|they|it) %s (?:block|stop|prevent) %s from (?:stopping|finishing)'
+     % (CC, CANT, CC), 'doc', 'hooks-stop',
+     'a Stop hook can keep Claude from stopping: exit code 2 prevents it and continues the conversation'),
+    ('plugin-eval', NO_RUNNER, 'doc', 'plugin-evals', '`claude plugin eval` runs a plugin\'s eval suite and scores it'),
+    ('plugin-validate', NO_VALIDATOR, 'doc', 'plugin-validate',
+     '`claude plugin validate` checks a plugin\'s files for syntax and schema errors'),
+    ('lsp', r"%s (?:has no|doesn't support|does not support) (?:lsp|language servers|code intelligence)(?: support)?" % CC,
+     'doc', 'code-intelligence', 'code intelligence plugins connect Claude Code to a language server'),
+    ('procedure-skill', r'(?:skills|they) %s be shared (?:with the team|through the (?:repository|repo))'
+     % r"(?:can ?not|can't)", 'doc', 'skill-locations',
+     'a skill committed under .claude/skills/ loads for everyone who works in the repository'),
+    ('stop-hook', NO_CHECK, 'repo', 'check', 'the project has a check command now'),
+    ('allowlist', NO_CHECK, 'repo', 'check', 'the project has a check command now'),
+    ('lsp', UNTYPED, 'repo', 'typed', 'the project has typed code now'),
+)
+STALE_FORMS = [(feature, re.compile(pattern), kind, key, claim) for feature, pattern, kind, key, claim in STALE_REASONS]
+# Correctness defects in a declined feature's own configuration: the decline left them behind, so they stay in the
+# plan, graded as usual, and cite the decline.
+DECLINE_DEFECTS = {'stop-hook': ('matcher-type', 'matcher-ignored', 'hook-script', 'hooks-file'),
+                   'allowlist': ('default-mode', 'auto-mode', 'write-rule'),
+                   'procedure-skill': ('flat-skill', 'skill-missing')}
+NO_REASON = 'no reason given'
+
+
+def decline_reason(sentence, match):
+    """The reason a decline states, as exact parts of its sentence: a clause before it and the clause after it."""
+    parts = []
+    lead = LEAD_REASON.match(sentence[:match.start()])
+    if lead:
+        parts.append((lead.start(lead.lastgroup), lead.group(lead.lastgroup).strip()))
+    if match.start('why') >= 0:
+        tail = sentence[match.start('why'):].strip()
+        if tail:
+            parts.append((match.start('why'), tail))
+    return parts
+
+
+def stale_reason(feature, parts):
+    """The first STALE_REASONS row a reason part matches as a whole clause, or None."""
+    for _, part in parts:
+        clause = re.sub(r'\s+', ' ', part.replace('`', '').replace('’', "'")).strip().rstrip('.!').lower()
+        clause = re.sub(r'^(?:because|since|so)\s+', '', clause)
+        for row in STALE_FORMS:
+            if row[0] == feature and row[1].fullmatch(clause):
+                return row
+    return None
 
 
 def decline_forms(feature):
@@ -981,11 +1045,48 @@ class Scan:
                     continue
                 if DECLINE_LIMIT.search(sentence):
                     continue
+                body = sentence.rstrip('.!')
                 for feature, label, noun, forms in DECLINE_FORMS:
-                    if feature not in found and any(form.search(sentence.rstrip('.!')) for form in forms):
+                    match = next((m for m in (form.search(body) for form in forms) if m), None) \
+                        if feature not in found else None
+                    if match:
+                        parts = decline_reason(body, match)
                         found[feature] = {'feature': feature, 'label': label, 'path': path,
-                                          'line': line_at(noun.search(sentence).start()), 'quote': sentence[:400]}
+                                          'line': line_at(noun.search(sentence).start()), 'quote': sentence[:400],
+                                          'reason': ' \u2026 '.join(text for _, text in parts)[:400] or NO_REASON,
+                                          'reason_line': line_at(parts[0][0]) if parts else None,
+                                          'stale': stale_reason(feature, parts)}
         return [found[feature] for feature, _, _ in DECLINABLE if feature in found]
+
+    def reconsider(self, stale, checks, documented, corpus, typed_at):
+        """A "Worth reconsidering" note for a decline whose stated reason no longer holds, or None.
+
+        Only with concrete evidence: the catalog's doc page showing the cited limitation is gone (and only when this
+        Claude Code has the feature), or the file and line showing the situation the decision assumed has changed.
+        """
+        if not stale:
+            return None
+        _, _, kind, key, claim = stale
+        if kind == 'doc':
+            doc = self.source(key)
+            needs = next((f.get('min_version') for f in self.catalog.get('features', []) if f.get('doc') == key
+                          and f.get('min_version')), None)
+            have = version_tuple(self.claude_version)
+            if not doc['url'] or (needs and have and have < version_tuple(needs)):
+                return None
+            return {'claim': claim, 'evidence': {'url': doc['url'], 'heading': doc['heading']}}
+        at = None
+        if key == 'check':
+            for command in documented:
+                at = next(((path, number) for path, text in corpus.items() for number, line in prose(text)
+                           if self.mentioned(command, line)), None)
+                if at:
+                    break
+            if not at and checks and checks[0]['source'] in self.fileset:
+                at = (checks[0]['source'], 1)
+        elif key == 'typed' and typed_at:
+            at = typed_at[0]
+        return {'claim': claim, 'evidence': {'path': at[0], 'line': at[1]}} if at else None
 
     # -- correctness checks -----------------------------------------------
     def check_settings(self, settings):
@@ -1221,15 +1322,18 @@ class Scan:
         if 'docs/operations' in self.dirs or any(re.search(r'sdlc', f, re.I) and f.endswith('.md') and not self.data(f)
                                                  for f in self.files):
             agent_run.append('delivery/SDLC docs present')
-        typed = []
+        typed, typed_at = [], []
         for f in self.files:
             name = f.split('/')[-1]
             if f.count('/') <= 2 and (name in LANGUAGES or name.endswith('.csproj')) and name not in typed \
                     and not self.data(f):
                 typed.append(name)
+                typed_at.append((f, 1))
         pyproject = self.text('pyproject.toml') or ''
-        if re.search(r'^\[tool\.(mypy|pyright)\]', pyproject, re.M):
+        tool = re.search(r'^\[tool\.(mypy|pyright)\]', pyproject, re.M)
+        if tool:
             typed.append('pyproject.toml [tool.mypy/pyright]')
+            typed_at.append(('pyproject.toml', pyproject.count('\n', 0, tool.start()) + 1))
         lsp_enabled = any('lsp' in k.lower() for k in plugins_enabled)
         secret_paths = []
         for f in self.files:
@@ -1385,6 +1489,7 @@ class Scan:
         declined = self.declines(instructions)
         for entry in declined:
             entry['finding_ids'] = [f['id'] for f in self.findings if f['id'].split(':')[0] == entry['feature']]
+            entry['reconsider'] = self.reconsider(entry.pop('stale'), checks, documented, corpus, typed_at)
         gone = {fid for entry in declined for fid in entry['finding_ids']}
         self.findings = [f for f in self.findings if f['id'] not in gone]
 
@@ -1490,6 +1595,12 @@ class Scan:
             'must_rules': capped(must_rules, 'signals.must_rules', t),
         }
         plan = plan_of(self.findings, optional, declined)
+        for entry in declined:
+            entry['defects'] = []
+            for item in plan['items'] + plan['overflow']:
+                if item['kind'] in DECLINE_DEFECTS.get(entry['feature'], ()):
+                    item['declined'] = {'label': entry['label'], 'path': entry['path'], 'line': entry['line']}
+                    entry['defects'].append(item['title'])
         setup = bool(roots or project_settings or '.claude' in self.dirs)
         out = {'claudit': VERSION, 'catalog_version': self.catalog.get('catalog_version'),
                'claude_version': self.claude_version, 'root': '.', 'git': self.git, 'inventory': inventory,

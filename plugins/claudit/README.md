@@ -46,8 +46,10 @@ Asking Claude to audit or improve the Claude Code setup also invokes it.
    and the effort. When nothing is worth changing, the report says "No changes worth
    making", which is a valid result with Coverage A.
 4. **Declined by the project**: features the project documents a deliberate choice
-   against, quoted with their file and line. Claudit doesn't recommend them or count
-   them against Coverage.
+   against, quoted with their file and line and the reason the project gives (or "no
+   reason given"). Claudit doesn't recommend them or count them against Coverage. A
+   declined item gets a "Worth reconsidering" note only when Claudit can cite evidence
+   that the stated reason no longer holds.
 5. **An offer to apply** the changes you select, in place or on a branch in an
    isolated worktree with a pull request through `gh`.
 
@@ -161,6 +163,36 @@ and the diffs. The rules:
   Questions, conditionals, future, negated or reversed sentences ("if", "will be",
   "weren't removed", "restored") don't count, nor do sentences about another tool
   (Git or push hooks, Cursor skills) that don't name Claude.
+- **The reason for a decline.** The reason is the rest of the decline's sentence: the
+  clause after it (from because, since, in favour of, so or "and replaced them with",
+  or after `;` or `:`) and, for a deliberate absence, a clause before it ("The plugin
+  is advisory, so it deliberately has no evals", "Because …, we deliberately …"). A
+  reason in another sentence isn't read, and a sentence with neither says "no reason
+  given".
+- **Worth reconsidering, only on evidence.** A declined item gets a note only when its
+  whole reason clause (after because, since or so) is one of these, word for word up to
+  case, quotes and backticks, and the evidence exists:
+
+  | Declined | Stated reason | Evidence |
+  |---|---|---|
+  | Hooks | hooks (or Claude Code hooks, Stop hooks, a hook, they, it) can't, cannot or are unable to block, stop or prevent Claude from stopping or finishing | [Stop](https://code.claude.com/docs/en/hooks): exit code 2 keeps Claude working |
+  | Plugin evals | Claude Code has, offers or provides no (or there is no) way to run evals, or no built-in eval runner | [Test plugins with evals](https://code.claude.com/docs/en/plugin-evals) |
+  | Plugin validation | Claude Code has no (or there is no) way to validate plugins, or no built-in plugin validator | [plugin validate](https://code.claude.com/docs/en/plugins/cli-reference) |
+  | Code-intelligence plugins | Claude Code has no, doesn't or does not support LSP, language servers or code intelligence | [Code intelligence plugins](https://code.claude.com/docs/en/plugins/code-intelligence) |
+  | Procedure skills | skills (or they) can't be shared with the team or through the repository | [Choose where skills load](https://code.claude.com/docs/en/skills) |
+  | Hooks, pre-approved commands | there is or are no (or the project has no) check, check command or script, tests or test suite (to run), or there is nothing to check or run | the `path:line` of a documented check command, or the check script |
+  | Code-intelligence plugins | the project, repository, code or codebase is untyped, is not typed or has no typed code, or there is no typed code | the typed-code marker (`tsconfig.json:1`, the `[tool.mypy]` line of `pyproject.toml`) |
+
+  A doc row gives no note when the scan's Claude Code is older than the feature's
+  minimum version. Any other wording gets no note, including the same reason with a
+  limit or aside ("can't block Claude from finishing in CI"), and so does a reason that
+  only rests on best practice. The note is advice on the declined item: it is not in
+  the plan and changes no grade.
+- **Defects a decline left behind stay in the plan.** A decline removes only its own
+  Coverage gap. A correctness defect in the declined feature's own configuration (hook
+  matchers, hook scripts and hooks files for hooks; `defaultMode`, `autoMode` and
+  `Write(...)` rules for pre-approved commands; skill files for procedure skills) is
+  planned and graded like any other and cites the decline.
 
 ## How it works
 

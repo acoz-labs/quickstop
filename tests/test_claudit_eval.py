@@ -517,13 +517,18 @@ def scan_of(root):
 
 def conforming(scan):
     """A report that follows the scan exactly."""
-    items = ''.join('%d. **%s** (Coverage, effort S)\n   Problem: x.\n   Change: y.\n   Source: [h](u)\n\n'
-                    % (i['n'], i['title']) for i in scan['plan']['items'])
+    items = ''.join('%d. **%s** (Coverage, effort S)\n   Problem: x.\n   Change: y.\n   Source: [h](u)\n%s\n'
+                    % (i['n'], i['title'], '   Declined: %s (`%s:%d`)\n' % (
+                        i['declined']['label'], i['declined']['path'], i['declined']['line'])
+                       if i.get('declined') else '') for i in scan['plan']['items'])
     grades = '\n'.join('- **%s: %s** (confidence: high). %s' % (
         name.capitalize(), g['letter'], 'Fine.' if g['letter'] == 'A' else 'Items %s would raise it.' % ', '.join(
             str(n) for n in g['items'])) for name, g in scan['grades'].items())
-    declined = ''.join('- **%s** (`%s:%d`): "%s"\n' % (d['label'], d['path'], d['line'], d['quote'])
-                       for d in scan['declined'])
+    declined = ''.join('- **%s** (`%s:%d`): "%s"\n  Reason: %s\n' % (
+        d['label'], d['path'], d['line'], d['quote'],
+        'no reason given.' if d['reason'] == 'no reason given' else '"%s"' % d['reason'])
+        + ('  Worth reconsidering: %s. Evidence: %s\n' % (d['reconsider']['claim'], ce.evidence_text(d['reconsider']))
+           if d['reconsider'] else '') for d in scan['declined'])
     return ('# Claudit: x\n\n**Intent:** x.\n\n## Grades\n\n%s\n\n## Top changes\n\n%s\n\n%s%s'
             '## Also worth knowing\n\n- Optional.\n\n---\n%s\nClaude Code 2.1.316.\n' % (
                 grades, scan['plan']['summary'], items,
@@ -551,6 +556,37 @@ class GradeTests(Temp):
         return root
 
     @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_reconsider_and_defect_controls(self):
+        root = self.repo()
+        (root / 'docs/repository.md').write_text(
+            "Claude Code hooks were retired because hooks can't block Claude from finishing.\n"
+            'We dropped the allowlist in favour of bypassPermissions in the project settings.\n')
+        (root / '.claude').mkdir()
+        (root / '.claude/settings.json').write_text('{"permissions": {"defaultMode": "bypassPermissions"}}\n')
+        scan = scan_of(root)
+        self.assertEqual([bool(d['reconsider']) for d in scan['declined']], [True, False])
+        helper = ce.load_helper(ROOT / 'plugins/claudit')
+        good = conforming(scan)
+        checks = ce.grade_report(good, scan, helper)
+        self.assertTrue(checks['reconsider_notes'] and checks['declined_reasons'] and checks['declined_defects_cited'],
+                        checks)
+        url = 'https://code.claude.com/docs/en/hooks'
+        bad = {'reconsider_notes': [good.replace('  Worth reconsidering:', '  Note:'),
+                                    good.replace(url, 'https://code.claude.com/docs/en/other'),
+                                    good.replace('Evidence: ' + url, 'Evidence: [Stop](see below)').replace(
+                                        '## Also worth knowing', '## Also worth knowing\n\nSource: ' + url),
+                                    good.replace('  Reason: "in favour of', '  Worth reconsidering: x.\n'
+                                                 '  Reason: "in favour of')],
+               'declined_defects_cited': [good.replace('   Declined: ', '   Source: declined '),
+                                          good.replace('   Declined: Pre-approved commands (`docs/repository.md:2`)\n',
+                                                       '')]}
+        for check, texts in bad.items():
+            for text in texts:
+                with self.subTest(check=check, text=text[-200:]):
+                    self.assertNotEqual(text, good)
+                    self.assertFalse(ce.grade_report(text, scan, helper)[check])
+
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
     def test_grade_controls(self):
         scan = scan_of(self.repo())
         self.assertEqual([i['title'] for i in scan['plan']['items']],
@@ -560,12 +596,15 @@ class GradeTests(Temp):
         checks = ce.grade_report(good, scan, helper)
         self.assertEqual(checks, {'plan_items': True, 'grades': True, 'grade_raise': True, 'footer': True,
                                   'scan_no_test_data_findings': True, 'optional_not_planned': True,
-                                  'declined_listed': True})
+                                  'declined_listed': True, 'declined_reasons': True, 'reconsider_notes': True})
         bad = {'plan_items': good.replace('1. **Pre-approve', '1. **Allow'),
                'grades': good.replace('**Coverage: C**', '**Coverage: B**'),
                'grade_raise': good.replace('Items 1, 2 would raise it.', 'Two gaps.'),
                'footer': good.replace(scan['footer'], 'Claudit 4.1.0'),
                'declined_listed': good.replace('## Declined by the project', '## Declined'),
+               'declined_reasons': good.replace('  Reason: "CI is the gate"', '  Reason: no reason given.'),
+               'reconsider_notes': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Hooks are '
+                                                'worth reconsidering.\n'),
                'optional_not_planned': good.replace('2. **Add a skill for docs/release.md**',
                                                     '2. **Add a skill for docs/release.md** and docs/operations/sdlc.md')}
         for check, text in bad.items():

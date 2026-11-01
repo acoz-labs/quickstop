@@ -1,0 +1,5 @@
+# jotter
+
+Setup decisions are in @docs/decisions.md.
+
+Always run `bin/check-notes` before you report a change as done.

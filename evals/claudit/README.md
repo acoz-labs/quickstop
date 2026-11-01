@@ -1,7 +1,7 @@
 # Claudit eval suite
 
 A `claude plugin eval` suite that measures how well a Claude Code setup review
-finds planted problems in nine small synthetic repositories. It is Claudit's
+finds planted problems in thirteen small synthetic repositories. It is Claudit's
 release gate (issue #155), not a per-PR check: each full pass spends model budget.
 Recorded baselines are in [the baseline record](../../docs/acceptance/claudit-eval-baselines.md).
 
@@ -27,6 +27,10 @@ the suite moves into the plugin.
 | `f7-fixture-noise` | Python CLI whose eval grader, golden report and fixture repository look like procedures and config | none on test data: `no-invented-fixture-findings` (regex) fails on a finding about them; the one real change is a skill for `docs/release.md` |
 | `f8-documented-decline` | Advisory plugin whose `docs/decisions.md` retires hooks and declines an eval campaign | none: `structure-declined` needs both under "Declined by the project" with `docs/decisions.md:3` and `:5`, `no-invented-declined-recommendation` fails if either is recommended, `structure-coverage-a` needs Coverage A |
 | `f9-clean` | Small, fully configured Node library | none: "No changes worth making" (`structure-plan-items`) with Coverage A (`structure-coverage-a`) |
+| `f10-stale-decline` | Notes app that retired hooks because "hooks can't block Claude from finishing" and declined pre-approved commands because "there is no check command", while `CLAUDE.md` documents `bin/check-notes` | none: both declines with their reason and a Worth reconsidering note citing the hooks doc and `CLAUDE.md:5`, nothing in the plan, all grades A |
+| `f11-valid-decline` | Shell toolkit that retired hooks for a review checklist and dropped code intelligence because it has no typed code | none: both declines with their reason, no Worth reconsidering note, no hooks recommended |
+| `f12-unsafe-decline` | Project that dropped pre-approved commands in favour of project `bypassPermissions` | the `defaultMode` defect as the one plan item, citing `docs/decisions.md:3` (`structure-defect-cited`), Correctness D |
+| `f13-no-reason-decline` | TypeScript library that retired hooks and dropped LSP plugins without a reason | none: both declines say "no reason given", no Worth reconsidering note |
 
 Every case also has these `structure-*` regex graders: the report states the
 project's intent, gives Correctness, Alignment and Coverage grades, each with a
@@ -43,6 +47,17 @@ three more, all script graders:
 - `structure-footer`: the footer names Claudit's version and an audited commit.
 - `structure-grade-raise`: every grade below A names the plan items that would
   raise it.
+
+Claudit 4.2 targets (issue #184) add script graders to F10 to F13, all built from
+the scan like `structure-plan-items`: `structure-grades` (the scan's three letters),
+`structure-declined-listed`, `structure-declined-reason` (each entry's "Reason:"
+with the first six words of the captured reason, or "no reason given"),
+`structure-reconsider` (F10: the note and its evidence URL or `path:line` inside the
+entry) or `no-invented-reconsider` (any line saying reconsider or revisit without a
+negation fails), `structure-defect-cited` (F12: the item cites the decline on a line
+that isn't its `Source:` line), and, where hooks stay declined,
+`no-invented-hooks-recommendation`. F1 to F9 are unchanged, so their 4.1.0 bars
+compare like for like.
 
 F3's six planted findings (the flat skill's paths and move, `Write(...)`,
 `.claudeignore`, project `defaultMode`, the array matcher and the oversized
@@ -120,7 +135,10 @@ Each `run<N>/` keeps `report.md`, the raw JSON, stderr, the scan of the same clo
 and `meta.json` with the exact command line, commit, Claude Code version, cost,
 wall time and the script checks. Of the report: its plan, grade letters and footer
 match the scan, every grade below A names its items, no optional procedure's path
-appears under Top changes, and declines are listed with their `path:line`. Of the
+appears under Top changes, and declines are listed with their `path:line`, each
+with its reason, a Worth reconsidering note exactly where the scan gives one (and no
+reconsider or revisit line otherwise), and the decline cited in any plan item it
+left behind. Of the
 scan itself (`scan_no_test_data_findings`): it raised nothing on test data, so a
 test-data finding outside Top changes can only come from the model and is not
 script-checked. `summary.json` gives the medians. `grade --report R --scan S` runs the

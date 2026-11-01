@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# jotter: add or list notes.
+set -euo pipefail
+notes="${JOTTER_FILE:-notes.txt}"
+case "${1:-list}" in
+  add) shift; printf "%s\n" "$*" >> "$notes" ;;
+  list) cat "$notes" 2>/dev/null || echo "(no notes)" ;;
+esac
