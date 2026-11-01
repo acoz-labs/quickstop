@@ -78,6 +78,62 @@ def declined_pattern(refs):
         r'(?=%s\x60?%s\b)' % (body, re.escape(ref)) for ref in refs)
 
 
+# Claudit 4.2: each declined entry's reason, its Worth reconsidering note when the scan gives one and never
+# otherwise, and the decline cited in a plan item it left behind. A Source: line never satisfies a cue.
+DECLINED_TOP = r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*'
+DECLINED_BODY = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
+ENTRY = r'(?:(?!\n[-*][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*?'
+RECONSIDER_FREE = (r'(?:^|\n)(?![^\n]*\b(?:no|not|nothing|none|never)\b)[^\n]*\b(?:reconsider\w*|revisit\w*)')
+
+
+def words_pattern(text, limit=6):
+    """The first words of a quoted text, with any quotes, backticks, emphasis or wrapping between them."""
+    words = re.findall(r"[\w'\u2019./-]+", text.split(' \u2026 ')[0])[:limit]
+    return r'[\s\x60"\u201c\u201d*_]+'.join(
+        re.escape(w.replace('\u2019', "'")).replace("'", "['\\u2019]") for w in words)
+
+
+def entry_cue(entry, cue):
+    """Lookahead: a declined entry (from its path:line to the next bullet or section) that holds the cue."""
+    ref = '%s:%d' % (entry['path'], entry['line'])
+    return r'(?=%s\x60?%s\b%s%s)' % (DECLINED_BODY, re.escape(ref), ENTRY, cue)
+
+
+def reason_cue(entry):
+    lead = r'\bReason(?:\*\*)?:(?:\*\*)?[ \t]*["\u201c\x60*_]*'
+    if entry['reason'] == 'no reason given':
+        return entry_cue(entry, lead + 'no reason given')
+    return entry_cue(entry, lead + words_pattern(entry['reason']))
+
+
+def reconsider_cue(entry):
+    evidence = entry['reconsider']['evidence']
+    cue = (re.escape(evidence['url']) if 'url' in evidence
+           else r'\x60?%s\b' % re.escape('%s:%d' % (evidence['path'], evidence['line'])))
+    return entry_cue(entry, r'\bWorth reconsidering\b' + ENTRY + cue)
+
+
+def evidence_text(reconsider):
+    evidence = reconsider['evidence']
+    return evidence['url'] if 'url' in evidence else '`%s:%d`' % (evidence['path'], evidence['line'])
+
+
+def no_reconsider_cue(entry):
+    return entry_cue(entry, r'\b(?:reconsider\w*|revisit\w*)')
+
+
+def declined_cues(cues):
+    """The Declined by the project section, holding every cue."""
+    return DECLINED_TOP + ''.join(cues)
+
+
+def defect_cited_pattern(number, item):
+    ref = '%s:%d' % (item['declined']['path'], item['declined']['line'])
+    return (TOP + NOT_ITEM + r'\n(?:#{3,4}[ \t]+)?(?:\*\*)?%d[.)][ \t]+(?:\*\*)?%s' % (number, title_pattern(item['title']))
+            + r'(?:(?!\n(?:#{3,4}[ \t]+)?(?:\*\*)?[0-9]+[.)][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,})[\s\S])*?'
+            + r'\n(?![ \t]*(?:[-*][ \t]+)?(?:\*\*)?Source\b)[^\n]*\x60?%s\b' % re.escape(ref))
+
+
 class Failure(Exception):
     pass
 
@@ -425,6 +481,17 @@ def grade_report(text, scan, helper):
     if scan.get('declined'):
         refs = ['%s:%d' % (entry['path'], entry['line']) for entry in scan['declined']]
         checks['declined_listed'] = re.search(declined_pattern(refs), text) is not None
+        checks['declined_reasons'] = re.search(declined_cues(reason_cue(e) for e in scan['declined']), text,
+                                               re.I) is not None
+        checks['reconsider_notes'] = all(
+            re.search(declined_cues([reconsider_cue(e)]), text, re.I) if e.get('reconsider')
+            else not re.search(declined_cues([no_reconsider_cue(e)]), text, re.I) for e in scan['declined'])
+        if not any(e.get('reconsider') for e in scan['declined']):
+            checks['reconsider_notes'] = checks['reconsider_notes'] and not re.search(RECONSIDER_FREE, text, re.I)
+        cited = [(n, item) for n, item in enumerate(scan['plan']['items'], 1) if item.get('declined')]
+        if cited:
+            checks['declined_defects_cited'] = all(re.search(defect_cited_pattern(n, item), text, re.I)
+                                                   for n, item in cited)
     return checks
 
 

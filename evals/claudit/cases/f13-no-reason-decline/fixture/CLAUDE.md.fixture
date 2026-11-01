@@ -1,0 +1,7 @@
+# slugify-lite
+
+Setup decisions are in @docs/decisions.md.
+
+## Commands
+
+- `npm test` builds and runs the tests.

@@ -1,0 +1,7 @@
+# tally
+
+Setup decisions are in @docs/decisions.md.
+
+## Commands
+
+- `bin/test` checks the word counts against known files.

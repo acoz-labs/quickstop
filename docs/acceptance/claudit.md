@@ -25,7 +25,7 @@ action, an agent's success claim or matching headings is not evidence it happene
 ## Eval suite and baselines
 
 [`evals/claudit/`](../../evals/claudit/README.md) is Claudit's `claude plugin eval`
-release gate: nine synthetic fixtures with planted findings, run by
+release gate: thirteen synthetic fixtures with planted findings, run by
 `bin/claudit-eval` with a pinned model and `--max-cost-usd`. It isn't a per-PR
 check. A release compares its numbers with the recorded
 [baselines](claudit-eval-baselines.md) using the same model, judge and run count,

@@ -96,7 +96,17 @@ intent, the explanations and the diffs. Use the scan's output as given:
 - **Optional**: `optional` entries (procedure docs the loaded instructions already
   link) and `plan.overflow` items go under Also worth knowing, framed as optional.
 - **Declined**: `declined` lists features the project documents a deliberate choice
-  against. Never recommend them anywhere in the report.
+  against. Never recommend them anywhere in the report. Each entry's `reason` is the
+  project's stated reason, quoted exactly, or "no reason given".
+- **Worth reconsidering**: only an entry whose `reconsider` is set gets a "Worth
+  reconsidering" note, giving its `claim` and its `evidence` (the doc URL and heading,
+  or the `path:line`) exactly. Never write that note, or suggest revisiting a
+  decision, for any other entry, whatever you think of the reason; best practice is
+  never evidence. The note is advice: it sits on the declined item, not in Top
+  changes, and changes no grade.
+- **Defects a decline left behind**: a plan item with `declined` is a defect in the
+  declined feature's own configuration. Keep it as given, and add a line citing the
+  decline (its label and `path:line`) so the reader sees why it is still there.
 - **Footer**: `footer` is the footer's first line, verbatim.
 
 What the grades mean, for your one-sentence explanations: **Correctness**, does
@@ -145,10 +155,13 @@ in exactly this form:
    Why: <how the change serves the intent>.
    Change: <the exact diff, settings snippet or command, in a fenced block>
    Source: [<heading>](<url>)
+   Declined: <label> (`<path>:<line>`)
 
 ## Declined by the project
 
 - **<label>** (`<path>:<line>`): "<quote>"
+  Reason: "<reason>"
+  Worth reconsidering: <claim>. Evidence: [<heading>](<url>)
 
 ## Also worth knowing
 
@@ -158,7 +171,11 @@ in exactly this form:
 <footer>
 ```
 
-Omit "Declined by the project" when `declined` is empty. With no plan items the
+Omit "Declined by the project" when `declined` is empty. Write the Declined line only
+in a plan item with `declined`. When `reason` is "no reason given", write `Reason: no
+reason given.` without quotes. Write the Worth reconsidering line only for an entry
+with `reconsider`; its evidence is `[<heading>](<url>)` for a doc and `` `<path>:<line>` ``
+for a repository file. With no plan items the
 Top changes section is just the summary line ("No changes worth making: ..."),
 which is a valid report. Every change needs the problem, the reason, the exact
 change and the source. State the problem plainly, even when the grades already
