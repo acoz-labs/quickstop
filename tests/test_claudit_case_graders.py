@@ -97,8 +97,9 @@ DOCS = {
     'no-invented-reconsider': (
         'No declined entry has evidence that its reason no longer holds, so nothing may be offered for '
         'reconsideration (issue #184 requirement 2).\n\nScript-graded (case-insensitive, must not match): any '
-        'reconsider... or revisit... fails, unless directly after "not ", "not worth ", "no need to ", "nothing to ", '
-        '"nothing is worth " or "nothing here is worth ". A negation elsewhere on the line doesn\'t exempt it.'),
+        'reconsider... or revisit... fails, unless directly after "not worth ", "do not ", "does not ", "should not ", '
+        '"no need to ", "nothing to ", "nothing is worth " or "nothing here is worth ". A negation elsewhere on the '
+        'line doesn\'t exempt it, and a line with "why not" or ending in "?" always fails.'),
     'structure-defect-cited': (
         'The defect the decline left behind is in the plan and cites the decline (issue #184 requirement 3): '
         '{items}.\n\nScript-graded (case-insensitive): in Top changes, item N with its title word for word, then '
@@ -385,7 +386,14 @@ class CaseGraders(unittest.TestCase):
                     (case, free, good(extra='\n- Never mind the checklist; revisit the LSP decision.'), False),
                     (case, free, good(extra='\n- The hooks decision is not worth reconsidering.'), True),
                     (case, free, good(extra='\n- No need to revisit the hooks decision.'), True),
-                    (case, free, good(extra='\n- There is nothing to reconsider.'), True)]
+                    (case, free, good(extra='\n- There is nothing to reconsider.'), True),
+                    (case, free, good(extra='\n- You should not revisit the LSP decision.'), True),
+                    # Review round 2 (L3): a rhetorical suggestion is a note.
+                    (case, free, good(extra='\n- Why not reconsider the hooks decision?'), False),
+                    (case, free, good(extra='\n- Is it not worth revisiting the hooks decision?'), False),
+                    (case, free, good(extra='\n- Why not revisit hooks now that Stop hooks block.'), False),
+                    (case, free, good(extra='\n- Hooks: not reconsidered; is that still right?'), False),
+                    (case, free, good(extra='\n- The hooks were not removed; reconsider them.'), False)]
         if 'structure-defect-cited' in g:
             cite = g['structure-defect-cited']
             out += [(case, cite, good(), True),

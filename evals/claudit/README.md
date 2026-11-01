@@ -53,8 +53,9 @@ the scan like `structure-plan-items`: `structure-grades` (the scan's three lette
 `structure-declined-listed`, `structure-declined-reason` (each entry's "Reason:"
 with the first six words of the captured reason, or "no reason given"),
 `structure-reconsider` (F10: the note and its evidence URL or `path:line` inside the
-entry) or `no-invented-reconsider` (any reconsider or revisit fails unless a negation
-directly governs it, as in "not worth reconsidering" or "no need to revisit"), `structure-defect-cited` (F12: the item cites the decline on a line
+entry) or `no-invented-reconsider` (any reconsider or revisit fails unless a plain
+negation directly governs it, as in "not worth reconsidering" or "no need to
+revisit"; a question or "why not" always fails), `structure-defect-cited` (F12: the item cites the decline on a line
 that isn't its `Source:` line), and, where hooks stay declined,
 `no-invented-hooks-recommendation`. F1 to F9 are unchanged, so their 4.1.0 bars
 compare like for like.

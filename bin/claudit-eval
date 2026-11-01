@@ -83,10 +83,14 @@ def declined_pattern(refs):
 DECLINED_TOP = r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*'
 DECLINED_BODY = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
 ENTRY = r'(?:(?!\n[-*][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*?'
-# Any reconsider or revisit fails, wherever it is, unless a negation directly governs it ("not worth reconsidering",
-# "no need to revisit", "nothing to reconsider"); a negation elsewhere on the line doesn't count.
-RECONSIDER_FREE = (r'(?<!not worth )(?<!not )(?<!no need to )(?<!nothing to )(?<!nothing is worth )'
-                   r'(?<!nothing here is worth )\b(?:reconsider\w*|revisit\w*)')
+# Any reconsider or revisit fails, wherever it is, unless a plain negation directly governs it ("not worth
+# reconsidering", "do not revisit", "no need to revisit", "nothing to reconsider"); a negation elsewhere on the line
+# doesn't count. A line that asks ("Why not reconsider ...", "Is it not worth revisiting ...?") always fails.
+RECONSIDER_WORD = r'\b(?:reconsider|revisit)\w*'
+RECONSIDER_FREE = (r'(?:^|\n)(?:[^\n]*\bwhy not\b[^\n]*%s|[^\n]*%s[^\n]*\?[ \t]*(?=\n|(?![\s\S]))'
+                   r'|[^\n]*?(?<!not worth )(?<!do not )(?<!does not )(?<!should not )(?<!no need to )(?<!nothing to )'
+                   r'(?<!nothing is worth )(?<!nothing here is worth )%s)' % (RECONSIDER_WORD, RECONSIDER_WORD,
+                                                                              RECONSIDER_WORD))
 
 
 def words_pattern(text, limit=6):
