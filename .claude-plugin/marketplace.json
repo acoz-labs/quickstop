@@ -8,13 +8,13 @@
   "plugins": [
     {
       "name": "claudit",
-      "version": "4.1.0",
+      "version": "4.2.0",
       "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/acoz-labs/quickstop.git",
         "path": "plugins/claudit",
-        "sha": "70b883abfbaa6cb99b7b89dd344507ff1a2310d0"
+        "sha": "e3b1cd2928155855e8093174263d0b038ee92580"
       },
       "keywords": [
         "audit",

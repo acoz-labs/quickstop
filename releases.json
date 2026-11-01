@@ -4,8 +4,8 @@
     {
       "name": "claudit",
       "harness": "claude-code",
-      "commit": "70b883abfbaa6cb99b7b89dd344507ff1a2310d0",
-      "sha256": "0168de4e216155ff09e20260dcb89afd371e01ba0a7905ccfc7f8a57d6ac8802",
+      "commit": "e3b1cd2928155855e8093174263d0b038ee92580",
+      "sha256": "277ba1f77dd48b5fc6fab1eb1e9babefdfc56e32c27254dc77d590cfd8de3825",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claudit",
@@ -13,7 +13,7 @@
       },
       "manifest": {
         "name": "claudit",
-        "version": "4.1.0",
+        "version": "4.2.0",
         "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
         "author": {
           "name": "quickstop",
@@ -30,9 +30,9 @@
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 174,
-        "artifact": "sha256:505b8b358950a3b16b3a4d9bd3b9f6dc77da0d56ea82e89fc047e1a1512a5083",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/174#issuecomment-6548783164"
+        "issue": 184,
+        "artifact": "sha256:abb26de7d1561aeb13e6b0dcadfb778541c9f555cee7b11258942ad5800f0e77",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/184#issuecomment-6564094632"
       }
     },
     {
