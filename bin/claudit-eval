@@ -83,7 +83,10 @@ def declined_pattern(refs):
 DECLINED_TOP = r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*'
 DECLINED_BODY = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
 ENTRY = r'(?:(?!\n[-*][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*?'
-RECONSIDER_FREE = (r'(?:^|\n)(?![^\n]*\b(?:no|not|nothing|none|never)\b)[^\n]*\b(?:reconsider\w*|revisit\w*)')
+# Any reconsider or revisit fails, wherever it is, unless a negation directly governs it ("not worth reconsidering",
+# "no need to revisit", "nothing to reconsider"); a negation elsewhere on the line doesn't count.
+RECONSIDER_FREE = (r'(?<!not worth )(?<!not )(?<!no need to )(?<!nothing to )(?<!nothing is worth )'
+                   r'(?<!nothing here is worth )\b(?:reconsider\w*|revisit\w*)')
 
 
 def words_pattern(text, limit=6):

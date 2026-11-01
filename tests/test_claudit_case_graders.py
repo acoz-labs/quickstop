@@ -96,8 +96,9 @@ DOCS = {
         'then, before the entry ends, the evidence URL or `path:line` (optionally backticked).'),
     'no-invented-reconsider': (
         'No declined entry has evidence that its reason no longer holds, so nothing may be offered for '
-        'reconsideration (issue #184 requirement 2).\n\nScript-graded (case-insensitive, must not match): a line '
-        'with reconsider... or revisit... and none of no, not, nothing, none or never fails.'),
+        'reconsideration (issue #184 requirement 2).\n\nScript-graded (case-insensitive, must not match): any '
+        'reconsider... or revisit... fails, unless directly after "not ", "not worth ", "no need to ", "nothing to ", '
+        '"nothing is worth " or "nothing here is worth ". A negation elsewhere on the line doesn\'t exempt it.'),
     'structure-defect-cited': (
         'The defect the decline left behind is in the plan and cites the decline (issue #184 requirement 3): '
         '{items}.\n\nScript-graded (case-insensitive): in Top changes, item N with its title word for word, then '
@@ -371,7 +372,20 @@ class CaseGraders(unittest.TestCase):
             out += [(case, free, good(), True),
                     (case, free, good(extra='\n- Nothing here is worth reconsidering.'), True),
                     (case, free, good(extra='\n- Worth reconsidering: hooks now block stopping.'), False),
-                    (case, free, good(extra='\n- You may want to revisit the hooks decision.'), False)]
+                    (case, free, good(extra='\n- You may want to revisit the hooks decision.'), False),
+                    # Review round 1 (M1): a negation elsewhere on the line doesn't exempt a note.
+                    (case, free, good(extra='\n- **Hooks** (`docs/decisions.md:3`): "x" Reason: no reason given. '
+                                            'Worth reconsidering: Stop hooks can now block.'), False),
+                    (case, free, good(extra='\n- Reason: "because the project has no typed code". Worth '
+                                            'reconsidering: LSP is mature now.'), False),
+                    (case, free, good(extra='\n  Worth reconsidering: a Stop hook can keep Claude from stopping, '
+                                            'which no longer matches the retirement. Evidence: [Stop](u)'), False),
+                    (case, free, good(extra='\n- None of these needs a note, but hooks are worth reconsidering.'),
+                     False),
+                    (case, free, good(extra='\n- Never mind the checklist; revisit the LSP decision.'), False),
+                    (case, free, good(extra='\n- The hooks decision is not worth reconsidering.'), True),
+                    (case, free, good(extra='\n- No need to revisit the hooks decision.'), True),
+                    (case, free, good(extra='\n- There is nothing to reconsider.'), True)]
         if 'structure-defect-cited' in g:
             cite = g['structure-defect-cited']
             out += [(case, cite, good(), True),

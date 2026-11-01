@@ -605,12 +605,22 @@ class GradeTests(Temp):
                'declined_reasons': good.replace('  Reason: "CI is the gate"', '  Reason: no reason given.'),
                'reconsider_notes': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Hooks are '
                                                 'worth reconsidering.\n'),
+               # Review round 1 (M1): a negation elsewhere on the line doesn't exempt the note.
+               'reconsider_notes_no_reason': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Reason: '
+                                                          'no reason given. Worth reconsidering: hooks block now.\n'),
+               'reconsider_notes_no_longer': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Worth '
+                                                          'reconsidering: this no longer matches the retirement.\n'),
                'optional_not_planned': good.replace('2. **Add a skill for docs/release.md**',
                                                     '2. **Add a skill for docs/release.md** and docs/operations/sdlc.md')}
-        for check, text in bad.items():
-            with self.subTest(check=check):
+        for name, text in bad.items():
+            check = 'reconsider_notes' if name.startswith('reconsider_notes') else name
+            with self.subTest(check=name):
                 self.assertNotEqual(text, good)
                 self.assertFalse(ce.grade_report(text, scan, helper)[check])
+        for text in ('- Hooks are not worth reconsidering.', '- No need to revisit the hooks decision.'):
+            with self.subTest(allowed=text):
+                self.assertTrue(ce.grade_report(good.replace('## Also worth knowing\n', '## Also worth knowing\n\n%s\n'
+                                                             % text), scan, helper)['reconsider_notes'])
         report, scan_path = self.base / 'report.md', self.base / 'scan.json'
         report.write_text(good)
         scan_path.write_text(json.dumps(scan))
