@@ -51,7 +51,7 @@ For this branch's PRs (`gh pr view`), against the output style. Template section
 
 ### 4. Unpushed commit messages
 
-Suggest revised wording only. This audit never rewrites history, pushed or not, never pushes and never merges; the skill's frontmatter removes those commands while it runs.
+Suggest revised wording only. This audit never rewrites history, pushed or not, never pushes and never merges. While it runs, the skill's frontmatter blocks the plain forms of those commands, such as `git push`, `git commit --amend`, `git reset` and `gh pr merge`; variants such as `git -C <dir> push` or `git commit -a --amend` aren't blocked.
 
 ## Out of scope, deliberately
 
