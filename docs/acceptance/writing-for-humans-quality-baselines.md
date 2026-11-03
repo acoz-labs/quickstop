@@ -13,7 +13,7 @@ Humans. Whole-reply hits were 54, 54 and 55 of 63. No arm stated the stakes in i
 opening in any of 21 runs. Writing for Humans is clearly better on one measure: it put
 an identifier or `file:line` at the start of 9 sentences, against 23–24 for the
 others. It was not shorter than Concise (303 against 286 median words), and its runs
-cost about 1.7 times as much (/bin/zsh.052 against /bin/zsh.031). Every reply in every arm passed
+cost about 1.7 times as much ($0.052 against $0.031). Every reply in every arm passed
 pedantry and had no repeated sentences, so on these tasks those two graders don't
 separate the arms.
 
@@ -231,13 +231,20 @@ How calibration got there, before any counted run:
   with the claim and sometimes the ask, and give consequences later. This is the
   clearest gap a 1.0 style could target. It's also the item that most depends on the
   80-word, 3-sentence cut.
-- **Case 2's ask key is "none", but every reply asks something.** The task offers no
-  Write tool, so every reply, in every arm, ends by asking the reader to paste the
-  record into the wiki or enable Write. The comparator correctly fails that against
-  "none". It costs each arm the same 3 whole-read items, so comparisons still hold,
-  but absolute whole-read scores are 3 lower than the writing alone would earn. Fix
-  this in a later suite version (offer Write, or reword the prompt), not by regrading
-  this baseline.
+- **Case 2's ask key is "none", but every reply asks something.** All 9 whole-read
+  asks failed, 3 in each arm. Two things in the setup invite an ask. The task offers
+  no Write tool, so replies ask the reader to paste the record into the wiki or enable
+  Write (default run 1, Concise runs 1 and 3, Writing for Humans runs 1–3). The
+  transcript ends with Theo, who was to write it up, saying he's out and asking
+  whoever writes it to post it, so replies also ask who owns posting the record
+  (default runs 2 and 3, Concise run 2, and alongside the paste request in Concise run 1
+  and Writing for Humans runs 1 and 2). Some readers also picked up an optional
+  follow-up, such as checking the record's date. The comparator correctly fails these
+  against "none". Each arm loses the same 3 whole-read items, so comparisons still
+  hold, but absolute whole-read scores are 3 lower than the writing alone would earn.
+  Fix this in a later suite version, not by regrading this baseline: offer Write, or
+  reword the prompt and transcript so no posting step is left open, or key the ask as
+  "post the record to the wiki".
 - **Pedantry and repeated content are at the ceiling.** All 63 replies passed pedantry
   and none repeated a sentence. Calibration shows both graders catch clear cases, so
   on these tasks neither separates the arms.
