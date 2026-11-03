@@ -543,10 +543,10 @@ class GradeTests(Temp):
                                         'Follow `docs/operations/sdlc.md`.\n')
         (root / 'docs/operations').mkdir(parents=True)
         (root / 'docs/repository.md').write_text('Claude Code hooks were retired; CI is the gate.\n')
-        (root / 'docs/operations/sdlc.md').write_text('# Delivery\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
-        (root / 'docs/release.md').write_text('# Release\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
+        (root / 'docs/operations/sdlc.md').write_text('# Delivery\n' + ''.join('%d. Run step %d\n' % (n, n) for n in range(1, 6)))
+        (root / 'docs/release.md').write_text('# Release\n' + ''.join('%d. Run step %d\n' % (n, n) for n in range(1, 6)))
         (root / 'tests/reports').mkdir(parents=True)
-        (root / 'tests/reports/run.md').write_text('# Release report\n' + ''.join('%d. s\n' % n for n in range(1, 6)))
+        (root / 'tests/reports/run.md').write_text('# Release report\n' + ''.join('%d. Run step %d\n' % (n, n) for n in range(1, 6)))
         (root / 'bin/ci').write_text('#!/bin/sh\n')
         (root / 'bin/ci').chmod(0o755)
         env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
@@ -710,6 +710,11 @@ with open(os.environ['FAKE_ARGS'], 'a') as handle:
                              'parent': sorted(os.listdir('..'))}}) + '\\n')
 if judge:
     print(json.dumps({{'result': os.environ.get('FAKE_JUDGE_REPLY', 'PASS'), 'total_cost_usd': 0.001}}))
+elif '--plugin-dir' in sys.argv:  # claudit-deep: the helper's deep subcommand records its nested call
+    with open(os.environ['CLAUDIT_DEEP_RECORD'], 'a') as handle:
+        handle.write(json.dumps({{'status': 'ran', 'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2}}) + '\\n')
+    print(json.dumps({{'result': '# Claudit: x\\n\\n`CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.12,
+                      'permission_denials': []}}))
 elif sys.argv[2] == '/doctor':
     print(json.dumps({{'result': 'Doctor: `CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.1,
                       'permission_denials': [{{'tool_name': 'Bash'}}]}}))
@@ -821,8 +826,26 @@ class CombinedArmTests(Temp):
         proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'plain', '--model', 'm', '--max-cost-usd',
                                '1', '--max-budget-usd', '1', '--dry-run'], capture_output=True, text=True, env=self.fake())
         self.assertEqual(proc.returncode, 1)
-        self.assertIn('applies only to the doctor-combined arm', proc.stderr)
+        self.assertIn('applies only to the doctor-combined and claudit-deep arms', proc.stderr)
         self.assertFalse(self.calls.exists())
+
+    def test_claudit_deep_runs_headless_on_the_candidate_and_counts_the_nested_call(self):
+        out = self.base / 'deep'
+        proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'claudit-deep', '--model', 'claude-sonnet-5-5',
+                               '--max-budget-usd', '0.4', '--max-cost-usd', '5', '--case', 'f17-scope', '--output-dir',
+                               str(out)], capture_output=True, text=True, env=self.fake(), stdin=subprocess.DEVNULL)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        call = [r for r in self.records() if '--plugin-dir' in r['argv']]
+        self.assertEqual(len(call), 1)
+        self.assertEqual(call[0]['argv'], ['-p', ce.DEEP_INVOKE, '--plugin-dir', str(ROOT / 'plugins/claudit'),
+                                           *ce.HEADLESS_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.4'])
+        self.assertTrue(call[0]['cwd'].endswith('/home/cwd'))
+        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
+        self.assertEqual(run['costUsd'], 0.42)  # the outer call and the nested prompt-audit
+        self.assertEqual(run['parts'][0]['nested'], [{'status': 'ran', 'cost_usd': 0.3, 'seconds': 40.0,
+                                                      'permission_denials': 2}])
+        self.assertTrue({g['name']: g['passed'] for g in run['graders']}['finding-symlink-real-path'])
+        self.assertIn('nested: claudit.py deep runs claude -p "/doctor prompt-audit ."', (out / 'command.txt').read_text())
 
     def test_refuses_an_instruction_file_above_the_workspace(self):
         env = self.fake()

@@ -22,7 +22,15 @@ only the accepted release; a development checkout can contain a newer candidate.
 /claudit:claudit hooks            # same, with a deeper look at hooks
 /claudit:claudit --read-only      # report only
 /claudit:claudit --user           # also check your ~/.claude settings and CLAUDE.md
+/claudit:claudit --deep           # also run /doctor prompt-audit and weigh its findings
 ```
+
+`--deep` runs Claude Code's own instruction audit, `/doctor prompt-audit .`, headless
+and read-only in the project (project settings only, no edits, Bash denied, Claudit
+not loaded again), and `claude doctor` for invalid settings, user level included. It
+costs one more model call and up to three minutes. Every prompt-audit finding is kept
+in a change, added as a note, or dropped with a reason. If the nested run can't happen
+(no login, a sandbox, no permission) the footer says so and the report is still graded.
 
 Asking Claude to audit or improve the Claude Code setup also invokes it.
 
@@ -50,7 +58,11 @@ Asking Claude to audit or improve the Claude Code setup also invokes it.
    reason given"). Claudit doesn't recommend them or count them against Coverage. A
    declined item gets a "Worth reconsidering" note only when Claudit can cite evidence
    that the stated reason no longer holds.
-5. **An offer to apply** the changes you select, in place or on a branch in an
+5. **Always loaded**: a table of what loads into every session, in words and estimated
+   tokens: instruction files, `@` imports, and the skill and subagent descriptions
+   Claude sees. A file a plain link points at isn't loaded; one an unconditional "see
+   X" points at is listed as "likely read".
+6. **An offer to apply** the changes you select, in place or on a branch in an
    isolated worktree with a pull request through `gh`.
 
 Process detail stays in a short footer. Its first line gives the Claudit version and
@@ -114,6 +126,34 @@ and the diffs. The rules:
   (`PRE_CHANGE_SHA`, `<sha>`) are never suggested, and no suggestion uses a
   wildcard. An unlabelled fence counts as commands, so put output in a `text` or
   `console` fence.
+- **Stale facts.** Paths, folders, scripts and commands named in the in-repo
+  instruction files, skills, subagents and commands must exist: package.json
+  scripts (`npm run x`, `bun run x`), Makefile and justfile targets, `bin/` and
+  `scripts/` files. A backticked dependency in a sentence that names a manifest
+  (`pyproject.toml`, `package.json`, …) must be declared there, and a skill or
+  subagent named as "the `x` skill" must exist (not checked when the project enables a
+  plugin, which can supply them). Each missing one is a Correctness finding, all of a
+  file's are one change, and Alignment can't be A while one stands. A name in a line
+  that says it isn't there ("provides no `bin/container`") or is conditional ("where
+  supported") is not stale.
+- **Human gates.** A sentence in the loaded instructions where a person must approve
+  a merge, deploy, release, publish or push to main, with no ask or deny rule for its
+  command, is a Coverage change: the exact `Bash(<command> *)` ask rule, plus the plain
+  statement that branch protection (or the deploy system's approval) is the real gate
+  and a client-side rule can be got around. The command is the one the sentence or the
+  instructions name, a `bin/` or `scripts/` file named for the verb, or `gh pr merge`
+  and `git push`.
+- **Opt-in git hooks.** `core.hooksPath`, husky, lefthook or pre-commit set up in the
+  repo with no SessionStart hook enabling them for agent and cloud sessions is a
+  Coverage low, unless the project documents a decision against hooks.
+- **Context, against documented limits only.** CLAUDE.md over 200 lines; a skill's
+  `description` plus `when_to_use` over 1,536 characters; custom subagent descriptions
+  over 15,000 tokens. A skill only a subagent reads (by path or `skills:`), named
+  nowhere else as one to run, without `disable-model-invocation: true` is an Alignment
+  low. A sentence of 8 or more words copied word for word into three or more files
+  (instruction files, skills, subagents, docs, script strings) is one Alignment low,
+  listed with its paraphrase candidates; two copies are left alone. Sizes are in words
+  and estimated tokens.
 - **Procedures already reachable are optional.** A procedure doc that loaded team
   instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
   CLAUDE.local.md) already link, as a Markdown link or a bare or backticked path, is
@@ -139,6 +179,11 @@ and the diffs. The rules:
   own name, so `plugins/test-runner` is scanned. Symlinks are judged by their target
   too, and a test directory's own `CLAUDE.md` is still an instruction file. Anything
   else the tests load can be dismissed.
+- **Declarative lists aren't procedures.** A numbered list counts as procedure steps
+  only when at least half its items open with a verb ("Run", "Tag", "Push") or order
+  the steps (then, next, first, finally); standing principles or facts ("1. The public
+  API is stable") never are. Translations (`i18n/`, `locales/`, …) and reference
+  pages (`reference/`, `api/`) aren't either.
 - **Documented declines.** Claudit reads the loaded team instructions, the Markdown
   files they link and the README. A sentence declines a feature (hooks, plugin evals,
   plugin validation, pre-approved commands, procedure skills, code intelligence) only
@@ -214,18 +259,27 @@ and the diffs. The rules:
   doesn't know yet.
 - One read-only Sonnet `auditor` agent handles cross-file review on large setups;
   small repositories don't use it. The skill itself runs on Sonnet.
-- Claudit points you to the native checks it can't run for you: `/doctor`,
-  `/doctor prompt-audit`, `/insights` and `/skill-doctor`.
+- Hand-offs appear only when a finding calls for them: `/skill-doctor` (many or long
+  skill descriptions), `/fewer-permission-prompts` (to confirm an allowlist from real
+  use), `/run-skill-generator` and `/verify` (no check command), `/context` (a large
+  always-loaded context).
+- Files above the repository get one line each and are never graded, with a flag
+  when they change how the repo's own files load (a `CLAUDE.md` above means the repo's
+  `AGENTS.md` isn't read on its own). Symlinked instruction files are named with their
+  real paths.
 
 ## State and writes
 
-Claudit keeps no cache and writes nothing outside the project. An audit writes
-nothing at all. It writes only when you apply changes, or when you ask it not to
-repeat a suggestion: that goes in `.claude/claudit-dismissed.json` in the project.
+Claudit keeps no cache. An audit writes nothing at all. It writes only when you apply
+changes, or when you ask it not to repeat a suggestion: that is stored for you alone
+in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/dismissed/<repository key>.json`),
+or with `--shared` in `.claude/claudit-dismissed.json` for the whole team. The audit
+reads both, and the footer says where its dismissals came from.
 
 ## Requirements
 
-Tested with Claude Code 2.1.312. `python3` 3.9 or later; without it Claudit reads the
+Tested with Claude Code 2.1.317; `--deep` needs `/doctor prompt-audit` (2.1.283 or
+later) and a login for the nested run. `python3` 3.9 or later; without it Claudit reads the
 files itself at lower confidence. Git for branch delivery and `gh` for pull requests.
 
 ## Upgrading from 3.x
