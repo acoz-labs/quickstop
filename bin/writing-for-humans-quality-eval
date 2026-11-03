@@ -22,7 +22,9 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-SUITE = ROOT / 'evals/writing-for-humans-quality'
+SUITE_PATH = 'evals/writing-for-humans-quality'
+RUNNER_PATH = 'bin/writing-for-humans-quality-eval'
+SUITE = ROOT / SUITE_PATH
 PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
 PLUGIN_NAME = 'writing-for-humans'
 # Arm name -> the `outputStyle` setting it runs with. Only the writing-for-humans arm loads the plugin:
@@ -90,19 +92,12 @@ def units(text):
 
     Fenced code and table rows are structured data, not prose, and are left out. Each heading, list item
     and paragraph starts a new unit; paragraphs and list items split into sentences. A wholly bold line
-    without a sentence ending ("**What changes**", "**Why:**") is a heading, and so is a wholly bold first
-    sentence with more text after it in the same paragraph ("**Verdict.** The job...")."""
+    without a sentence ending ("**What changes**", "**Why:**") is a heading."""
     found, paragraph, fence = [], [], None
 
     def flush():
         if paragraph:
-            parts = split_sentences(' '.join(paragraph))
-            # A run-in label ("**Verdict.** The job...") heads the text after it, so it is a heading too.
-            label = LABEL.match(parts[0]) if len(parts) > 1 else None
-            if label:
-                found.append(('heading', label['label'].strip()))
-                parts = parts[1:]
-            found.extend(('sentence', s) for s in parts)
+            found.extend(('sentence', s) for s in split_sentences(' '.join(paragraph)))
             paragraph.clear()
 
     for line in text.splitlines():
@@ -497,17 +492,52 @@ def config_changes(before, after):
             if before.get(name) != after.get(name)]
 
 
-def candidate(plugin_source):
+def frozen_ids():
+    """What a result is tied to: the suite tree and runner blob at HEAD, and whether the working tree is clean."""
+    return {'suite_tree': git('rev-parse', f'HEAD:{SUITE_PATH}'), 'runner_blob': git('rev-parse', f'HEAD:{RUNNER_PATH}'),
+            'clean': not git('status', '--porcelain')}
+
+
+def candidate(plugin_source, ids):
     rel = os.path.relpath(Path(plugin_source).resolve(), ROOT)
     return '\n'.join([
         f'head: {git("rev-parse", "HEAD")}',
         f'tree: {git("rev-parse", "HEAD^{tree}")}',
         f'plugin tree ({rel} at HEAD): {git("rev-parse", f"HEAD:{rel}")}',
         f'plugin bytes digest (working tree): {tree_digest(plugin_source)}',
-        f'suite tree (evals/writing-for-humans-quality at HEAD): {git("rev-parse", "HEAD:evals/writing-for-humans-quality")}',
-        f'runner blob (bin/writing-for-humans-quality-eval at HEAD): {git("rev-parse", "HEAD:bin/writing-for-humans-quality-eval")}',
-        f'working tree clean: {not git("status", "--porcelain")}',
+        f'suite tree ({SUITE_PATH} at HEAD): {ids["suite_tree"]}',
+        f'runner blob ({RUNNER_PATH} at HEAD): {ids["runner_blob"]}',
+        f'working tree clean: {ids["clean"]}',
     ]) + '\n'
+
+
+def counted(filtered, runs):
+    """A run that can count toward a baseline or gate: the whole suite, or a baseline's number of runs."""
+    return not filtered or runs >= BASELINE_RUNS
+
+
+def calibration_problems(calibration, cases, ids):
+    """Why a calibration doesn't clear a counted run on this suite, or [] when it does.
+
+    It must have run the judges on a clean tree with the same suite tree and runner blob, and graded every
+    sample of every case as expected."""
+    if calibration is None:
+        return ['no calibration: a counted run needs a passing `calibrate --judges` on the same tree']
+    problems = [] if calibration.get('judges') else ['calibration ran without the judges']
+    recorded = calibration.get('candidate') or {}
+    if not recorded.get('clean'):
+        problems.append('calibration ran on a dirty working tree')
+    problems += [f'calibration {key} {recorded.get(key)} differs from {ids.get(key)}'
+                 for key in ('suite_tree', 'runner_blob') if recorded.get(key) != ids.get(key)]
+    rows = calibration.get('rows') or []
+    for name in cases:
+        for sample in SAMPLES:
+            wanted = {'cold-read-opening', 'cold-read-whole'} | (set() if sample == 'borderline-fail' else {'pedantry'})
+            missing = wanted - {r.get('grader') for r in rows if r.get('case') == name and r.get('sample') == sample}
+            if missing:
+                problems.append(f'calibration did not grade {name} {sample} with {", ".join(sorted(missing))}')
+    problems += [f"calibration failed: {r.get('case')} {r.get('sample')} {r.get('grader')}" for r in rows if not r.get('ok')]
+    return problems
 
 
 def claude_version():
@@ -578,6 +608,18 @@ def run(args):
         raise Failure(f'unknown case: {", ".join(unknown)}')
     cases = {name: all_cases[name] for name in names}
     arms = args.arm or list(ARMS)
+    filtered = bool(args.case or args.arm)
+    ids = frozen_ids()
+    calibration = None
+    if counted(filtered, args.runs):
+        if not ids['clean']:
+            raise Failure('a counted run needs a clean working tree')
+        if not args.calibration:
+            raise Failure('a counted run needs --calibration: the output dir of a passing `calibrate --judges`')
+        calibration = read_json(Path(args.calibration) / 'calibration.json')
+        problems = calibration_problems(calibration, all_cases, ids)
+        if problems:
+            raise Failure('the calibration does not clear this run: ' + '; '.join(problems))
     out = Path(args.output_dir).resolve() if args.output_dir else SUITE / 'results' / \
         dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     if out.exists() and any(out.iterdir()):
@@ -588,8 +630,10 @@ def run(args):
     shutil.copytree(source, plugin_dir, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     version = json.loads((plugin_dir / '.claude-plugin/plugin.json').read_text()).get('version')
     digest = tree_digest(plugin_dir)
-    (out / 'CANDIDATE.txt').write_text(candidate(source))
-    filtered = bool(args.case or args.arm)
+    (out / 'CANDIDATE.txt').write_text(candidate(source, ids))
+    (out / 'candidate.json').write_text(json.dumps(ids, indent=2) + '\n')
+    if calibration:
+        (out / 'calibration.json').write_text(json.dumps(calibration, indent=2) + '\n')
     expected = expected_suite(cases, arms, args.runs, filtered)
     (out / 'suite.json').write_text(json.dumps(expected, indent=2) + '\n')
     settings = {'model': args.model, 'judge_model': args.judge_model, 'claude_version': claude_version(),
@@ -760,6 +804,7 @@ def summarize(out, write=True):
     cases = load_cases()
     problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'),
                               cases)
+    problems += provenance_problems(out, expected, cases)
     summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == BASELINE_RUNS,
                'problems': problems, 'settings': read_json(out / 'settings.json', {}),
                'arms': {arm: arm_metrics([r for r in records if r['arm'] == arm], cases) for arm in expected['arms']},
@@ -770,6 +815,19 @@ def summarize(out, write=True):
         (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
         (out / 'summary.md').write_text(markdown(summary) + '\n')
     return summary
+
+
+def provenance_problems(out, expected, cases):
+    """A result must come from the suite and runner at HEAD, and a counted one from a matching calibration."""
+    recorded = read_json(Path(out) / 'candidate.json')
+    if recorded is None:
+        return ['no candidate.json: the suite tree and runner blob were not recorded']
+    head = frozen_ids()
+    problems = [f'result {key} {recorded.get(key)} differs from HEAD {head[key]}'
+                for key in ('suite_tree', 'runner_blob') if recorded.get(key) != head[key]]
+    if counted(expected.get('filtered'), expected['runs']):
+        problems += calibration_problems(read_json(Path(out) / 'calibration.json'), cases, recorded)
+    return problems
 
 
 def recorded_judge_cost(directory):
@@ -870,6 +928,7 @@ def calibration_expectations(sample, case, grades):
 
 
 def calibrate(args):
+    ids = frozen_ids()
     cases = load_cases()
     names = args.case or list(cases)
     out = Path(args.output_dir).resolve() if args.output_dir else None
@@ -901,7 +960,7 @@ def calibrate(args):
     if out:
         out.mkdir(parents=True, exist_ok=True)
         (out / 'calibration.json').write_text(json.dumps(
-            {'judges': bool(args.judge_model and args.judges), 'judge_model': args.judge_model,
+            {'judges': bool(args.judge_model and args.judges), 'judge_model': args.judge_model, 'candidate': ids,
              'cost_usd': round(budget.spent, 4) if budget else 0, 'rows': rows}, indent=2) + '\n')
     print('| Case | Sample | Grader | As expected | Detail |\n|---|---|---|---|---|')
     for row in rows:
@@ -943,6 +1002,7 @@ def main():
     p.add_argument('--arm', action='append', choices=list(ARMS), help='repeat for more (a subset run)')
     p.add_argument('--jobs', type=positive_int, default=3)
     p.add_argument('--no-judges', action='store_true')
+    p.add_argument('--calibration', help='output dir of a passing `calibrate --judges` on this tree (counted runs)')
     p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
     p.add_argument('--output-dir', help='default evals/writing-for-humans-quality/results/<UTC timestamp>')
     p = sub.add_parser('grade', help='regrade a result dir: script graders, and judges with --judges (paid)')
