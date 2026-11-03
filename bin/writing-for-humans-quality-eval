@@ -33,8 +33,9 @@ SCRIPT_GRADERS = ('repeated-content', 'words', 'identifier-subject', 'ask-questi
 JUDGE_GRADERS = ('cold-read-opening', 'cold-read-whole', 'pedantry')
 TASK_TOOLS = ('Read', 'Glob', 'Grep', 'Skill')
 # Flags every model call shares: the normal login, no user settings, no MCP servers, nothing saved.
+# DISABLE_AUTOUPDATER also stops the background marketplace refresh, which rewrites known_marketplaces.json.
 ISOLATION = ('--setting-sources', 'project,local', '--strict-mcp-config', '--no-session-persistence')
-ENV = {'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'}
+ENV = {'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1', 'DISABLE_AUTOUPDATER': '1'}
 REAL_CONFIG = ('.claude/settings.json', '.claude/plugins/installed_plugins.json',
                '.claude/plugins/known_marketplaces.json')
 OPENING_SENTENCES = 3
@@ -847,10 +848,10 @@ def main():
     def paid(p, task=True):
         p.add_argument('--judge-model', default='claude-sonnet-5-5')
         p.add_argument('--max-cost-usd', type=positive_cost, required=True, help='ceiling for this whole invocation')
-        p.add_argument('--judge-max-usd', type=positive_cost, default=0.15, help='ceiling per judge call')
+        p.add_argument('--judge-max-usd', type=positive_cost, default=0.05, help='ceiling per judge call')
         p.add_argument('--ledger', help='spend ledger to append this invocation to')
         if task:
-            p.add_argument('--task-max-usd', type=positive_cost, default=0.75, help='ceiling per task run')
+            p.add_argument('--task-max-usd', type=positive_cost, default=0.30, help='ceiling per task run')
 
     p = sub.add_parser('preflight', help='prove each arm activates its style; no model call')
     p.add_argument('--arm', action='append', choices=list(ARMS))
@@ -861,7 +862,7 @@ def main():
     p.add_argument('--output-dir')
     p.add_argument('--judge-model', default='claude-sonnet-5-5')
     p.add_argument('--max-cost-usd', type=positive_cost, default=1.0)
-    p.add_argument('--judge-max-usd', type=positive_cost, default=0.15)
+    p.add_argument('--judge-max-usd', type=positive_cost, default=0.05)
     p.add_argument('--ledger')
     p = sub.add_parser('run', help='run the arms, then grade every output')
     p.add_argument('--model', required=True)
