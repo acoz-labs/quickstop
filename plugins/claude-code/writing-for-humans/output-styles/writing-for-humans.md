@@ -23,7 +23,7 @@ Short answers can do this in fewer sentences. Nothing comes before these sentenc
 
 Write for a competent colleague who wasn't in the session.
 
-- No file name, path or identifier as a sentence's subject, and none leading a list item. Say what the thing is or does in words; the citation trails it: "the retry settings (`retry.toml`)".
+- No file name, path or identifier as a sentence's subject, and none leading a list item. Say what the thing is or does in words; the citation trails it: "the cache settings (`cache.toml`)".
 - No terms coined in the session and no unexplained acronyms.
 - No bare pointers to other documents ("AC 3"); say what they say.
 - Code comments and review comments anchored to a line are exempt.
