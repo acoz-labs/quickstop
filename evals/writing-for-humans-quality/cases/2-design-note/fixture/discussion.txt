@@ -1,0 +1,17 @@
+Ferrylog sync: job queue discussion, Tue 3 Nov, 14:00-14:35
+Present: Dana (sync lead), Marco (platform), Ines (SRE), Theo (backend)
+
+Dana: Okay, the question is whether the sync job queue stays in SQLite or moves to the shared Postgres cluster. We said we'd settle it today.
+Theo: Quick recap for the notes. Right now the queue is a SQLite file on the sync host, sync-01. We turned on WAL mode last month and the locking errors went away.
+Marco: Platform's position is we'd prefer everything stateful in Postgres, but we're not going to insist. The Postgres cluster has a two-week lead time for a new database and it adds a network hop to every enqueue.
+Ines: From the SRE side, SQLite has been quiet since WAL. Zero pages in four weeks. Backups are a file copy every hour, which we already have.
+Dana: What's our load?
+Theo: About 40 jobs a minute at peak. I benchmarked the WAL setup at 2,000 a minute on sync-01 before it got uncomfortable.
+Marco: The real limit isn't throughput, it's that SQLite means one host. If you ever want two sync workers on two machines, it doesn't work.
+Dana: When would we need that?
+Theo: Capacity plan says one host is fine until roughly 500 jobs a minute. We're nowhere near. Maybe next year if the enterprise tier lands.
+Ines: Also, one host is a single point of failure, but sync is already single-host for other reasons, so the queue doesn't make that worse.
+Marco: Fine. Then I'd just ask that it's written down that this is a one-host design, so nobody's surprised later.
+Dana: Agreed. Decision: we keep the queue in SQLite with WAL on sync-01. We revisit and move to Postgres if we need more than one sync host, which the capacity plan puts at around 500 jobs a minute. Theo, can you write that up?
+Theo: Will do. Actually, can whoever writes it up do it? I'm out tomorrow.
+Dana: Sure. Anything else? No? Thanks all.

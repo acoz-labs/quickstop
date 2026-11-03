@@ -1,0 +1,907 @@
+#!/usr/bin/env python3
+"""Measure how readable Claude's replies are under three output styles: default, Concise and Writing for Humans."""
+import sys
+
+if sys.version_info < (3, 11):
+    sys.exit('writing-for-humans-quality-eval requires Python 3.11+; put the pinned interpreter first in PATH')
+
+import argparse
+import concurrent.futures
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shutil
+import statistics
+import subprocess
+import tempfile
+import threading
+import time
+
+ROOT = Path(__file__).resolve().parent.parent
+SUITE = ROOT / 'evals/writing-for-humans-quality'
+PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+PLUGIN_NAME = 'writing-for-humans'
+# Arm name -> the `outputStyle` setting it runs with. Only the writing-for-humans arm loads the plugin:
+# loading it everywhere would let the default and Concise arms call its writing-style skill.
+ARMS = {'default': 'default', 'concise': 'Concise', 'writing-for-humans': f'{PLUGIN_NAME}:{PLUGIN_NAME}'}
+ITEMS = ('claim', 'ask', 'stakes')
+SCRIPT_GRADERS = ('repeated-content', 'words', 'identifier-subject', 'ask-question')
+JUDGE_GRADERS = ('cold-read-opening', 'cold-read-whole', 'pedantry')
+TASK_TOOLS = ('Read', 'Glob', 'Grep', 'Skill')
+# Flags every model call shares: the normal login, no user settings, no MCP servers, nothing saved.
+ISOLATION = ('--setting-sources', 'project,local', '--strict-mcp-config', '--no-session-persistence')
+ENV = {'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'}
+REAL_CONFIG = ('.claude/settings.json', '.claude/plugins/installed_plugins.json',
+               '.claude/plugins/known_marketplaces.json')
+OPENING_SENTENCES = 3
+OPENING_WORDS = 80
+SHINGLE = 5
+NEAR_DUPLICATE = 0.6
+
+
+class Failure(Exception):
+    pass
+
+
+def positive_cost(value):
+    cost = float(value)
+    if not (math.isfinite(cost) and cost > 0):
+        raise argparse.ArgumentTypeError('cost must be greater than 0')
+    return cost
+
+
+def positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError('must be at least 1')
+    return number
+
+
+# Text units: what counts as a sentence.
+
+ABBREVIATIONS = ('e.g.', 'i.e.', 'etc.', 'vs.', 'approx.', 'cf.', 'no.', 'mr.', 'ms.', 'dr.')
+BOUNDARY = re.compile(r'[.!?]["\')\]*_`]*\s+(?=["\'(\[*_`]*[A-Z0-9`])')
+LIST_MARKER = re.compile(r'^(?:[-*+]|\d+[.)])\s+')
+HEADING = re.compile(r'^#{1,6}\s+')
+
+
+def split_sentences(paragraph):
+    sentences, start = [], 0
+    for match in BOUNDARY.finditer(paragraph):
+        head = paragraph[start:match.start() + 1]
+        if head.lower().endswith(ABBREVIATIONS):
+            continue
+        sentences.append(head.strip())
+        start = match.end()
+    tail = paragraph[start:].strip()
+    return sentences + ([tail] if tail else [])
+
+
+def units(text):
+    """The output as ('heading' | 'sentence', text) units in order.
+
+    Fenced code and table rows are structured data, not prose, and are left out. Each heading, list item
+    and paragraph starts a new unit; paragraphs and list items split into sentences."""
+    found, paragraph, fence = [], [], None
+
+    def flush():
+        if paragraph:
+            found.extend(('sentence', s) for s in split_sentences(' '.join(paragraph)))
+            paragraph.clear()
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        marker = stripped[:3]
+        if marker in ('```', '~~~'):
+            flush()
+            fence = None if fence == marker else (fence or marker)
+            continue
+        if fence:
+            continue
+        if not stripped or stripped.startswith('|') or re.fullmatch(r'[-*_]{3,}', stripped):
+            flush()
+            continue
+        stripped = re.sub(r'^(?:>\s?)+', '', stripped)
+        if HEADING.match(stripped):
+            flush()
+            found.append(('heading', HEADING.sub('', stripped)))
+            continue
+        if LIST_MARKER.match(stripped):
+            flush()
+            stripped = LIST_MARKER.sub('', stripped)
+        paragraph.append(stripped)
+    flush()
+    return found
+
+
+def sentences(text):
+    return [value for kind, value in units(text) if kind == 'sentence']
+
+
+def opening(text):
+    """What the opening cold reader sees: the output up to its third sentence, or its first 80 words if shorter.
+
+    Headings before the third sentence are kept and their words count toward the 80, but they are not
+    sentences."""
+    parts, count = [], 0
+    for kind, value in units(text):
+        if count == OPENING_SENTENCES:
+            break
+        parts.append(value)
+        count += kind == 'sentence'
+    words = ' '.join(parts).split()
+    return ' '.join(words[:OPENING_WORDS]) if len(words) > OPENING_WORDS else '\n'.join(parts)
+
+
+# Script graders.
+
+def tokens(sentence):
+    return re.findall(r"[a-z0-9]+(?:['’._:/-][a-z0-9]+)*", sentence.lower())
+
+
+def shingles(words):
+    return {tuple(words[i:i + SHINGLE]) for i in range(len(words) - SHINGLE + 1)}
+
+
+def repeated_content(text):
+    """Sentences that repeat an earlier one: the same words (4 or more), or 5-word shingle Jaccard >= 0.6."""
+    seen, repeats = [], []
+    for sentence in sentences(text):
+        words = tokens(sentence)
+        grams = shingles(words)
+        for earlier, earlier_words, earlier_grams in seen:
+            exact = len(words) >= 4 and words == earlier_words
+            union = grams | earlier_grams
+            similarity = len(grams & earlier_grams) / len(union) if grams and earlier_grams else 0.0
+            if exact or similarity >= NEAR_DUPLICATE:
+                repeats.append({'sentence': sentence, 'repeats': earlier, 'jaccard': round(1.0 if exact else similarity, 3)})
+                break
+        seen.append((sentence, words, grams))
+    return repeats
+
+
+def word_count(text):
+    """Words outside fenced code blocks."""
+    kept, fence = [], None
+    for line in text.splitlines():
+        marker = line.strip()[:3]
+        if marker in ('```', '~~~'):
+            fence = None if fence == marker else (fence or marker)
+            continue
+        if not fence:
+            kept.append(line)
+    return len(re.findall(r'\w\S*', '\n'.join(kept)))
+
+
+IDENTIFIER = re.compile(
+    r'''^(?:`[^`]+`                                # any code span
+        |[\w./-]+:\d+(?:[-:]\d+)?\b                # file:line
+        |[A-Za-z_][\w.]*\(\)                       # call()
+        |[A-Za-z0-9]*_[\w.]*                       # snake_case
+        |[a-z][a-z0-9]*[A-Z]\w*                    # camelCase
+        |[\w.-]*/[\w./-]+                          # a path
+        |[\w-]+\.(?:py|js|ts|tsx|rb|go|rs|java|md|ya?ml|json|toml|sh|txt|log|diff|sql|css|html)\b  # a file
+        )''', re.X)
+
+
+def identifier_subjects(text):
+    """Sentences whose grammatical subject is a code identifier or file:line, read as their first token."""
+    found = []
+    for sentence in sentences(text):
+        lead = re.sub(r'^[*_"\'(\[]+', '', sentence)
+        if IDENTIFIER.match(lead):
+            found.append(sentence)
+    return found
+
+
+def ask_question(text):
+    """Case 4: one of the first three sentences is a question."""
+    first = sentences(text)[:OPENING_SENTENCES]
+    return any(re.sub(r'[*_"\')\]`]+$', '', s).endswith('?') for s in first)
+
+
+def script_grades(text, case):
+    repeats = repeated_content(text)
+    subjects = identifier_subjects(text)
+    grades = {'repeated-content': {'count': len(repeats), 'passed': not repeats, 'detail': repeats},
+              'words': {'count': word_count(text)},
+              'identifier-subject': {'count': len(subjects), 'passed': not subjects, 'detail': subjects}}
+    if case.get('ask_question'):
+        grades['ask-question'] = {'passed': ask_question(text), 'detail': sentences(text)[:OPENING_SENTENCES]}
+    return grades
+
+
+# The suite on disk.
+
+def load_cases(suite=SUITE):
+    cases = {}
+    for path in sorted((Path(suite) / 'cases').glob('*/case.json')):
+        directory = path.parent
+        case = json.loads(path.read_text())
+        key = json.loads((directory / 'key.json').read_text())
+        if set(key) != set(ITEMS) or not all(isinstance(key[i], str) and key[i].strip() for i in ITEMS):
+            raise Failure(f'{directory.name}: key.json needs non-empty claim, ask and stakes')
+        if not (directory / 'fixture').is_dir():
+            raise Failure(f'{directory.name}: missing fixture/')
+        cases[directory.name] = dict(case, name=directory.name, dir=directory, key=key,
+                                     prompt=(directory / 'prompt.md').read_text().strip())
+    if not cases:
+        raise Failure(f'no cases under {suite}/cases')
+    return cases
+
+
+def case_graders(case):
+    names = ['repeated-content', 'words', 'identifier-subject'] + (['ask-question'] if case.get('ask_question') else [])
+    return names + list(JUDGE_GRADERS)
+
+
+def judge_prompt(name, suite=SUITE):
+    return (Path(suite) / 'judges' / f'{name}.md').read_text().strip()
+
+
+# Model calls.
+
+def parse_stream(text):
+    records = []
+    for line in text.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def first(records, kind, subtype=None):
+    return next((r for r in records if r.get('type') == kind and (subtype is None or r.get('subtype') == subtype)), {})
+
+
+def number(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+
+class Budget:
+    """A spend ceiling shared by concurrent calls: each reserves its own cap and settles at its real cost."""
+
+    def __init__(self, limit, floor=0.02):
+        self.limit, self.floor, self.spent, self.reserved = limit, floor, 0.0, 0.0
+        self.lock = threading.Lock()
+
+    def reserve(self, cap):
+        with self.lock:
+            left = self.limit - self.spent - self.reserved
+            grant = min(cap, left)
+            if grant < self.floor:
+                return None
+            self.reserved += grant
+            return grant
+
+    def settle(self, grant, cost):
+        with self.lock:
+            self.reserved -= grant
+            self.spent += cost
+
+
+def claude_env():
+    return dict(os.environ, **ENV)
+
+
+def call_claude(args, cwd, timeout):
+    return subprocess.run(['claude', '-p', *args], cwd=cwd, env=claude_env(), stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def task_command(case, arm, model, plugin_dir, cap):
+    command = [case['prompt'], '--model', model, '--settings', json.dumps({'outputStyle': ARMS[arm]}),
+               '--tools', ','.join(TASK_TOOLS), '--allowedTools', *TASK_TOOLS,
+               '--output-format', 'stream-json', '--verbose', '--max-budget-usd', f'{cap:.4f}', *ISOLATION]
+    if arm == 'writing-for-humans':
+        command += ['--plugin-dir', str(plugin_dir)]
+    return command
+
+
+def init_proof(init, arm, model, plugin_dir, version):
+    """Why this run's init record does not prove the arm's setup, or [] when it does."""
+    problems = []
+    if init.get('output_style') != ARMS[arm]:
+        problems.append(f"init output_style {init.get('output_style')!r}, expected {ARMS[arm]!r}")
+    if init.get('model') != model:
+        problems.append(f"init model {init.get('model')!r}, expected {model!r}")
+    plugins = [p for p in init.get('plugins') or [] if isinstance(p, dict) and p.get('name') == PLUGIN_NAME]
+    if arm == 'writing-for-humans':
+        if not any(p.get('version') == version and Path(str(p.get('path'))).resolve() == Path(plugin_dir).resolve()
+                   for p in plugins):
+            problems.append(f'init does not list {PLUGIN_NAME} {version} from {plugin_dir}')
+    elif plugins:
+        problems.append(f'{PLUGIN_NAME} is loaded in the {arm} arm')
+    if init.get('mcp_servers'):
+        problems.append(f"MCP servers loaded: {init.get('mcp_servers')}")
+    return problems
+
+
+def run_task(case, arm, model, plugin_dir, version, budget, cap, directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    grant = budget.reserve(cap)
+    if grant is None:
+        return {'skipped': 'budget exhausted'}
+    workspace = Path(tempfile.mkdtemp(prefix='wfhq-task-')).resolve()
+    started = time.monotonic()
+    try:
+        shutil.copytree(case['dir'] / 'fixture', workspace, dirs_exist_ok=True)
+        done = call_claude(task_command(case, arm, model, plugin_dir, grant), workspace, timeout=900)
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+    records = parse_stream(done.stdout)
+    result = first(records, 'result')
+    cost = number(result.get('total_cost_usd'))
+    budget.settle(grant, cost)
+    (directory / 'transcript.jsonl').write_text(done.stdout)
+    init = first(records, 'system', 'init')
+    (directory / 'init.json').write_text(json.dumps(init, indent=2) + '\n')
+    output = result.get('result') if isinstance(result.get('result'), str) else ''
+    (directory / 'output.md').write_text(output)
+    problems = init_proof(init, arm, model, plugin_dir, version)
+    if done.returncode or result.get('is_error') or result.get('subtype') != 'success':
+        problems.append(f"run error: exit {done.returncode}, subtype {result.get('subtype')!r}, "
+                        f'stderr {done.stderr[-300:]!r}')
+    if not output.strip():
+        problems.append('empty output')
+    return {'arm': arm, 'case': case['name'], 'output_style': init.get('output_style'), 'model': init.get('model'),
+            'claude_version': init.get('claude_code_version'), 'valid': not problems, 'problems': problems,
+            'cost_usd': round(cost, 6), 'duration_seconds': round(number(result.get('duration_ms')) / 1000, 1),
+            'wall_seconds': round(time.monotonic() - started, 1), 'turns': result.get('num_turns'),
+            'workspace': workspace.name}
+
+
+def schema(properties):
+    return {'type': 'object', 'additionalProperties': False, 'required': list(properties), 'properties': properties}
+
+
+TEXT = {'type': 'string'}
+VERDICT = schema({'verdict': {'type': 'string', 'enum': ['PASS', 'FAIL']}, 'reason': TEXT})
+SCHEMAS = {
+    'reader': schema({item: TEXT for item in ITEMS}),
+    'compare': schema({part: schema({item: VERDICT for item in ITEMS}) for part in ('opening', 'whole')}),
+    'pedantry': schema({'verdict': {'type': 'string', 'enum': ['PASS', 'FAIL']}, 'reason': TEXT, 'evidence': TEXT}),
+}
+
+
+def judge_command(kind, prompt, model, cap, suite=SUITE):
+    return [prompt, '--model', model, '--system-prompt', judge_prompt(kind, suite), '--tools', '',
+            '--json-schema', json.dumps(SCHEMAS[kind]), '--output-format', 'json',
+            '--max-budget-usd', f'{cap:.4f}', *ISOLATION]
+
+
+def run_judge(kind, prompt, model, budget, cap, path, suite=SUITE):
+    """One judge call; its structured verdict, or None if it failed. The record is kept at path."""
+    grant = budget.reserve(cap)
+    if grant is None:
+        return None, 'budget exhausted'
+    cwd = Path(tempfile.mkdtemp(prefix='wfhq-judge-')).resolve()
+    try:
+        done = call_claude(judge_command(kind, prompt, model, grant, suite), cwd, timeout=300)
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
+    try:
+        record = json.loads(done.stdout)
+    except ValueError:
+        record = {}
+    record = record if isinstance(record, dict) else {}
+    budget.settle(grant, number(record.get('total_cost_usd')))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'kind': kind, 'model': model, 'prompt': prompt, 'record': record,
+                                'exit': done.returncode, 'stderr': done.stderr[-500:]}, indent=2) + '\n')
+    verdict = record.get('structured_output')
+    if done.returncode or record.get('is_error') or not isinstance(verdict, dict):
+        return None, f"judge {kind} failed: exit {done.returncode}, subtype {record.get('subtype')!r}"
+    return verdict, None
+
+
+def reader_prompt(text):
+    return f'<message>\n{text}\n</message>'
+
+
+def compare_prompt(key, opening_notes, whole_notes):
+    return '\n'.join(['<answer_key>', json.dumps(key, indent=2), '</answer_key>',
+                      '<opening_notes>', json.dumps(opening_notes, indent=2), '</opening_notes>',
+                      '<whole_notes>', json.dumps(whole_notes, indent=2), '</whole_notes>'])
+
+
+def pedantry_prompt(request, text):
+    return f'<request>\n{request}\n</request>\n<message>\n{text}\n</message>'
+
+
+def judge_output(text, case, model, budget, cap, directory, suite=SUITE):
+    """The three judged graders for one output. Readers never see the key; the comparator never sees the output."""
+    directory = Path(directory)
+    grades, errors = {}, []
+    excerpt = opening(text)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {
+            'opening': pool.submit(run_judge, 'reader', reader_prompt(excerpt), model, budget, cap,
+                                   directory / 'reader-opening.json', suite),
+            'whole': pool.submit(run_judge, 'reader', reader_prompt(text), model, budget, cap,
+                                 directory / 'reader-whole.json', suite),
+            'pedantry': pool.submit(run_judge, 'pedantry', pedantry_prompt(case['prompt'], text), model, budget, cap,
+                                    directory / 'pedantry.json', suite)}
+        notes = {name: future.result() for name, future in futures.items()}
+    for name, (_, error) in notes.items():
+        if error:
+            errors.append(error)
+    pedantry, _ = notes['pedantry']
+    if pedantry:
+        grades['pedantry'] = {'passed': pedantry['verdict'] == 'PASS', 'detail': pedantry}
+    if notes['opening'][0] and notes['whole'][0]:
+        verdicts, error = run_judge('compare', compare_prompt(case['key'], notes['opening'][0], notes['whole'][0]),
+                                    model, budget, cap, directory / 'compare.json', suite)
+        if error:
+            errors.append(error)
+        else:
+            for part in ('opening', 'whole'):
+                items = {item: verdicts[part][item]['verdict'] == 'PASS' for item in ITEMS}
+                grades[f'cold-read-{part}'] = {'hits': sum(items.values()), 'items': items,
+                                               'notes': notes[part][0], 'verdicts': verdicts[part]}
+    grades['opening_excerpt'] = excerpt
+    return grades, errors
+
+
+# Evidence and guards.
+
+def git(*args):
+    done = subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def tree_digest(root):
+    digest = hashlib.sha256()
+    for path in sorted(Path(root).rglob('*')):
+        if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
+            digest.update(str(path.relative_to(root)).encode() + b'\0' + path.read_bytes() + b'\0')
+    return digest.hexdigest()
+
+
+def real_config_digests():
+    home = Path.home()
+    return {name: hashlib.sha256((home / name).read_bytes()).hexdigest() if (home / name).is_file() else None
+            for name in REAL_CONFIG}
+
+
+def candidate(plugin_source):
+    rel = os.path.relpath(Path(plugin_source).resolve(), ROOT)
+    return '\n'.join([
+        f'head: {git("rev-parse", "HEAD")}',
+        f'tree: {git("rev-parse", "HEAD^{tree}")}',
+        f'plugin tree ({rel} at HEAD): {git("rev-parse", f"HEAD:{rel}")}',
+        f'plugin bytes digest (working tree): {tree_digest(plugin_source)}',
+        f'suite tree (evals/writing-for-humans-quality at HEAD): {git("rev-parse", "HEAD:evals/writing-for-humans-quality")}',
+        f'runner blob (bin/writing-for-humans-quality-eval at HEAD): {git("rev-parse", "HEAD:bin/writing-for-humans-quality-eval")}',
+        f'working tree clean: {not git("status", "--porcelain")}',
+    ]) + '\n'
+
+
+def claude_version():
+    done = subprocess.run(['claude', '--version'], capture_output=True, text=True)
+    return done.stdout.strip()
+
+
+def append_ledger(path, what, cost):
+    """One row per paid invocation, with the running total taken from the ledger's last row."""
+    path = Path(path)
+    total = 0.0
+    for line in path.read_text().splitlines() if path.is_file() else []:
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        try:
+            total = float(cells[-1])
+        except (ValueError, IndexError):
+            continue
+    total += cost
+    stamp = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M')
+    tree = git('rev-parse', 'HEAD^{tree}')
+    dirty = '' if not git('status', '--porcelain') else ' (dirty)'
+    with path.open('a') as handle:
+        handle.write(f'| {stamp} | {what} | {tree}{dirty} | {cost:.4f} | {total:.4f} |\n')
+    return total
+
+
+# Style proof without a model call: `/output-style` lists the styles and marks the active one "(current)".
+
+def preflight(arm, plugin_dir):
+    workspace = Path(tempfile.mkdtemp(prefix='wfhq-preflight-')).resolve()
+    try:
+        args = ['/output-style', '--settings', json.dumps({'outputStyle': ARMS[arm]}),
+                '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '0.01', *ISOLATION]
+        if arm == 'writing-for-humans':
+            args += ['--plugin-dir', str(plugin_dir)]
+        done = call_claude(args, workspace, timeout=120)
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
+    records = parse_stream(done.stdout)
+    return grade_preflight(arm, records)
+
+
+def grade_preflight(arm, records):
+    init, result = first(records, 'system', 'init'), first(records, 'result')
+    listing = str(result.get('result') or '')
+    style = ARMS[arm]
+    current = re.search(rf'^- {re.escape(style)} \(current\)', listing, re.M) is not None
+    checks = {'init output_style': init.get('output_style') == style,
+              'listed as current': current,
+              'model-free': result.get('total_cost_usd') == 0}
+    return {'arm': arm, 'style': style, 'passed': all(checks.values()), 'checks': checks,
+            'init_output_style': init.get('output_style'), 'listing': listing,
+            'claude_version': init.get('claude_code_version')}
+
+
+# Subcommands.
+
+def expected_suite(cases, arms, runs, filtered):
+    return {'arms': {arm: ARMS[arm] for arm in arms}, 'runs': runs, 'filtered': filtered,
+            'cases': {name: case_graders(case) for name, case in cases.items()}}
+
+
+def run(args):
+    all_cases = load_cases()
+    names = args.case or list(all_cases)
+    unknown = [name for name in names if name not in all_cases]
+    if unknown:
+        raise Failure(f'unknown case: {", ".join(unknown)}')
+    cases = {name: all_cases[name] for name in names}
+    arms = args.arm or list(ARMS)
+    out = Path(args.output_dir).resolve() if args.output_dir else SUITE / 'results' / \
+        dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    if out.exists() and any(out.iterdir()):
+        raise Failure(f'output dir is not empty: {out}')
+    out.mkdir(parents=True, exist_ok=True)
+    source = Path(args.plugin).resolve() if args.plugin else PLUGIN
+    plugin_dir = out / 'plugin'
+    shutil.copytree(source, plugin_dir, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    version = json.loads((plugin_dir / '.claude-plugin/plugin.json').read_text()).get('version')
+    digest = tree_digest(plugin_dir)
+    (out / 'CANDIDATE.txt').write_text(candidate(source))
+    filtered = bool(args.case or args.arm)
+    expected = expected_suite(cases, arms, args.runs, filtered)
+    (out / 'suite.json').write_text(json.dumps(expected, indent=2) + '\n')
+    settings = {'model': args.model, 'judge_model': args.judge_model, 'claude_version': claude_version(),
+                'arms': expected['arms'], 'plugin': f'{PLUGIN_NAME} {version} via --plugin-dir (writing-for-humans arm only)',
+                'task_tools': list(TASK_TOOLS), 'isolation': list(ISOLATION), 'env': ENV,
+                'system_prompt_env': {name: os.environ.get(name) for name in
+                                      ('CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT', 'CLAUDE_CODE_SIMPLE')},
+                'effort': 'default (not set)', 'max_cost_usd': args.max_cost_usd,
+                'task_max_usd': args.task_max_usd, 'judge_max_usd': args.judge_max_usd, 'jobs': args.jobs}
+    (out / 'settings.json').write_text(json.dumps(settings, indent=2) + '\n')
+    before = real_config_digests()
+    proofs = [preflight(arm, plugin_dir) for arm in arms]
+    (out / 'preflight.json').write_text(json.dumps(proofs, indent=2) + '\n')
+    for proof in proofs:
+        print(f"Preflight {proof['arm']}: {'pass' if proof['passed'] else 'FAIL'} {proof['checks']}")
+    if not all(proof['passed'] for proof in proofs):
+        raise Failure('a style preflight failed; no paid run was started')
+    budget = Budget(args.max_cost_usd)
+    jobs = [(n, name, arm) for n in range(1, args.runs + 1) for name in cases for arm in arms]
+
+    def one(job):
+        n, name, arm = job
+        directory = out / 'runs' / arm / name / f'run-{n}'
+        record = run_task(cases[name], arm, args.model, plugin_dir, version, budget, args.task_max_usd, directory)
+        if 'skipped' not in record:
+            text = (directory / 'output.md').read_text()
+            record['script'] = script_grades(text, cases[name])
+            if record['valid'] and not args.no_judges:
+                record['judges'], record['judge_errors'] = judge_output(
+                    text, cases[name], args.judge_model, budget, args.judge_max_usd, directory / 'judges')
+        record.update(run=n, case=name, arm=arm)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'record.json').write_text(json.dumps(record, indent=2) + '\n')
+        print(f"{arm} {name} run {n}: {'skipped' if 'skipped' in record else 'valid' if record['valid'] else 'INVALID'}"
+              f" ${record.get('cost_usd', 0):.4f}", flush=True)
+        return record
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            list(pool.map(one, jobs))
+    finally:
+        changes = [f'~/{name} changed during the run' for name, value in real_config_digests().items()
+                   if value != before[name]]
+        if tree_digest(plugin_dir) != digest:
+            changes.append('retained plugin bytes changed during the run')
+        (out / 'guard.json').write_text(json.dumps({'before': before, 'after': real_config_digests(),
+                                                    'problems': changes}, indent=2) + '\n')
+        if args.ledger:
+            total = append_ledger(args.ledger, f'run {out.name}: arms {",".join(arms)}, {len(cases)} cases, '
+                                  f'{args.runs} runs', budget.spent)
+            print(f'Ledger: ${budget.spent:.4f} this run, ${total:.4f} cumulative')
+    summary = summarize(out)
+    print(markdown(summary))
+    return 0 if summary['complete'] else 1
+
+
+def load_records(out):
+    records = []
+    for path in sorted(Path(out).glob('runs/*/*/run-*/record.json')):
+        records.append(json.loads(path.read_text()))
+    return records
+
+
+def suite_problems(records, expected, guard, proofs):
+    problems = []
+    if expected.get('filtered'):
+        problems.append('subset run (--case or --arm): never a baseline')
+    seen = {}
+    for record in records:
+        seen.setdefault((record['arm'], record['case']), []).append(record)
+    for arm in expected['arms']:
+        for name, graders in expected['cases'].items():
+            got = seen.get((arm, name), [])
+            valid = [r for r in got if r.get('valid')]
+            if len(valid) != expected['runs']:
+                problems.append(f'{arm} {name}: {len(valid)} valid runs of {expected["runs"]}')
+            for record in valid:
+                missing = [g for g in graders if g not in (record.get('script') or {})
+                           and g not in (record.get('judges') or {})]
+                if missing:
+                    problems.append(f'{arm} {name} run {record["run"]}: not graded by {", ".join(missing)}')
+    problems += [f'{arm} {name} is not in the suite' for arm, name in seen
+                 if arm not in expected['arms'] or name not in expected['cases']]
+    problems += [f'invalid run {r["arm"]} {r["case"]} {r["run"]}: {"; ".join(r.get("problems") or [])}'
+                 for r in records if 'valid' in r and not r['valid']]
+    problems += [f'skipped run {r["arm"]} {r["case"]} {r["run"]}: {r["skipped"]}' for r in records if 'skipped' in r]
+    problems += list((guard or {}).get('problems') or [])
+    if proofs is None:
+        problems.append('no preflight.json')
+    else:
+        problems += [f"preflight failed for {p['arm']}" for p in proofs if not p.get('passed')]
+        missing = set(expected['arms']) - {p['arm'] for p in proofs}
+        problems += [f'no preflight for {arm}' for arm in sorted(missing)]
+    return problems
+
+
+def arm_metrics(records, cases):
+    valid = [r for r in records if r.get('valid')]
+    judges = [r.get('judges') or {} for r in valid]
+    words = [r['script']['words']['count'] for r in valid]
+    asks = [r for r in valid if cases.get(r['case'], {}).get('ask_question')]
+
+    def hits(part):
+        return sum((j.get(f'cold-read-{part}') or {}).get('hits', 0) for j in judges)
+
+    return {'valid_runs': len(valid),
+            'opening_hits': hits('opening'), 'opening_items': 3 * len(valid),
+            'whole_hits': hits('whole'), 'whole_items': 3 * len(valid),
+            'pedantry_passes': sum(bool((j.get('pedantry') or {}).get('passed')) for j in judges),
+            'repeated_content': sum(r['script']['repeated-content']['count'] for r in valid),
+            'runs_with_repeats': sum(r['script']['repeated-content']['count'] > 0 for r in valid),
+            'identifier_subjects': sum(r['script']['identifier-subject']['count'] for r in valid),
+            'ask_question_passes': sum(r['script']['ask-question']['passed'] for r in asks), 'ask_question_runs': len(asks),
+            'median_words': statistics.median(words) if words else None,
+            'task_cost_usd': round(sum(r['cost_usd'] for r in valid), 4),
+            'mean_task_cost_usd': round(statistics.mean([r['cost_usd'] for r in valid]), 4) if valid else None,
+            'mean_task_seconds': round(statistics.mean([r['duration_seconds'] for r in valid]), 1) if valid else None,
+            'judge_cost_usd': round(sum(r.get('judge_cost_usd', 0) for r in valid), 4),
+            'output_styles': sorted({str(r.get('output_style')) for r in valid}),
+            'models': sorted({str(r.get('model')) for r in valid}),
+            'claude_versions': sorted({str(r.get('claude_version')) for r in valid})}
+
+
+def read_json(path, default=None):
+    path = Path(path)
+    return json.loads(path.read_text()) if path.is_file() else default
+
+
+def summarize(out, write=True):
+    out = Path(out)
+    expected = read_json(out / 'suite.json')
+    if expected is None:
+        raise Failure(f'{out} has no suite.json')
+    records = load_records(out)
+    for record in records:
+        record['judge_cost_usd'] = recorded_judge_cost(out / 'runs' / record['arm'] / record['case'] / f'run-{record["run"]}')
+    cases = load_cases()
+    problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'))
+    summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == 3,
+               'problems': problems, 'settings': read_json(out / 'settings.json', {}),
+               'arms': {arm: arm_metrics([r for r in records if r['arm'] == arm], cases) for arm in expected['arms']},
+               'cases': {arm: {name: case_metrics([r for r in records if r['arm'] == arm and r['case'] == name])
+                               for name in expected['cases']} for arm in expected['arms']},
+               'total_cost_usd': round(sum(r.get('cost_usd', 0) + r['judge_cost_usd'] for r in records), 4)}
+    if write:
+        (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+        (out / 'summary.md').write_text(markdown(summary) + '\n')
+    return summary
+
+
+def recorded_judge_cost(directory):
+    total = 0.0
+    for path in Path(directory).glob('judges/*.json'):
+        total += number((json.loads(path.read_text()).get('record') or {}).get('total_cost_usd'))
+    return total
+
+
+def case_metrics(records):
+    valid = [r for r in records if r.get('valid')]
+    judges = [r.get('judges') or {} for r in valid]
+    return {'runs': len(valid),
+            'opening': [(j.get('cold-read-opening') or {}).get('hits') for j in judges],
+            'whole': [(j.get('cold-read-whole') or {}).get('hits') for j in judges],
+            'pedantry': [(j.get('pedantry') or {}).get('passed') for j in judges],
+            'repeats': [r['script']['repeated-content']['count'] for r in valid],
+            'words': [r['script']['words']['count'] for r in valid]}
+
+
+def markdown(summary):
+    lines = [f"Complete: {summary['complete']} | baseline: {summary['baseline']} | "
+             f"total cost ${summary['total_cost_usd']:.4f}",
+             *[f'Problem: {problem}' for problem in summary['problems']], '',
+             '| Arm | Style | Valid runs | Opening hits | Whole hits | Pedantry passes | Repeats (runs) '
+             '| Identifier subjects | Case 4 question | Median words | Task $/run | Task s/run | Judge $ |',
+             '|---|---|---|---|---|---|---|---|---|---|---|---|---|']
+    for arm, m in summary['arms'].items():
+        lines.append(f"| {arm} | {', '.join(m['output_styles']) or '-'} | {m['valid_runs']} "
+                     f"| {m['opening_hits']}/{m['opening_items']} | {m['whole_hits']}/{m['whole_items']} "
+                     f"| {m['pedantry_passes']}/{m['valid_runs']} | {m['repeated_content']} ({m['runs_with_repeats']}) "
+                     f"| {m['identifier_subjects']} | {m['ask_question_passes']}/{m['ask_question_runs']} "
+                     f"| {m['median_words']} | {m['mean_task_cost_usd']} | {m['mean_task_seconds']} | {m['judge_cost_usd']} |")
+    return '\n'.join(lines)
+
+
+def grade(args):
+    """Regrade recorded outputs with the script graders ($0); --judges reruns the judges (paid)."""
+    out = Path(args.result_dir)
+    cases = load_cases()
+    budget = Budget(args.max_cost_usd) if args.judges else None
+    for path in sorted(out.glob('runs/*/*/run-*/record.json')):
+        record = json.loads(path.read_text())
+        if 'skipped' in record:
+            continue
+        text = (path.parent / 'output.md').read_text()
+        record['script'] = script_grades(text, cases[record['case']])
+        if args.judges and record.get('valid'):
+            judges = path.parent / 'judges'
+            if judges.exists():
+                shutil.rmtree(judges)
+            record['judges'], record['judge_errors'] = judge_output(
+                text, cases[record['case']], args.judge_model, budget, args.judge_max_usd, judges)
+        path.write_text(json.dumps(record, indent=2) + '\n')
+    if budget and args.ledger:
+        append_ledger(args.ledger, f'regrade judges {out.name}', budget.spent)
+    summary = summarize(out)
+    print(markdown(summary))
+    return 0 if summary['complete'] else 1
+
+
+# Calibration: hand-written good and bad samples per case.
+
+def calibration_expectations(sample, case, grades):
+    """[(grader, ok, detail)] for one sample: good must pass everything, bad must fail everything."""
+    good = sample == 'good'
+    checks = [('repeated-content', (grades['repeated-content']['count'] == 0) == good,
+               f"{grades['repeated-content']['count']} repeated"),
+              ('identifier-subject', (grades['identifier-subject']['count'] == 0) == good,
+               f"{grades['identifier-subject']['count']} identifier subjects")]
+    if case.get('ask_question'):
+        checks.append(('ask-question', grades['ask-question']['passed'] == good, f"passed {grades['ask-question']['passed']}"))
+    if 'cold-read-opening' in grades:
+        opening = grades['cold-read-opening']
+        ok = opening['hits'] == 3 if good else (opening['hits'] <= 1 and not opening['items']['claim'])
+        checks.append(('cold-read-opening', ok, f"{opening['hits']}/3 {opening['items']}"))
+    if 'cold-read-whole' in grades:
+        whole = grades['cold-read-whole']
+        checks.append(('cold-read-whole', whole['hits'] == 3 if good else whole['hits'] <= 2,
+                       f"{whole['hits']}/3 {whole['items']}"))
+    if 'pedantry' in grades:
+        checks.append(('pedantry', grades['pedantry']['passed'] == good, f"passed {grades['pedantry']['passed']}"))
+    return checks
+
+
+def calibrate(args):
+    cases = load_cases()
+    names = args.case or list(cases)
+    out = Path(args.output_dir).resolve() if args.output_dir else None
+    budget = Budget(args.max_cost_usd) if args.judges else None
+    rows, failed = [], False
+    try:
+        for name in names:
+            case = cases[name]
+            for sample in ('good', 'bad'):
+                text = (case['dir'] / 'calibration' / f'{sample}.md').read_text()
+                grades = script_grades(text, case)
+                if args.judges:
+                    judged, errors = judge_output(text, case, args.judge_model, budget, args.judge_max_usd,
+                                                  (out or Path(tempfile.mkdtemp(prefix='wfhq-cal-'))) / name / sample)
+                    grades.update(judged)
+                    if errors:
+                        failed = True
+                        rows.append({'case': name, 'sample': sample, 'grader': 'judges', 'ok': False,
+                                     'detail': '; '.join(errors)})
+                for grader, ok, detail in calibration_expectations(sample, case, grades):
+                    failed |= not ok
+                    rows.append({'case': name, 'sample': sample, 'grader': grader, 'ok': ok, 'detail': detail})
+                rows.append({'case': name, 'sample': sample, 'grader': 'words', 'ok': True,
+                             'detail': str(grades['words']['count'])})
+    finally:
+        if budget and args.ledger:
+            total = append_ledger(args.ledger, f'calibration judges ({len(names)} cases)', budget.spent)
+            print(f'Ledger: ${budget.spent:.4f} this run, ${total:.4f} cumulative')
+    if out:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / 'calibration.json').write_text(json.dumps(
+            {'judges': bool(args.judge_model and args.judges), 'judge_model': args.judge_model,
+             'cost_usd': round(budget.spent, 4) if budget else 0, 'rows': rows}, indent=2) + '\n')
+    print('| Case | Sample | Grader | As expected | Detail |\n|---|---|---|---|---|')
+    for row in rows:
+        detail = str(row['detail']).replace('|', '\\|')
+        print(f"| {row['case']} | {row['sample']} | {row['grader']} | {'yes' if row['ok'] else 'NO'} | {detail} |")
+    if budget:
+        print(f'Judge cost: ${budget.spent:.4f}')
+    return 1 if failed else 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+
+    def paid(p, task=True):
+        p.add_argument('--judge-model', default='claude-sonnet-5-5')
+        p.add_argument('--max-cost-usd', type=positive_cost, required=True, help='ceiling for this whole invocation')
+        p.add_argument('--judge-max-usd', type=positive_cost, default=0.15, help='ceiling per judge call')
+        p.add_argument('--ledger', help='spend ledger to append this invocation to')
+        if task:
+            p.add_argument('--task-max-usd', type=positive_cost, default=0.75, help='ceiling per task run')
+
+    p = sub.add_parser('preflight', help='prove each arm activates its style; no model call')
+    p.add_argument('--arm', action='append', choices=list(ARMS))
+    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p = sub.add_parser('calibrate', help='grade the hand-written samples; script graders cost nothing')
+    p.add_argument('--case', action='append')
+    p.add_argument('--judges', action='store_true', help='also run the model judges (paid)')
+    p.add_argument('--output-dir')
+    p.add_argument('--judge-model', default='claude-sonnet-5-5')
+    p.add_argument('--max-cost-usd', type=positive_cost, default=1.0)
+    p.add_argument('--judge-max-usd', type=positive_cost, default=0.15)
+    p.add_argument('--ledger')
+    p = sub.add_parser('run', help='run the arms, then grade every output')
+    p.add_argument('--model', required=True)
+    paid(p)
+    p.add_argument('--runs', type=positive_int, default=1)
+    p.add_argument('--case', action='append', help='exact case name; repeat for more (a subset run)')
+    p.add_argument('--arm', action='append', choices=list(ARMS), help='repeat for more (a subset run)')
+    p.add_argument('--jobs', type=positive_int, default=3)
+    p.add_argument('--no-judges', action='store_true')
+    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--output-dir', help='default evals/writing-for-humans-quality/results/<UTC timestamp>')
+    p = sub.add_parser('grade', help='regrade a result dir: script graders, and judges with --judges (paid)')
+    p.add_argument('result_dir')
+    p.add_argument('--judges', action='store_true')
+    paid(p, task=False)
+    p = sub.add_parser('summarize', help='check a result dir against its suite and print the per-arm table')
+    p.add_argument('result_dir')
+    args = parser.parse_args()
+    try:
+        if args.command == 'preflight':
+            with tempfile.TemporaryDirectory(prefix='wfhq-plugin-') as temp:
+                plugin_dir = Path(temp) / 'plugin'
+                shutil.copytree(Path(args.plugin).resolve() if args.plugin else PLUGIN, plugin_dir)
+                proofs = [preflight(arm, plugin_dir) for arm in args.arm or ARMS]
+            for proof in proofs:
+                print(f"{proof['arm']}: {'pass' if proof['passed'] else 'FAIL'} {proof['checks']}")
+            return 0 if all(proof['passed'] for proof in proofs) else 1
+        if args.command == 'calibrate':
+            return calibrate(args)
+        if args.command == 'run':
+            return run(args)
+        if args.command == 'grade':
+            return grade(args)
+        summary = summarize(args.result_dir)
+        print(markdown(summary))
+        return 0 if summary['complete'] else 1
+    except (Failure, OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+        print(f'writing-for-humans-quality-eval: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

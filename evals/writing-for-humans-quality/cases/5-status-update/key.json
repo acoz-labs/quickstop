@@ -1,0 +1,5 @@
+{
+  "claim": "Three of the five services (accounts, notifications and gateway) are migrated to the new structured logger with their tests passing; billing and search are not done yet.",
+  "ask": "Get the session access to the search staging environment (or ask Priya to grant it), because search's migration can't be tested without it.",
+  "stakes": "Without staging access the search migration stays untested, and the old logger's planned removal on 14 November slips, since it can't be removed while any service still uses it."
+}

@@ -1,0 +1,9 @@
+--- a/config/export.yaml
++++ b/config/export.yaml
+@@ -4,5 +4,6 @@ schedule: "0 2 * * *"
+ writer:
+   format: parquet
+   compression: zstd
++  row_group_size: 10000
+ resources:
+   memory_limit: 2Gi

@@ -1,0 +1,1 @@
+Earlier I asked you which PDF library we should use to add digital signatures to invoices; it has to be MIT or Apache-2.0 licensed. You delegated the research to a subagent, and its raw return is in `subagent-return.md`. Relay the result to me.

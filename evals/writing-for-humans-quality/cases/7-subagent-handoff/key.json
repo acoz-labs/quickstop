@@ -1,0 +1,5 @@
+{
+  "claim": "Of the three candidates, only pdfquill both supports digital signatures and has an allowed licence (MIT); paperforge supports signatures but is AGPL-3.0, and inkleaf is Apache-2.0 but can't sign.",
+  "ask": "Choose between pdfquill, accepting that it has had no release in 14 months, or paperforge, which needs legal to approve the AGPL licence first.",
+  "stakes": "Choosing pdfquill risks having to fork and patch it ourselves if a bug or security issue appears; choosing paperforge means waiting on legal, and if legal rejects AGPL we can't use it at all."
+}

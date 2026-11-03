@@ -1,0 +1,5 @@
+{
+  "claim": "No. A blank email makes the importer reject the whole file: it validates every row before writing, raises on the first invalid row, and imports nothing from that file.",
+  "ask": "none",
+  "stakes": "A single blank email means none of the file's contacts are imported, so anyone counting on bad rows being skipped will silently get an empty import unless they clean the file first."
+}

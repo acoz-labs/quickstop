@@ -1,0 +1,8 @@
+# config/export.yaml as deployed
+target: harbor-analytics
+schedule: "0 2 * * *"
+writer:
+  format: parquet
+  compression: zstd
+resources:
+  memory_limit: 2Gi

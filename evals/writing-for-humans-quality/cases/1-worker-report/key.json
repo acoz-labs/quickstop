@@ -1,0 +1,5 @@
+{
+  "claim": "The export ran out of memory and was killed because the parquet-writer upgrade to 3.0 (merged 30 October) changed the default row group size from 10,000 rows to 1,000,000, so each batch held about 100 times more rows in memory than before.",
+  "ask": "Approve deploying the drafted fix (pinning row_group_size to 10,000 in the export config) during the change freeze, which needs the asker's sign-off.",
+  "stakes": "Until it is deployed the export fails every night and Harbor Analytics misses that night's data; if it is still failing on Friday the partner's monthly reconciliation runs on incomplete data."
+}

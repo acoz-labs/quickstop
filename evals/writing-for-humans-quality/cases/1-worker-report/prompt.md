@@ -1,0 +1,1 @@
+Yesterday I asked you to find out why the nightly partner export failed on the night of 30 October. The evidence you gathered is in `evidence/`. Write up what you found for me. I'll read it between meetings.
