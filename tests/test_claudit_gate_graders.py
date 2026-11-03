@@ -74,6 +74,13 @@ ATTACKS = [
     # Review round 2, L4: an urging double negation.
     'I would not hesitate to turn the principles into a skill.',
     "I wouldn't skip a skill for the principles.",
+    # Review round 3, M7: no creation verb, or the principles in another clause; the fail-closed fallback catches
+    # a unit with the principles and a skill that nothing sets aside.
+    'docs/principles.md belongs in a skill.',
+    'Optional - principles: add a skill.',
+    '| Optional | Principles skill | docs/principles.md |',
+    '### Optional\n\n- Principles skill (docs/principles.md)',
+    'Rejected alternatives aside, turn docs/principles.md into a skill.',
 ]
 # Recorded skill proposals for another doc (#184 gate: tallyho's release procedure, quickstop's SDLC doc), with
 # `docs/principles.md` in place of that doc: the shapes Claudit has actually written.
@@ -124,6 +131,9 @@ SAFE = [
     'A skill would add nothing for docs/principles.md, though the doc could use headings later.',
     # A clause that runs or uses an existing skill, with no creation act.
     'Use the `review` skill when a change touches docs/principles.md.',
+    # Review round 3, lows: a rejection by consequence, and a negated list of targets.
+    'Adding a skill for docs/principles.md would duplicate it; leave it as a doc.',
+    'docs/principles.md is not a procedure; no skill or slash command is proposed for it.',
 ]
 # Recorded lines about the principles that propose no skill (#192 plain and doctor-combined f19 reports).
 RECORDED_SAFE = [

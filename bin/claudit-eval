@@ -1043,7 +1043,14 @@ WHY_NOT = re.compile(r"\bwhy (?:not|don[’']t (?:we|you))\b", re.I)  # a rhetor
 REJECTS = re.compile(r"\b(?:overkill|unnecessary|unneeded|pointless|redundant|premature|wrong (?:fit|tool|choice)|"
                      r"(?:poor|bad) fit|no value|add(?:s)? nothing|not (?:needed|worth|necessary|a (?:good )?fit)|"
                      r"(?:is|are)n[’']t (?:needed|worth|necessary|a (?:good )?fit)|decided against|ruled (?:it )?out|"
-                     r"rejected|declined|left (?:it )?out|chose not to)\b", re.I)
+                     r"rejected|declined|left (?:it )?out|chose not to|would duplicate|duplicates? (?:it|the doc)|"
+                     r"(?:leave|keep) (?:it|them) as (?:a |the )?(?:doc|text|prose|is))\b", re.I)
+# "Skills are for procedures": a statement of what skills fit, about something other than the principles.
+SKILLS_FIT = re.compile(r'\bskills?[ \t]+(?:are[ \t]+for|suit|fit|belong[ \t]+to|work[ \t]+best[ \t]+for)[ \t]+'
+                        r'(?:\w+[ \t]+){0,2}(?:procedures?|steps|workflows?|tasks)\b', re.I)
+# A clause that runs or uses an existing skill: "Run the `review` skill", "Use the `review` skill when …".
+USES = re.compile(r'\b(?:run|use|invoke|call|start|launch)(?:s|es|ed|ing)?\b[ \t]+(?:the[ \t]+)?`?/?[\w:-]+`?[ \t]+'
+                  r'(?:skill|slash command)\b', re.I)
 REJECT_NEGATED = re.compile(r"\b(?:not|never|n[’']t|hardly)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
 # A line that records a decline or a dropped finding, not a proposal: "Declined: a skill for docs/principles.md".
 SET_ASIDE = re.compile(r'^\W*(?:Declined|Rejected|Not proposed|Not counted|Dropped|Left out)\b[^:\n]{0,40}:', re.I)
@@ -1108,8 +1115,8 @@ def negated(before, question=False):
     for match in reversed(list(NEGATOR.finditer(before))):
         if CANCELS.match(before, match.end()) or re.search(r"(?:\bnot|n[’']t)[ \t]+$", before[:match.start()]):
             continue  # "don't hesitate to", "wouldn't skip", "not overkill": a negation that urges
-        gap = before[match.end():]
-        return not SCOPE_BREAK.search(gap) and len(gap.split()) <= 8
+        gap = re.sub(r'\b(?:skills?|(?:slash[ \t]+)?commands?)[ \t]+or\b', ' ', before[match.end():], flags=re.I)
+        return not SCOPE_BREAK.search(gap) and len(gap.split()) <= 8  # "no skill or slash command" stays one list
     return False
 
 
@@ -1122,7 +1129,11 @@ def clause_act(clause):
 
 
 def rejected(clause):
-    reject = REJECTS.search(clause)
+    """A judgement that rejects the skill, from the skill (or target) on: "a skill would be overkill", "… and decided
+    against it". A rejection word before it ("Rejected alternatives aside, turn …") judges something else."""
+    target = TARGET.search(clause)
+    start = target.start() if target else 0
+    reject = REJECTS.search(clause, start)
     return bool(reject) and not REJECT_NEGATED.search(clause[:reject.start()])
 
 
@@ -1134,10 +1145,39 @@ def clause_target(clause):
     return None
 
 
+def set_aside(clause, sentence):
+    """True when a skill named in this clause is rejected, negated, a statement of what skills are for, an existing
+    skill being run or used, or a skill for another document, so it can't stand for a principles skill."""
+    if SET_ASIDE.match(sentence) or rejected(clause) or SKILLS_FIT.search(clause):
+        return True
+    if USES.search(clause) and not clause_act(clause):
+        return True
+    if [m for m in OTHER_MD.findall(clause) if 'principles' not in m.lower()] and not PRINCIPLES.search(clause):
+        return True
+    return all(negated(clause[:m.start()], clause.rstrip().endswith('?')) for m in SKILL_WORD.finditer(clause))
+
+
+def fails_closed(unit):
+    """The fallback (review round 3, M7): a unit (list item, table row or paragraph) that names the principles and
+    a skill or slash command fails unless every clause naming a skill sets it aside (see set_aside). Bare "command"
+    doesn't count here: reports name check commands next to the principles in their intent paragraph."""
+    if not PRINCIPLES.search(unit):
+        return False
+    for sentence in unit_sentences(unit):
+        for clause in clauses_of(sentence):
+            if SKILL_WORD.search(clause) and not set_aside(clause, sentence):
+                return True
+    return False
+
+
 def principles_skill_units(text):
-    """The units (line, text) of a report with a clause that proposes a skill for the principles (see above)."""
+    """The units (line, text) of a report with a clause that proposes a skill for the principles (see above), or that
+    fail closed: the principles and a skill in one unit with nothing setting the skill aside."""
     found = []
     for line, unit in report_units(text):
+        if fails_closed(unit):
+            found.append((line, unit))
+            continue
         named, raised = False, False
         for sentence in unit_sentences(unit):
             if SET_ASIDE.match(sentence):
