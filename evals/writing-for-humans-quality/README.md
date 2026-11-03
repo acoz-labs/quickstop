@@ -97,9 +97,11 @@ Each heading, list item and paragraph starts a new unit, and paragraphs split in
 sentences at `.`, `?` or `!` followed by a capital, digit or code span (common
 abbreviations such as "e.g." don't split). Headings are not sentences, and neither is
 a line that is wholly bold with no sentence ending (`**What changes**`, `**Why:**`),
-which works as a heading. So does a run-in label: a wholly bold first sentence with
-more text after it in the same paragraph (`**Verdict.** The job…`). A bold sentence on
-its own, such as `**Ship it.**`, stays a sentence.
+which works as a heading. A bold sentence such as `**Ship it.**` stays a sentence,
+including at the start of a paragraph, so every grader sees it. A bold run-in label
+(`**Verdict.** The job…`) is therefore one of the 3 opening sentences. No rule tells
+such a label from a short bold point ("Ship as planned."), and the limitation is the
+same in every arm.
 
 Model judges (`judges/*.md`; Sonnet, `--system-prompt` replacing Claude Code's, no
 tools, JSON schema output):
@@ -149,7 +151,11 @@ The borderline samples were written from each case's prompt and key, not from an
 reply. They test the comparator where real replies fall, between the extremes. Script
 graders cost nothing; `--judges` adds the model judges (about $1.10 for all 36
 samples). The unit tests run the script half on every `bin/ci`.
-A counted run needs `calibrate --judges` to pass on every case, on the same tree, first.
+`calibrate --output-dir` records the suite tree, runner blob and whether the working
+tree was clean. A counted run (the whole suite, or 5 runs) refuses to start unless the
+working tree is clean and `--calibration <dir>` points to a calibration that ran the
+judges on a clean tree with the same suite tree and runner blob, graded every sample of
+every case, and got every row as expected. The run copies it into the result dir.
 
 ## Pass rule and summary
 
@@ -157,9 +163,11 @@ A counted run needs `calibrate --judges` to pass on every case, on the same tree
 recorded: every arm and case with `--runs` valid runs, every grader scored, a passing
 preflight per arm, and an unchanged guard. It also checks `suite.json` against the
 suite on disk (cases, their graders, arms and styles), so a result from an edited
-suite can't read as complete. Compare the `suite tree` line in `CANDIDATE.txt` with the
-merged tree too. Anything short of that is listed as a
-problem and the result is not complete. A `--case` or `--arm` run is a subset and
+suite can't read as complete. It compares the suite tree and runner blob the run
+recorded (`candidate.json`) with `HEAD`, so a result from an edited key, prompt, fixture
+or judge doesn't read as complete either; tree hashes survive a rebase merge. A counted
+result also needs its `calibration.json` to pass the checks above for those same hashes.
+Anything short of that is listed as a problem and the result is not complete. A `--case` or `--arm` run is a subset and
 never a baseline; a baseline is a complete result with 5 runs. A run whose judges
 failed or hit the budget is reported as not graded, never as a fail.
 
@@ -175,8 +183,8 @@ invocation's spend to a Markdown ledger.
 export PATH="$(mise where python@3.11.15)/bin:$PATH"
 bin/writing-for-humans-quality-eval preflight
 bin/writing-for-humans-quality-eval calibrate                      # script graders, $0
-bin/writing-for-humans-quality-eval calibrate --judges --max-cost-usd 1
-bin/writing-for-humans-quality-eval run --model claude-sonnet-5-5 --runs 5 --max-cost-usd 15
+bin/writing-for-humans-quality-eval calibrate --judges --max-cost-usd 1.5 --output-dir <cal dir>
+bin/writing-for-humans-quality-eval run --model claude-sonnet-5-5 --runs 5 --calibration <cal dir> --max-cost-usd 16
 bin/writing-for-humans-quality-eval summarize <result dir>
 bin/writing-for-humans-quality-eval grade <result dir>             # regrade scripts, $0
 bin/writing-for-humans-quality-eval grade <result dir> --judges --max-cost-usd 3
@@ -184,7 +192,8 @@ bin/writing-for-humans-quality-eval grade <result dir> --judges --max-cost-usd 3
 
 A result dir (default `evals/writing-for-humans-quality/results/<UTC timestamp>/`,
 git-ignored) holds `CANDIDATE.txt` (head, tree, plugin tree and digest, suite tree,
-runner blob), `suite.json`, `settings.json` (model, Claude Code version, flags,
+runner blob), `candidate.json` (suite tree, runner blob, clean), `calibration.json`
+(counted runs), `suite.json`, `settings.json` (model, Claude Code version, flags,
 environment), `preflight.json`, `guard.json`, the retained `plugin/`, and per run
 `runs/<arm>/<case>/run-<n>/` with `transcript.jsonl`, `init.json`, `output.md`,
 `record.json` and `judges/`. `summary.json` and `summary.md` hold the per-arm table.

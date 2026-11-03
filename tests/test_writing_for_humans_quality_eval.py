@@ -17,6 +17,16 @@ q = importlib.util.module_from_spec(spec)
 loader.exec_module(q)
 
 CASES = q.load_cases()
+HEAD_IDS = dict(q.frozen_ids(), clean=True)
+
+
+def passing_calibration(ids=HEAD_IDS, cases=CASES):
+    rows = []
+    for name in cases:
+        for sample in q.SAMPLES:
+            graders = ['cold-read-opening', 'cold-read-whole'] + ([] if sample == 'borderline-fail' else ['pedantry'])
+            rows += [{'case': name, 'sample': sample, 'grader': grader, 'ok': True, 'detail': ''} for grader in graders]
+    return {'judges': True, 'judge_model': 'claude-sonnet-5-5', 'candidate': dict(ids), 'rows': rows}
 
 
 class Sentences(unittest.TestCase):
@@ -41,14 +51,19 @@ class Sentences(unittest.TestCase):
                                          ('sentence', 'One.'), ('sentence', 'Two.'), ('heading', 'Why:'),
                                          ('sentence', 'Three.'), ('heading', 'Traffic'), ('heading', 'Notes')])
 
-    def test_run_in_bold_labels_are_headings(self):
-        self.assertEqual(q.units('**Verdict.** The job dropped a wait. It skipped merchants.'),
-                         [('heading', 'Verdict.'), ('sentence', 'The job dropped a wait.'),
-                          ('sentence', 'It skipped merchants.')])
-        self.assertEqual(q.units('- **Raise the timeout.** Security rejected it.'),
-                         [('heading', 'Raise the timeout.'), ('sentence', 'Security rejected it.')])
-        self.assertEqual(q.sentences('**Ship it** today. Then tag.'), ['**Ship it** today.', 'Then tag.'])
-        self.assertEqual(q.opening('**Verdict.** One. Two. Three. Four.'), 'Verdict.\nOne.\nTwo.\nThree.')
+    def test_bold_run_in_sentences_are_graded_as_sentences(self):
+        # A bold first sentence is a sentence for every grader, whether it is a point or a label.
+        case4 = CASES['4-decision-question']
+        text = '**Should I delete the old backups now, or wait a week?** Deleting frees 2 TB. Waiting costs nothing.'
+        self.assertTrue(q.script_grades(text, case4)['ask-question']['passed'])
+        self.assertEqual(q.identifier_subjects('**`Config.json` sets the timeout to 5s.** That is too short.'),
+                         ['**`Config.json` sets the timeout to 5s.**'])
+        repeat = 'The queue stays in SQLite on the sync host.'
+        self.assertEqual(len(q.repeated_content(f'{repeat} It is quiet.\n\n**{repeat}** More text.')), 1)
+        self.assertEqual(q.opening('**We keep the queue in SQLite.** One. Two. Three. Four.'),
+                         '**We keep the queue in SQLite.**\nOne.\nTwo.')
+        # Known limitation, the same in every arm: a bold label uses one of the 3 opening sentences.
+        self.assertEqual(q.opening('**Verdict.** One. Two. Three.'), '**Verdict.**\nOne.\nTwo.')
 
     def test_wholly_bold_sentences_stay_sentences(self):
         self.assertEqual(q.units('**Delete now or wait?**\n\n**Ship it.**'),
@@ -60,8 +75,8 @@ class Sentences(unittest.TestCase):
         self.assertTrue(q.ask_question('**Context**\n\nOne. Two.\n\n**Decision:**\n\nDelete now or wait?'))
 
     def test_split_keeps_closing_markup(self):
-        self.assertEqual(q.sentences('It signs. **Use pdfquill (MIT).** "Quoted." Done.'),
-                         ['It signs.', '**Use pdfquill (MIT).**', '"Quoted."', 'Done.'])
+        self.assertEqual(q.sentences('**Use pdfquill (MIT).** It signs. "Quoted." Done.'),
+                         ['**Use pdfquill (MIT).**', 'It signs.', '"Quoted."', 'Done.'])
 
     def test_blockquotes_and_bold_labels_are_prose(self):
         self.assertEqual(q.sentences('> Quoted line. Second.\n\n**Billing** is half done.'),
@@ -354,6 +369,51 @@ class Guard(unittest.TestCase):
                               '~/.claude/plugins/plugin-directory-cache-v2.json changed during the run'])
 
 
+class Calibration(unittest.TestCase):
+    def test_a_passing_matching_calibration_clears(self):
+        self.assertEqual(q.calibration_problems(passing_calibration(), CASES, HEAD_IDS), [])
+
+    def test_each_gap_is_named(self):
+        calibration = passing_calibration(cases={k: v for k, v in CASES.items() if k != '9-design-doc'})
+        calibration['candidate']['runner_blob'] = 'f' * 40
+        calibration['rows'][0]['ok'] = False
+        problems = q.calibration_problems(calibration, CASES, HEAD_IDS)
+        self.assertIn(f"calibration runner_blob {'f' * 40} differs from {HEAD_IDS['runner_blob']}", problems)
+        self.assertIn('calibration did not grade 9-design-doc good with cold-read-opening, cold-read-whole, pedantry',
+                      problems)
+        self.assertIn('calibration failed: 1-worker-report good cold-read-opening', problems)
+        self.assertEqual(q.calibration_problems(None, CASES, HEAD_IDS),
+                         ['no calibration: a counted run needs a passing `calibrate --judges` on the same tree'])
+
+    def test_counted_runs_are_the_whole_suite_or_five_runs(self):
+        self.assertTrue(q.counted(False, 1))
+        self.assertTrue(q.counted(True, 5))
+        self.assertFalse(q.counted(True, 1))
+
+    def run_args(self, temp, **kwargs):
+        import argparse
+        defaults = dict(case=None, arm=None, runs=5, calibration=None, output_dir=str(Path(temp) / 'out'),
+                        plugin=None, model='m', judge_model='j', max_cost_usd=1.0, task_max_usd=0.3,
+                        judge_max_usd=0.05, jobs=1, no_judges=False, ledger=None)
+        return argparse.Namespace(**dict(defaults, **kwargs))
+
+    def test_run_refuses_a_counted_run_before_any_spend(self):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(q, 'call_claude') as call:
+            with mock.patch.object(q, 'frozen_ids', return_value=dict(HEAD_IDS, clean=False)):
+                with self.assertRaisesRegex(q.Failure, 'clean working tree'):
+                    q.run(self.run_args(temp))
+            with mock.patch.object(q, 'frozen_ids', return_value=HEAD_IDS):
+                with self.assertRaisesRegex(q.Failure, 'needs --calibration'):
+                    q.run(self.run_args(temp, arm=['writing-for-humans']))
+                stale = Path(temp) / 'cal'
+                stale.mkdir()
+                (stale / 'calibration.json').write_text(json.dumps(passing_calibration(dict(HEAD_IDS, suite_tree='0' * 40))))
+                with self.assertRaisesRegex(q.Failure, 'does not clear this run: calibration suite_tree'):
+                    q.run(self.run_args(temp, calibration=str(stale)))
+            call.assert_not_called()
+            self.assertFalse((Path(temp) / 'out').exists())
+
+
 class BudgetAndLedger(unittest.TestCase):
     def test_reservations_never_exceed_the_ceiling(self):
         budget = q.Budget(1.0)
@@ -376,6 +436,8 @@ class BudgetAndLedger(unittest.TestCase):
 class Summary(unittest.TestCase):
     def write_result(self, out, arms=tuple(q.ARMS), runs=1, drop=(), invalid=(), filtered=False, guard=()):
         cases = CASES
+        (out / 'candidate.json').write_text(json.dumps(HEAD_IDS))
+        (out / 'calibration.json').write_text(json.dumps(passing_calibration()))
         (out / 'suite.json').write_text(json.dumps(q.expected_suite(cases, list(arms), runs, filtered)))
         (out / 'preflight.json').write_text(json.dumps([{'arm': arm, 'passed': True} for arm in arms]))
         (out / 'guard.json').write_text(json.dumps({'problems': list(guard)}))
@@ -466,6 +528,46 @@ class Summary(unittest.TestCase):
             self.assertEqual(q.tool_calls(transcript), ['Skill', 'Read'])
             metrics = q.summarize(out, write=False)['arms']['default']
         self.assertEqual((metrics['skill_calls'], metrics['tool_calls']), (1, 2))
+
+    def edited(self, name, change, runs=5):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            self.write_result(out, runs=runs)
+            data = json.loads((out / name).read_text())
+            change(data)
+            (out / name).write_text(json.dumps(data))
+            return q.summarize(out, write=False)
+
+    def test_a_result_from_another_suite_tree_or_runner_is_not_complete(self):
+        summary = self.edited('candidate.json', lambda d: d.update(suite_tree='0' * 40))
+        self.assertFalse(summary['complete'])
+        self.assertIn(f"result suite_tree {'0' * 40} differs from HEAD {HEAD_IDS['suite_tree']}", summary['problems'])
+        summary = self.edited('candidate.json', lambda d: d.update(runner_blob='1' * 40), runs=1)
+        self.assertFalse(summary['complete'])
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            self.write_result(out)
+            (out / 'candidate.json').unlink()
+            self.assertIn('no candidate.json: the suite tree and runner blob were not recorded',
+                          q.summarize(out, write=False)['problems'])
+
+    def test_a_counted_result_needs_its_matching_calibration(self):
+        def failed_row(d):
+            d['rows'][0]['ok'] = False
+        for change in (lambda d: d.update(judges=False), lambda d: d['candidate'].update(clean=False),
+                       lambda d: d['candidate'].update(suite_tree='0' * 40), lambda d: d.update(rows=d['rows'][1:]),
+                       failed_row):
+            summary = self.edited('calibration.json', change)
+            self.assertFalse(summary['complete'])
+            self.assertFalse(summary['baseline'])
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            self.write_result(out, runs=5)
+            (out / 'calibration.json').unlink()
+            summary = q.summarize(out, write=False)
+        self.assertFalse(summary['baseline'])
+        self.assertIn('no calibration: a counted run needs a passing `calibrate --judges` on the same tree',
+                      summary['problems'])
 
     def test_a_missing_preflight_is_a_problem(self):
         with tempfile.TemporaryDirectory() as temp:
