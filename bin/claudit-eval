@@ -1003,43 +1003,55 @@ def grade(args):
 # frozen #192 suite and its grader counts don't change. Each matches structure and co-occurrence, not a phrasing.
 
 # Rule 6: no principles skill anywhere in an f19 report, Optional notes and Also worth knowing included.
-PRINCIPLES = re.compile(r'\bprinciples\b|principles\.md', re.I)
+#
+# The unit is one clause of one sentence of a report item. A clause proposes a principles skill when it holds all
+# three: (a) a creation act, (b) a target that is a skill, slash command or command, and (c) the principles as its
+# source or subject (named, or "it", "them", "that", "the list" after the principles were named earlier in the same
+# item). A rejection exempts only its own clause. A later clause with a creation act and "it", "one" or "them" (or an
+# act with no object, "worth adding later") proposes when an earlier clause of the item raised a principles skill.
+# f19 has no skills, so a named skill counts like any other target; a clause that runs or uses a skill has no
+# creation act and proposes nothing.
+PRINCIPLES = re.compile(r'\bprinciples?\b|principles\.md', re.I)
+TARGET = re.compile(r'\bskills?\b|\bslash[ \t]+commands?\b|\bcommands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|'
+                    r'(?:^|[\s`(])/[a-z][\w-]*\b', re.I)
 SKILL_WORD = re.compile(r'\bskills?\b|\bslash[ \t]+commands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|'
-                        r'(?:^|[\s`(])/principles\b', re.I)
+                        r'(?:^|[\s`(])/principles\b', re.I)  # doc-skills: what names a skill
+_VERB = (r'add|create|write|make|turn|convert|package|wrap|capture|extract|move|put|build|give|introduce|define|'
+         r'ship|split|promote|extend|bundle|codify|encode|expose|register|recommend|suggest|propose|consider|try|'
+         r'set[ \t]+up|spin[ \t]+up|break[ \t]+out')
+ACT = re.compile(
+    r"\b(?:%s)\b" % '|'.join(v[:-1] + '(?:e|es|ed|ing)' if v.endswith('e') else v + '(?:s|es|ed|ing)?'
+                              for v in _VERB.split('|'))
+    + r"|\b(?:deserves?|warrants?)\b|\bits[ \t]+own\b|\bnew[ \t]+(?:\S+[ \t]+){0,2}?(?:skills?|(?:slash[ \t]+)?commands?)\b"
+    r"|\bworth[ \t]+(?:adding|having|creating|making|writing|turning)\b|\bwhy[ \t]+not\b|\b(?:how|what)[ \t]+about\b"
+    r"|\bas[ \t]+an?[ \t]+(?:\S+[ \t]+){0,2}?(?:skills?|(?:slash[ \t]+)?commands?)\b"
+    r"|\b(?:would|could|might|should|will|can)(?:n[’']t)?\b[^.;,]{0,60}?\b(?:help|work|cut|load|fit|benefit|save|"
+    r"become|be[ \t]+(?:an?[ \t]+)?(?:good|great|useful|better|natural|nice|ideal))\b"
+    r"|\bhelps?\b|\bon[ \t]+demand\b"
+    r"|(?:\bnot|n[’']t)[ \t]+(?:hesitate|skip|avoid|rule[ \t]+out|leave[ \t]+out|pass[ \t]+on)\b"  # double negation
+    r"|(?:\bnot|n[’']t)[ \t]+(?:\w+[ \t]+)?(?:overkill|unnecessary|pointless|redundant|premature)\b", re.I)
 NEGATOR = re.compile(r"\b(?:no|none|not|never|nothing|without|avoid|skip|rather than|instead of|against)\b|"
                      r"n[’']t\b", re.I)
-# A negation reaches the skill word when no comma, semicolon, colon or conjunction (and, or, but, then, so) and at
-# most eight words sit between them: "No skill is needed", "There is no need to turn the principles into a skill".
+# A negation reaches the act or the target when no comma, semicolon, colon or conjunction (and, or, but, then, so)
+# and at most eight words sit between them: "No skill is needed", "There is no need to turn the principles into a
+# skill". A negation that urges ("Don't hesitate", "wouldn't skip") negates nothing.
 SCOPE_BREAK = re.compile(r'[,;:]|\b(?:and|or|but|then|so|yet)\b', re.I)
-# A negation that urges rather than rejects: "Don't hesitate to add a skill", "don't forget".
-URGES = re.compile(r"\b(?:don[’']t|do not|never)[ \t]+(?:hesitate|wait|forget|delay|overlook|miss)\b", re.I)
+CANCELS = re.compile(r"[ \t]+(?:\w+[ \t]+)?(?:hesitate|wait|forget|delay|overlook|miss|skip|avoid|rule[ \t]+out|"
+                     r"leave[ \t]+out|pass[ \t]+on|overkill|unnecessary|pointless|redundant|premature)\b", re.I)
 WHY_NOT = re.compile(r"\bwhy (?:not|don[’']t (?:we|you))\b", re.I)  # a rhetorical proposal, never a negation
-# A judgement that rejects the skill, later in its sentence, and isn't itself negated: "a skill would be overkill",
-# "I considered a skill … and decided against it".
-REJECTS = re.compile(r"\b(?:overkill|unnecessary|unneeded|pointless|redundant|premature|wrong(?: fit)?|"
+# A judgement in the same clause that rejects the skill, unless itself negated: "a skill would be overkill".
+REJECTS = re.compile(r"\b(?:overkill|unnecessary|unneeded|pointless|redundant|premature|wrong (?:fit|tool|choice)|"
                      r"(?:poor|bad) fit|no value|add(?:s)? nothing|not (?:needed|worth|necessary|a (?:good )?fit)|"
                      r"(?:is|are)n[’']t (?:needed|worth|necessary|a (?:good )?fit)|decided against|ruled (?:it )?out|"
                      r"rejected|declined|left (?:it )?out|chose not to)\b", re.I)
 REJECT_NEGATED = re.compile(r"\b(?:not|never|n[’']t|hardly)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
-# A rejection reversed later in the sentence: "isn't necessary today, but worth adding later", "unnecessary right
-# now, though you could add it later", "no skill yet; add one when the list grows".
-REVERSAL = re.compile(r"(?:\b(?:but|though|although|however|yet)\b|;)[^.;]*?\b(?:worth (?:adding|having|it|one)|"
-                      r"(?:could|should|might|may|can|will|would) (?:still |later |eventually )?(?:add|create|write|"
-                      r"make|turn|have|use|help)\b(?![ \t]+(?:nothing|no\b|little|much))|add (?:it|one|them)|later\b|eventually|"
-                      r"someday|in (?:the )?future|"
-                      r"once (?:it|the list|they)|when (?:it|the list|they) grows?)", re.I)
-# "Skills are for procedures": a statement of what skills fit, about something other than the principles.
-SKILLS_FIT = re.compile(r'\bskills?[ \t]+(?:are[ \t]+for|suit|fit|belong[ \t]+to|work[ \t]+best[ \t]+for)[ \t]+'
-                        r'(?:\w+[ \t]+){0,2}(?:procedures?|steps|workflows?|tasks)\b', re.I)
-# A skill the report names that isn't a principles skill: "Run the `review` skill; it reads docs/principles.md".
-OTHER_SKILL = re.compile(r'`/?([\w:-]+)`[ \t]+(?:skill|slash command|command)\b', re.I)
 # A line that records a decline or a dropped finding, not a proposal: "Declined: a skill for docs/principles.md".
 SET_ASIDE = re.compile(r'^\W*(?:Declined|Rejected|Not proposed|Not counted|Dropped|Left out)\b[^:\n]{0,40}:', re.I)
 BACK_REFERENCE = re.compile(r'\b(?:it|them|this|that|these|those|the (?:list|doc|file|page))\b', re.I)
-MAKE_ONE = re.compile(r'\b(?:add|create|write|make|build|turn[ \t]+\w+[ \t]+into|wrap[ \t]+\w+[ \t]+in)[ \t]+one\b',
-                      re.I)
-CLAUSE_SPLIT = re.compile(r'[;:]\s+|,\s+(?=(?:but|so|and|then|which|though|although|while|whereas)\b)|'
-                          r'\s+(?:but|so|then|which|though|although|while|whereas)\s+|\s[—–-]\s')
+POINTS_BACK = re.compile(r"[ \t]*(?:(?:it|one|them|that)\b|(?:(?:later|eventually|someday|today|now|then|again|"
+                         r"too|as well|in (?:the )?future)\b[ \t]*)*[.!?]?$)", re.I)
+CLAUSE_SPLIT = re.compile(r'[;:]\s+|,\s+(?=(?:but|so|and|then|which|though|although|while|whereas|however|yet)\b)|'
+                          r'\s+(?:but|so|then|which|though|although|while|whereas|however)\s+|\s[—–-]\s')
 OTHER_MD = re.compile(r'`?([\w./-]+\.md)`?')
 
 
@@ -1075,74 +1087,80 @@ def unit_sentences(unit):
     return [s.strip() for s in re.split(r'(?<=[.!?])\s+(?=[A-Z`*_(\[])', re.sub(r'\s*\n\s*', ' ', unit)) if s.strip()]
 
 
-def negated(before):
-    """True when a negation's scope reaches the end of `before` (the text up to a skill word)."""
+def clauses_of(sentence):
+    """A sentence's clauses. What follows a colon stays with the clause before it when it has no act of its own
+    ("Convert to a skill: `docs/principles.md`")."""
+    out = []
+    for part in re.split(r'(?<=:)\s+', sentence):
+        pieces = [c for c in CLAUSE_SPLIT.split(part) if c and c.strip()]
+        if out and out[-1].endswith(':') and pieces and not ACT.search(pieces[0]):
+            out[-1] += ' ' + pieces.pop(0)
+        out += pieces
+    return out
+
+
+def negated(before, question=False):
+    """True when a negation's scope reaches the end of `before` (the text up to an act or a target). In a question a
+    leading negative ("Wouldn't a skill help?") asks for the thing, so it negates nothing."""
     before = WHY_NOT.sub('why', before)
+    if question:
+        before = re.sub(r"^\W*\w+n[’']t\b", '', before)
     for match in reversed(list(NEGATOR.finditer(before))):
-        if URGES.match(before, before.rfind(' ', 0, match.start()) + 1):
-            continue  # "Don't hesitate to …" urges
+        if CANCELS.match(before, match.end()) or re.search(r"(?:\bnot|n[’']t)[ \t]+$", before[:match.start()]):
+            continue  # "don't hesitate to", "wouldn't skip", "not overkill": a negation that urges
         gap = before[match.end():]
         return not SCOPE_BREAK.search(gap) and len(gap.split()) <= 8
     return False
 
 
-def proposes_skill(clause, sentence, named_skills=False):
-    """True when a clause puts a skill forward: a skill word no negation reaches and that no later unnegated judgement
-    in the sentence rejects. Unless `named_skills`, a skill named in the clause other than a principles one ("the
-    `review` skill") is an existing skill, not a proposal."""
-    if SKILLS_FIT.search(clause):
-        return False
-    for match in SKILL_WORD.finditer(clause):
-        other = [n for n in OTHER_SKILL.findall(clause[:match.end()]) if 'principle' not in n.lower()]
-        if other and not named_skills:
-            continue
-        before = clause[:match.start()]
-        if clause.rstrip().endswith('?'):  # "Wouldn't a skill help?" asks for one
-            before = re.sub(r"^\s*\w+n[’']t\b", '', before)
-        if negated(before):
-            continue
-        after = sentence[sentence.find(clause) + match.end():] if clause in sentence else clause[match.end():]
-        reject = REJECTS.search(after)
-        if reject and not REJECT_NEGATED.search(after[:reject.start()]):
-            continue
-        return True
-    return False
+def clause_act(clause):
+    """The first creation act in a clause that no negation reaches, or None."""
+    for act in ACT.finditer(clause):
+        if not negated(clause[:act.start()], clause.rstrip().endswith('?')):
+            return act
+    return None
+
+
+def rejected(clause):
+    reject = REJECTS.search(clause)
+    return bool(reject) and not REJECT_NEGATED.search(clause[:reject.start()])
+
+
+def clause_target(clause):
+    """The first skill, slash command or command a clause names that no negation reaches, or None."""
+    for target in TARGET.finditer(clause):
+        if not negated(clause[:target.start()], clause.rstrip().endswith('?')):
+            return target
+    return None
 
 
 def principles_skill_units(text):
-    """The units (line, text) of a report that propose a skill for the principles, anywhere in the report.
-
-    A sentence counts when it names the principles (or refers back to them, with the principles named earlier in the
-    same paragraph or list item and no other Markdown file named) and either a clause proposes a skill (a question
-    counts too: "Why not make it a skill?"), or it raises a skill and a later clause reverses the rejection ("isn't
-    necessary today, but worth adding later", "add one when the list grows"). A line that records a decline
-    ("Declined: …") proposes nothing."""
+    """The units (line, text) of a report with a clause that proposes a skill for the principles (see above)."""
     found = []
     for line, unit in report_units(text):
         named, raised = False, False
         for sentence in unit_sentences(unit):
-            here = PRINCIPLES.search(sentence) is not None
-            others = [m for m in OTHER_MD.findall(sentence) if 'principles' not in m.lower()]
-            about = here or (named and BACK_REFERENCE.search(sentence) and not others)
-            skill = SKILL_WORD.search(sentence) is not None
             if SET_ASIDE.match(sentence):
-                named = named or here
+                named = named or PRINCIPLES.search(sentence) is not None
                 continue
-            clauses = [c for c in CLAUSE_SPLIT.split(sentence) if c and c.strip()]
-            proposal = any(proposes_skill(c, sentence) for c in clauses)
-            reversal = (skill or raised) and REVERSAL.search(sentence) is not None and not URGES.search(sentence)
-            again = False
-            seen = False
-            for clause in clauses:  # "add one" after a clause or sentence that raised a skill
-                one = MAKE_ONE.search(clause)
-                if one and (raised or seen) and not negated(clause[:one.start()]):
-                    again = True
-                seen = seen or SKILL_WORD.search(clause) is not None
-            if (proposal or again or reversal) and about:
+            hit = False
+            for clause in clauses_of(sentence):
+                here = PRINCIPLES.search(clause) is not None
+                others = [m for m in OTHER_MD.findall(clause) if 'principles' not in m.lower()]
+                source = here or (named and BACK_REFERENCE.search(clause) is not None and not others)
+                target = TARGET.search(clause)
+                act = clause_act(clause)
+                if act and not rejected(clause):
+                    if clause_target(clause) and source:
+                        hit = True
+                    elif raised and not target and POINTS_BACK.match(clause, act.end()) and not others:
+                        hit = True  # "…, but worth adding later", "add one when the list grows"
+                if target and (here or named):
+                    raised = True  # a skill came up with the principles named, proposed or not
+                named = named or here
+            if hit:
                 found.append((line, unit))
                 break
-            named = named or here
-            raised = raised or (skill and (here or named))
     return found
 
 
@@ -1172,31 +1190,29 @@ def change_items(section):
 
 
 CREATES_SKILL = re.compile(r'\b(?:create|add|write|make|move)\b[^.]{0,60}\.claude/(?:skills|commands)/', re.I)
-# The shape of a proposal: a creating or converting verb with the skill word, or "a skill for/from X".
-PROPOSE_SHAPE = re.compile(r'\b(?:add|create|write|make|turn|convert|package|wrap|move|put|deserves?|as a|into a)\b'
-                           r'[^;\n]{0,80}?\b(?:skills?|slash commands?)\b|\b(?:skills?|slash commands?)[ \t]+(?:for|from)\b',
-                           re.I)
 SKILL_PATH = re.compile(r'`?[\w./-]*(?:\.claude/[\w./-]*|SKILL\.md)`?', re.I)
+SKILL_TITLE = re.compile(r'^\W*(?:\d+[.)])?\W*skills?\b\W*:', re.I)  # "**Skill: docs/testing.md**"
 
 
 def doc_skill_items(text):
     """(page, translation or reference page, a reason given) for each documentation page a numbered Top changes item
-    proposes a skill for. An item proposes one when a sentence (not a Source line) proposes a skill, as rule 6 reads a
-    proposal, with skill files' paths set aside, or creates a `.claude/skills/` file. Then each page the item names
-    counts, outside instruction files, skill files and `.claude/`: "Add a skill for X", "Turn X into a skill", "Add
-    skills for A and B", "Add a `testing` skill from X", "Make X a skill", or a title "Turn the release procedure into
-    a skill" with the page in its Problem line."""
+    proposes a skill for. An item proposes one when a clause of it (not a Source line) holds a creation act and a
+    skill or slash command that no negation reaches and no judgement rejects, as rule 6 reads a clause (skill files'
+    paths set aside), when it creates a `.claude/skills/` file, or when its title is "Skill: <page>". Then each page
+    the item names counts, outside instruction files, skill files and `.claude/`."""
     found = []
     for item in change_items(top_changes(text)):
         body = '\n'.join(l for l in item.splitlines() if not re.match(r'\s*Source:', l))
-        proposal = False
+        proposal = SKILL_TITLE.match(re.sub(r'^(?:#{3,4}[ \t]+)?\d+[.)][ \t]+', '', item.splitlines()[0])) is not None
         for sentence in unit_sentences(body):
-            bare = SKILL_PATH.sub(' ', sentence)
-            clauses = [c for c in CLAUSE_SPLIT.split(bare) if c and c.strip()]
-            if CREATES_SKILL.search(sentence) or (PROPOSE_SHAPE.search(bare) and any(
-                    proposes_skill(c, bare, named_skills=True) for c in clauses if PROPOSE_SHAPE.search(c))):
-                proposal = True
+            if proposal:
                 break
+            if CREATES_SKILL.search(sentence):
+                proposal = True
+            for clause in clauses_of(SKILL_PATH.sub(' ', sentence)):
+                skill = any(not negated(clause[:m.start()]) for m in SKILL_WORD.finditer(clause))
+                if skill and clause_act(clause) and not rejected(clause):
+                    proposal = True
         if not proposal:
             continue
         pages = []
@@ -1224,7 +1240,8 @@ STALE_WORD = re.compile(r"\b(?:histor\w*|past (?:events?|setups?)|narrat\w*|obso
                         r"no longer (?:needed|true|relevant|applies))", re.I)
 STALE_DENIED = re.compile(r"\b(?:not|never|n[’']t|no)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
 DECLINE_HEAD = re.compile(r'#+[ \t]+(?:Declined|Not counted)\b', re.I)
-KEPT = re.compile(r'\b(?:kept on purpose|keep (?:it|them|as is)|deliberately kept|on purpose)\b', re.I)
+# A line kept deliberately: "kept on purpose", "keep them as is". "Fix it on purpose" is not a keep.
+KEPT = re.compile(r'\b(?:kept|keep(?:s|ing)?|leave|left)\b[^.]{0,40}?\b(?:on purpose|deliberately|as is)\b', re.I)
 
 
 def finding_blocks(text):

@@ -63,6 +63,17 @@ ATTACKS = [
     "Don't hesitate to turn the principles into a skill.",  # a negation that urges
     'Nothing else is wrong and a skill for the principles would help.',  # a negation whose scope ends at "and"
     'Declined: nothing. Add a skill for `docs/principles.md`.',  # a decline line, then a proposal
+    # Review round 2, M5: a named skill to create is still a principles skill (f19 has no skills).
+    'Add a `go-style` skill from docs/principles.md.',
+    'Turn docs/principles.md into a `team-values` skill.',
+    'Optional: create a `design-rules` skill that loads docs/principles.md on demand.',
+    '- Optional: a `/guidelines` slash command could load docs/principles.md.',
+    'Run the `review` skill and add a skill for docs/principles.md.',
+    'Like the `review` skill, docs/principles.md would work well as a skill.',
+    'Extend the `review` skill with a principles skill.',
+    # Review round 2, L4: an urging double negation.
+    'I would not hesitate to turn the principles into a skill.',
+    "I wouldn't skip a skill for the principles.",
 ]
 # Recorded skill proposals for another doc (#184 gate: tallyho's release procedure, quickstop's SDLC doc), with
 # `docs/principles.md` in place of that doc: the shapes Claudit has actually written.
@@ -107,6 +118,12 @@ SAFE = [
     'Declined: a skill for docs/principles.md (it states values, not steps).',
     'Run the `review` skill; it reads docs/principles.md.',
     'No skill is needed for the principles, now or later.',
+    # Review round 2, M6: a later clause about something else doesn't reverse the rejection.
+    'No skill is needed for docs/principles.md; consider headings later.',
+    'No skill needed for docs/principles.md, though you should add a test later.',
+    'A skill would add nothing for docs/principles.md, though the doc could use headings later.',
+    # A clause that runs or uses an existing skill, with no creation act.
+    'Use the `review` skill when a change touches docs/principles.md.',
 ]
 # Recorded lines about the principles that propose no skill (#192 plain and doctor-combined f19 reports).
 RECORDED_SAFE = [
@@ -174,7 +191,10 @@ class DocSkills(unittest.TestCase):
                                                                                      'docs/release.md']),
                              ('Add a `testing` skill from docs/testing.md', ['docs/testing.md']),
                              ('Make `docs/api/reference.md` a skill', ['docs/api/reference.md']),
-                             ('Package `docs/deploy.md` as a slash command', ['docs/deploy.md'])):
+                             ('Package `docs/deploy.md` as a slash command', ['docs/deploy.md']),
+                             # Review round 2, L4.
+                             ('Give docs/testing.md its own skill', ['docs/testing.md']),
+                             ('Skill: docs/testing.md', ['docs/testing.md'])):
             with self.subTest(title=title):
                 self.assertEqual([p for p, _, _ in ce.doc_skill_items(plan(title))], pages)
         self.assertFalse(ce.doc_skills_pass(ce.doc_skill_items(plan('Make `docs/api/reference.md` a skill'))))
@@ -249,6 +269,11 @@ class HistoryLines(unittest.TestCase):
         '## Declined by the project\n\n- **Hooks** (`docs/repository.md:64`): history, "have been retired".\n'
         '- `docs/repository.md:42`: a stale record of the 3.9.6 compatibility run.',
     ]
+
+    def test_fix_on_purpose_is_not_a_keep(self):
+        # Review round 2, L4: only a keep ("kept on purpose") sets a line aside.
+        text = report('- `docs/repository.md:42`: the 3.9.6 compatibility run note is history. Fix it on purpose.')
+        self.assertEqual(ce.history_lines(text), ['compatibility-run'])
 
     def test_both_lines_found(self):
         for body in self.FOUND:
