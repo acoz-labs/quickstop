@@ -540,6 +540,7 @@ The long design doc (case 9) still rarely opens with its point. The gain over 0.
 | Part A (development, smoke, calibration, re-baseline) | 17.1948 |
 | `disallowed-tools` probe (2 Haiku calls) | 0.0011 |
 | 3 candidate screens | 2.6890 |
+| Reviewer probe of the writing-audit `disallowed-tools` (1 Haiku call) | 0.0048 |
 | Gate (45 runs) | 4.6864 |
 | #172 regression suite | 0.2007 |
 | **Cumulative** | **24.7768** of the $30 cap |

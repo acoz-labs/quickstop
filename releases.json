@@ -38,8 +38,8 @@
     {
       "name": "writing-for-humans",
       "harness": "claude-code",
-      "commit": "9754a2fa8cb67ee509bc61faac78df6ef17410cd",
-      "sha256": "abf6082b256d5508fc6567c7d3af87aad2d2a285f24446eeed0616196d890bf2",
+      "commit": "5581a159e10d523c68a514fec0237c46a44ac988",
+      "sha256": "f2df06a1cef1e5073e3adab9f3abf8cc8cddc063826de143b07eb88306004e35",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claude-code/writing-for-humans",
@@ -47,15 +47,28 @@
       },
       "manifest": {
         "name": "writing-for-humans",
-        "version": "0.3.1",
-        "description": "Plain, direct Claude Code writing with context, evidence and an opinionated voice preset.",
-        "license": "MIT"
+        "version": "1.0.0",
+        "description": "An output style that makes what Claude writes easy to take in at reading speed: the point, the ask and the stakes first, for a reader who wasn't in the session.",
+        "author": {
+          "name": "quickstop",
+          "url": "https://github.com/acoz-labs/quickstop"
+        },
+        "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/claude-code/writing-for-humans",
+        "repository": "https://github.com/acoz-labs/quickstop",
+        "license": "MIT",
+        "keywords": [
+          "writing",
+          "output-style",
+          "readability",
+          "communication",
+          "documentation"
+        ]
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 148,
-        "artifact": "sha256:2cfff52d6e5f567c1fdb27156f76a2d1ec3dbe003f226e8826e2854d561a1ec2",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/148#issuecomment-5954439158"
+        "issue": 189,
+        "artifact": "sha256:1ccfd3202ee44f586c7cf86ad120d38cad36cdbf24b73b19552ac39051d9d90c",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/189#issuecomment-6615336599"
       }
     }
   ]
