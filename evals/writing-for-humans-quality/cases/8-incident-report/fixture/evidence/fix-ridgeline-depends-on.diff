@@ -1,0 +1,14 @@
+--- a/ridgeline/payout-batch.job.yaml
++++ b/ridgeline/payout-batch.job.yaml
+@@ -4,6 +4,11 @@ owner: payments-ops
+ schedule: "0 2 * * *"
+ timezone: UTC
+ command: ["/opt/payouts/bin/payout-batch", "--business-date", "{{ yesterday }}"]
++# Wait for the ledger close, as the old cron wrapper did. Without this the
++# batch skips merchants whose partitions are still open (late payouts 2-4 Nov).
++depends_on:
++  - job: ledger-close
++    timeout: 3h
+ resources:
+   cpu: 2
+   memory: 4Gi

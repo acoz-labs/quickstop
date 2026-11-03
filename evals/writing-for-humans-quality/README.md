@@ -2,7 +2,7 @@
 
 Writing for Humans exists to make what Claude writes easy to read at human speed:
 understood cold, clear without being pedantic, little repetition, concise without
-losing clarity. This suite measures that (issue #187). It runs the same seven writing
+losing clarity. This suite measures that (issues #187 and #189). It runs the same nine writing
 tasks under three output styles and grades each reply the same way:
 
 | Arm | `outputStyle` | Plugin loaded |
@@ -76,7 +76,8 @@ answer). Each item has a `point`, which a reply must get across, and optional
 `detail`, which it needn't.
 
 1. `1-worker-report`: summarise an investigation from logs, notes and a config.
-2. `2-design-note`: a decision record from a meeting transcript.
+2. `2-design-note`: a decision record from a meeting transcript. The task has no
+   Write tool, so the ask is for the reader to post the record to the wiki.
 3. `3-pr-description`: a PR description from a diff, flagging an open question.
 4. `4-decision-question`: a release step that needs a choice only the user can make.
 5. `5-status-update`: resume a work session from its log.
@@ -85,6 +86,9 @@ answer). Each item has a `point`, which a reply must get across, and optional
    The subagent's return is a fixture, so every arm relays the same text. The user's
    licence requirement leaves one library, so the ask is whether to accept its
    maintenance risk, not a choice between libraries.
+8. `8-incident-report`: a full incident report from a large evidence bundle, long
+   enough (800+ words under the default style) for repetition and pedantry to fail.
+9. `9-design-doc`: a multi-section design doc from scattered notes and a template.
 
 ## Graders
 
@@ -117,8 +121,9 @@ Script graders (no model):
   repeat still counts. Reported as a count.
 - **Words:** words outside fenced code. Reported, not pass/fail.
 - **Identifier subject:** sentences whose first token is a code span, `file:line`, a
-  call, a snake_case or camelCase name, a path or a file name. Capitalised names such
-as Node.js and numbers such as 50/50 are not identifiers. "The `deliver()`
+  call, a snake_case or camelCase name, a path or a file name. A capitalised file name
+  such as `Config.json` counts; product names ending in `.js` (Node.js) and numbers
+  such as 50/50 are not identifiers. "The `deliver()`
   function loops" passes; "`deliver()` loops" doesn't. Negated or quoted sentences
   are not exempt.
 - **Case 4 question:** one of the first three sentences ends in `?`.
@@ -140,8 +145,9 @@ as Node.js and numbers such as 50/50 are not identifiers. "The `deliver()`
 
 The borderline samples were written from each case's prompt and key, not from any
 reply. They test the comparator where real replies fall, between the extremes. Script
-graders cost nothing; `--judges` adds the model judges (about $0.65 for all 28
+graders cost nothing; `--judges` adds the model judges (about $1.10 for all 36
 samples). The unit tests run the script half on every `bin/ci`.
+A counted run needs `calibrate --judges` to pass on every case, on the same tree, first.
 
 ## Pass rule and summary
 
@@ -152,7 +158,7 @@ suite on disk (cases, their graders, arms and styles), so a result from an edite
 suite can't read as complete. Compare the `suite tree` line in `CANDIDATE.txt` with the
 merged tree too. Anything short of that is listed as a
 problem and the result is not complete. A `--case` or `--arm` run is a subset and
-never a baseline; a baseline is a complete result with 3 runs. A run whose judges
+never a baseline; a baseline is a complete result with 5 runs. A run whose judges
 failed or hit the budget is reported as not graded, never as a fail.
 
 ## Running
@@ -168,7 +174,7 @@ export PATH="$(mise where python@3.11.15)/bin:$PATH"
 bin/writing-for-humans-quality-eval preflight
 bin/writing-for-humans-quality-eval calibrate                      # script graders, $0
 bin/writing-for-humans-quality-eval calibrate --judges --max-cost-usd 1
-bin/writing-for-humans-quality-eval run --model claude-sonnet-5-5 --runs 3 --max-cost-usd 12
+bin/writing-for-humans-quality-eval run --model claude-sonnet-5-5 --runs 5 --max-cost-usd 15
 bin/writing-for-humans-quality-eval summarize <result dir>
 bin/writing-for-humans-quality-eval grade <result dir>             # regrade scripts, $0
 bin/writing-for-humans-quality-eval grade <result dir> --judges --max-cost-usd 3

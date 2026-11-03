@@ -1,0 +1,14 @@
+{
+  "claim": {
+    "point": "The app should upload each photo straight to object storage with a short-lived signed URL and submit only the photo references, so inspection submits stop failing at the gateway's 30-second timeout.",
+    "detail": "6% of submits fail today, 41% of those with more than 40 photos; it also takes photo bytes off the API servers and lets the app retry one photo at a time; security's conditions include 15-minute single-object URLs and a key check at submit; it ships in app 4.12, mid-January."
+  },
+  "ask": {
+    "point": "The reviewers must decide whether to force app versions older than 4.12 to upgrade by switching the old submit path off on 31 January, or keep the old path running for them.",
+    "detail": "The mobile team needs the answer before sprint planning on 16 November, because a forced upgrade needs an upgrade prompt in 4.12."
+  },
+  "stakes": {
+    "point": "Forcing the upgrade lets the old path and its servers go but cuts off the inspectors whose devices can't run 4.12; keeping the old path keeps them working but means paying to run both paths.",
+    "detail": "About 9% of inspectors are on iOS 15; the old path's servers cost roughly GBP 1,800 a month."
+  }
+}

@@ -1,0 +1,5 @@
+app_version,min_ios,min_android,active_inspectors,share
+4.11,15.0,10,2310,0.62
+4.10,15.0,10,820,0.22
+4.9,15.0,9,410,0.11
+4.8 and older,14.0,9,190,0.05

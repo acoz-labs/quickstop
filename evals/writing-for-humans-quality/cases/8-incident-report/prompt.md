@@ -1,0 +1,1 @@
+On Wednesday I asked you to find out why some merchants were paid late at the start of November. The evidence you collected is in `evidence/`. Write the full investigation report for me. I'll take it to Monday's incident review, where people from finance and merchant support who weren't involved will read it too.

@@ -1,0 +1,42 @@
+claim_id,merchant_id,filed,fee_type,amount_gbp,days_late
+FC-4101,M86189,2026-11-05,overdraft interest,75.00,1
+FC-4102,M54556,2026-11-05,overdraft fee,75.00,1
+FC-4103,M86781,2026-11-05,late supplier payment fee,25.00,1
+FC-4104,M22624,2026-11-06,failed direct debit fee,120.00,1
+FC-4105,M48375,2026-11-06,late supplier payment fee,120.00,1
+FC-4106,M15030,2026-11-05,overdraft interest,50.00,1
+FC-4107,M93331,2026-11-05,overdraft fee,60.00,2
+FC-4108,M89838,2026-11-05,late supplier payment fee,30.00,1
+FC-4109,M62153,2026-11-05,overdraft fee,30.00,1
+FC-4110,M94160,2026-11-05,late supplier payment fee,25.00,1
+FC-4111,M19813,2026-11-05,failed direct debit fee,90.00,1
+FC-4112,M32510,2026-11-05,overdraft interest,120.00,1
+FC-4113,M55331,2026-11-05,failed direct debit fee,60.00,1
+FC-4114,M15630,2026-11-05,late supplier payment fee,30.00,2
+FC-4115,M52719,2026-11-05,failed direct debit fee,60.00,1
+FC-4116,M22739,2026-11-06,overdraft fee,25.00,1
+FC-4117,M38044,2026-11-05,failed direct debit fee,60.00,1
+FC-4118,M81848,2026-11-05,overdraft fee,35.00,1
+FC-4119,M49585,2026-11-05,failed direct debit fee,120.00,1
+FC-4120,M37756,2026-11-06,overdraft fee,30.00,1
+FC-4121,M75182,2026-11-06,late supplier payment fee,150.00,2
+FC-4122,M27305,2026-11-05,overdraft interest,50.00,1
+FC-4123,M69867,2026-11-05,failed direct debit fee,30.00,1
+FC-4124,M89274,2026-11-05,overdraft interest,75.00,1
+FC-4125,M75661,2026-11-06,overdraft fee,120.00,1
+FC-4126,M24903,2026-11-05,failed direct debit fee,35.00,1
+FC-4127,M14566,2026-11-06,overdraft fee,90.00,1
+FC-4128,M64935,2026-11-05,late supplier payment fee,120.00,2
+FC-4129,M91235,2026-11-06,overdraft fee,30.00,1
+FC-4130,M91864,2026-11-05,overdraft interest,25.00,1
+FC-4131,M79320,2026-11-05,late supplier payment fee,75.00,1
+FC-4132,M64973,2026-11-06,overdraft fee,50.00,1
+FC-4133,M23790,2026-11-05,failed direct debit fee,25.00,1
+FC-4134,M33834,2026-11-05,overdraft fee,60.00,1
+FC-4135,M36655,2026-11-05,overdraft fee,150.00,2
+FC-4136,M55398,2026-11-05,overdraft fee,60.00,1
+FC-4137,M30941,2026-11-05,failed direct debit fee,150.00,1
+FC-4138,M91331,2026-11-06,late supplier payment fee,30.00,1
+FC-4139,M21128,2026-11-05,overdraft fee,150.00,1
+FC-4140,M23344,2026-11-05,overdraft interest,75.00,1
+FC-4141,M60495,2026-11-05,overdraft interest,350.00,1

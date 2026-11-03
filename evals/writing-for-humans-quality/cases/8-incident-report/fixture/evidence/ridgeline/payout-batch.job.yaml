@@ -1,0 +1,13 @@
+# Ridgeline job definition, created by MIGRATION-1187 on 2026-11-01.
+name: payout-batch
+owner: payments-ops
+schedule: "0 2 * * *"
+timezone: UTC
+command: ["/opt/payouts/bin/payout-batch", "--business-date", "{{ yesterday }}"]
+resources:
+  cpu: 2
+  memory: 4Gi
+retries: 1
+timeout: 2h
+notify:
+  on_failure: ["#payments-ops"]

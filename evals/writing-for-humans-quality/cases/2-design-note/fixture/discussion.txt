@@ -12,6 +12,4 @@ Dana: When would we need that?
 Theo: Capacity plan says one host is fine until roughly 500 jobs a minute. We're nowhere near. Maybe next year if the enterprise tier lands.
 Ines: Also, one host is a single point of failure, but sync is already single-host for other reasons, so the queue doesn't make that worse.
 Marco: Fine. Then I'd just ask that it's written down that this is a one-host design, so nobody's surprised later.
-Dana: Agreed. Decision: we keep the queue in SQLite with WAL on sync-01. We revisit and move to Postgres if we need more than one sync host, which the capacity plan puts at around 500 jobs a minute. Theo, can you write that up?
-Theo: Will do. Actually, can whoever writes it up do it? I'm out tomorrow.
-Dana: Sure. Anything else? No? Thanks all.
+Dana: Agreed. Decision: we keep the queue in SQLite with WAL on sync-01. We revisit and move to Postgres if we need more than one sync host, which the capacity plan puts at around 500 jobs a minute. Anything else? No? Thanks all.
