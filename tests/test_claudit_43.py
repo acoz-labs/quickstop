@@ -293,6 +293,7 @@ class Dismissals(Project):
 
 FAKE_CLAUDE = r'''#!/bin/sh
 if [ "$1" = doctor ]; then
+  printf '%s\n' "$DISABLE_AUTOUPDATER" > "$PWD/doctor-env"
   printf 'Claude Code doctor\n\nInvalid settings\n- %s/.claude/settings.json \342\200\272 hooks.Stop: must be an array\n' "$PWD"
   printf '  Suggested fix: x\n\nNo installation issues found.\n'
   exit 0
@@ -306,7 +307,7 @@ esac
 
 
 class Deep(Project):
-    def run_deep(self, mode='ok'):
+    def run_deep(self, mode='ok', model=None):
         bindir = os.path.join(self.root, 'fakebin')
         os.makedirs(bindir)
         Path(bindir, 'claude').write_text(FAKE_CLAUDE)
@@ -314,7 +315,8 @@ class Deep(Project):
         args, record = os.path.join(self.root, 'args'), os.path.join(self.root, 'record.jsonl')
         code, out, _ = self.cli('deep', '--root', self.root, '--max-budget-usd', '0.4',
                                 env={'PATH': bindir + ':/usr/bin:/bin', 'FAKE_ARGS': args, 'FAKE_MODE': mode,
-                                     'CLAUDIT_DEEP_RECORD': record})
+                                     'CLAUDIT_DEEP_RECORD': record, 'CLAUDIT_DEEP_MODEL': model or '',
+                                     'DISABLE_AUTOUPDATER': ''})
         return code, out, Path(args).read_text().split('\n') if os.path.exists(args) else [], record
 
     def test_nested_prompt_audit_is_read_only_and_recorded(self):
@@ -324,12 +326,22 @@ class Deep(Project):
         self.assertEqual(out['prompt_audit']['report'], '1. A stale line')
         self.assertEqual((out['prompt_audit']['cost_usd'], out['prompt_audit']['permission_denials']), (0.2, 1))
         self.assertEqual(args[:2], ['-p', '/doctor prompt-audit .'])
-        for flag in ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit',
-                     'Skill(claudit:claudit)', '--strict-mcp-config', '--no-session-persistence', '--max-budget-usd'):
+        for flag in ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash',
+                     'Skill(claudit:claudit)', '--strict-mcp-config', '--no-session-persistence'):
             self.assertIn(flag, args)
+        self.assertEqual(args[args.index('--max-budget-usd') + 1], '0.4')
+        self.assertEqual(args[args.index('--model') + 1], 'sonnet')
+        self.assertEqual((out['prompt_audit']['model'], out['prompt_audit']['max_budget_usd']), ('sonnet', 0.4))
+        self.assertEqual(Path(self.root, 'doctor-env').read_text().strip(), '1')  # DISABLE_AUTOUPDATER for doctor
         self.assertEqual(out['claude_doctor']['line'],
                          'claude doctor: 1 invalid setting: ./.claude/settings.json › hooks.Stop: must be an array.')
-        self.assertEqual(json.loads(Path(record).read_text())['cost_usd'], 0.2)
+        recorded = json.loads(Path(record).read_text())
+        self.assertEqual((recorded['cost_usd'], recorded['model'], recorded['max_budget_usd']), (0.2, 'sonnet', 0.4))
+
+    def test_the_eval_runner_pins_the_nested_model(self):
+        _, out, args, _ = self.run_deep(model='claude-sonnet-5-5')
+        self.assertEqual(args[args.index('--model') + 1], 'claude-sonnet-5-5')
+        self.assertEqual(out['prompt_audit']['model'], 'claude-sonnet-5-5')
 
     def test_a_failed_nested_run_is_reported_not_raised(self):
         code, out, _, _ = self.run_deep('fail')

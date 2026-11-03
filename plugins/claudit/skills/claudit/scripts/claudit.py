@@ -2520,19 +2520,21 @@ def dismiss(root, fid, reason, shared=False, data_dir=None, git=True):
 
 
 # `deep`: Claude Code's own instruction audit, headless and read-only, as the doctor-combined baseline runs it (#192):
-# project settings only (so no user plugin, Claudit included, loads), no file edits, no MCP servers, no saved session.
-# In an untrusted folder print mode denies any call that would prompt, Bash included.
+# project settings only (so no user plugin, Claudit included, loads), no file edits and no Bash (denied by flag, so
+# a trusted project's allow rules can't grant it; in an untrusted folder print mode denies it anyway), no MCP
+# servers, no saved session.
 DEEP_PROMPT = '/doctor prompt-audit .'
-DEEP_FLAGS = ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit',
+DEEP_FLAGS = ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash',
               'Skill(claudit:claudit)', 'Skill(claudit:claudit *)', '--strict-mcp-config', '--no-session-persistence',
               '--output-format', 'json')
+DEEP_MODEL = 'CLAUDIT_DEEP_MODEL'  # the eval runner pins the nested model to its arm's model
 DEEP_TIMEOUT = 170  # seconds, inside the 180 s --deep budget
 DEEP_RECORD = 'CLAUDIT_DEEP_RECORD'  # a file the eval runner reads the nested call's cost and time from
 
 
 def claude_doctor(root):
     """`claude doctor`'s invalid-settings section (user settings included) as one line; never graded."""
-    proc = run(['claude', 'doctor'], timeout=30, cwd=root)
+    proc = run(['claude', 'doctor'], timeout=30, cwd=root, env={'DISABLE_AUTOUPDATER': '1'})
     if proc is None or proc.returncode != 0:
         return {'status': 'unavailable', 'line': 'claude doctor: could not run (%s).' % (
             'not found or timed out' if proc is None else 'exit %d' % proc.returncode)}
@@ -2551,7 +2553,9 @@ def claude_doctor(root):
 
 
 def deep(root, model, budget):
-    """Run `/doctor prompt-audit .` headless in the project, read-only, and `claude doctor`; never raises."""
+    """Run `/doctor prompt-audit .` headless in the project, read-only, and `claude doctor`; never raises. A model
+    in CLAUDIT_DEEP_MODEL (set by the eval runner) replaces `model`."""
+    model = os.environ.get(DEEP_MODEL) or model
     command = ['claude', '-p', DEEP_PROMPT, *DEEP_FLAGS, '--model', model, '--max-budget-usd', '%g' % budget]
     started = datetime.datetime.now()
     proc = run(command, timeout=DEEP_TIMEOUT, cwd=root, env={'DISABLE_AUTOUPDATER': '1'})
@@ -2570,7 +2574,8 @@ def deep(root, model, budget):
     else:
         status = 'ran'
     denials = raw.get('permission_denials')
-    audit = {'status': status, 'report': report if status == 'ran' else '', 'seconds': seconds,
+    audit = {'status': status, 'report': report if status == 'ran' else '', 'model': model,
+             'max_budget_usd': budget, 'seconds': seconds,
              'cost_usd': raw.get('total_cost_usd') if isinstance(raw.get('total_cost_usd'), (int, float)) else 0,
              'permission_denials': len(denials) if isinstance(denials, list) else 0,
              'command': ' '.join(command)}

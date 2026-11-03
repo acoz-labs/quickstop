@@ -35,7 +35,8 @@ servers. Write nothing unless the user picks changes to apply (step 6).
   nothing else."
 - Read the README and the root instruction files (CLAUDE.md, AGENTS.md and their
   imports) if the scan lists them.
-- With `--deep` only: run `python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py deep --root .`.
+- With `--deep` only: run
+  `python3 ${CLAUDE_SKILL_DIR}/scripts/claudit.py deep --root . --model sonnet --max-budget-usd 0.5`.
   It runs `/doctor prompt-audit .` headless and read-only in the project (project
   settings only, no edits, Bash denied, Claudit not loaded) and `claude doctor`. It
   takes up to three minutes and never fails the audit: read its `prompt_audit.status`.

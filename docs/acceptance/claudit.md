@@ -51,18 +51,25 @@ graders follow the scan, rebuilt with `python3 tests/test_claudit_case_graders.p
   `doctor-combined`'s flags (project settings only, Edit, Write and NotebookEdit
   denied, in a folder that is never trusted, so Bash is denied too) plus
   `Skill(claudit:claudit)` denied; the comparison with `doctor-combined` is
-  symmetric. The helper appends the nested call's status, cost, time and denials to
-  `CLAUDIT_DEEP_RECORD`, and the run's cost adds them to the outer call's. `headless`
-  records the same for a real repository.
+  symmetric. The nested call also denies Bash by flag, so the read-only claim holds in a
+  trusted project too; in these untrusted scaffolds that changes nothing. Step 1 of the
+  skill passes `--model sonnet --max-budget-usd 0.5`; the runner sets
+  `CLAUDIT_DEEP_MODEL` to the arm's `--model`, which pins the nested model to it. The
+  helper appends the nested call's status, model, budget, cost, time and denials to
+  `CLAUDIT_DEEP_RECORD`, and the run's cost adds them to the outer call's. `command.txt`
+  states the nested model and budget. `headless` records the same for a real
+  repository.
 - `gate --rule principles-skill|doc-skills|history-lines <reports or folders>`
   grades saved reports at $0. `principles-skill` (rule 6) fails a report that
   proposes a skill or slash command for the principles anywhere, Optional notes and
-  Also worth knowing included; a question, a qualifier or "add one" after a negated
-  form still counts. `doc-skills` (rule 4) lists the numbered "Add a skill for
-  <page>.md" items under Top changes and fails more than one, or any translation or
-  reference page. `history-lines` (rule 4) passes when a finding block names
+  Also worth knowing included; a question, a reversal ("isn't necessary today, but
+  worth adding later") or "add one" after a negated form still counts, and a decline
+  line ("Declined: …") or another named skill doesn't. `doc-skills` (rule 4) lists each documentation page a
+  numbered Top changes item proposes a skill for ("Add a skill for X", "Turn X into a
+  skill", "Add skills for A and B", "Make X a skill") and fails more than one, any
+  translation or reference page, or one with no stated reason. `history-lines` (rule 4) passes when a finding block names
   `docs/repository.md`, each of quickstop's two stale history lines (by line number or
-  its words) and calls it history or stale. Their positive, negative and attacker
+  its words) and calls it history or stale; a decline doesn't count. Their positive, negative and attacker
   controls are in `tests/test_claudit_gate_graders.py`.
 
 Before a paid run, every fixture hook must run on the host toolchain: scaffold each
