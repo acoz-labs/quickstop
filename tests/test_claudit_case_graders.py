@@ -128,13 +128,15 @@ def write_grader(case, name, pattern, flags='', match='', **doc):
 
 
 def scaffold_scan(case, workdir):
-    """Scaffold a case as the eval host does and scan it."""
-    target = (Path(workdir) / case)
-    target.mkdir()
+    """Scaffold a case as the eval host does and scan it. Each workspace has its own parent folder, as the eval
+    host's run home is (f17-scope writes instruction files there)."""
+    target = (Path(workdir) / case / 'cwd')
+    target.mkdir(parents=True)
     target = target.resolve()
     subprocess.run(['bash', str(CASES / case / 'scaffold.sh')], cwd=target, check=True, env=SCAFFOLD_ENV,
                    capture_output=True)
-    ceiling, cl.Scan.ceiling = cl.Scan.ceiling, str(target)  # instruction files above the temp dir don't count
+    # Instruction files above the case's own parent folder don't count.
+    ceiling, cl.Scan.ceiling = cl.Scan.ceiling, str(target.parent)
     try:
         return cl.Scan(str(target), True, cl.load_catalog(), '2.1.316').run()
     finally:

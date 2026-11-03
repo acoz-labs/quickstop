@@ -1,0 +1,5 @@
+# pathkit
+
+TypeScript library of small path helpers. Source in `src/`, tests next to the code as `*.test.ts`.
+
+Use bun run for scripts, never npm or yarn. Check your work before you report a change as done.

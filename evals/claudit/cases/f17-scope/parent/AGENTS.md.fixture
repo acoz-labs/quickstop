@@ -1,0 +1,3 @@
+# Workspace agents
+
+Each checkout below this folder has its own instructions. Build with `bin/legacy-build`.

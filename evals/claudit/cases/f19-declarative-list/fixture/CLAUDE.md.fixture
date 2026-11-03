@@ -1,0 +1,10 @@
+# quillcount
+
+Go library that counts words, sentences and reading time in Markdown text. Go 1.22, no dependencies outside the standard library.
+
+## Commands
+
+- `go test ./...` runs the tests; a Stop hook runs them too.
+- `go vet ./...` must be clean.
+
+The design principles in `docs/principles.md` hold for every change.
