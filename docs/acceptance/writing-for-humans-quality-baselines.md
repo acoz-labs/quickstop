@@ -434,3 +434,32 @@ The cap for #189 is $30 at list price. Every paid invocation is a row in `~/fact
 | Calibration on the candidate head | 0.8567 |
 | Counted re-baseline (135 runs: task 7.9033, judges 5.8810) | 13.7842 |
 | **Cumulative** | **17.1948** |
+
+## 1.0 candidate screens (#189; never counted toward the gate)
+
+Each screen is 1 run per case in the 1.0 arm only: 9 runs, 27 opening items. They ran on the frozen suite (`c8a8bf86`, runner `f03bee3a`) with the re-baseline's model, judges and limits. Each had a config sidecar before and after the run, and all three were unchanged. A candidate goes to the full gate only if both hold:
+- its opening reaches at least 12 of 27 items
+- its opening stakes are above 0
+
+The other columns preview the gate bars at screen size. With 9 runs they are noisy and decide nothing.
+
+| Candidate (plugin tree) | Opening (/27) | Opening stakes (/9) | Whole (/27) | Identifier subjects | Median words | Task $/run | Pedantry (/9) | Cases 8 and 9: repeats, pedantry | Screen $ |
+|---|---|---|---|---|---|---|---|---|---|
+| A `36ca75f5` | 18 | 5 | 26 | 10 | 291 | 0.0597 | 8 | 0, 2/2 | 0.9174 |
+| B `de92b47f` | 17 | 3 | 26 | 1 | 357 | 0.0581 | 9 | 0, 2/2 | 0.9027 |
+| C `0e58041f` | 13 | 2 | 26 | 1 | 301 | 0.0546 | 9 | 1, 2/2 | 0.8689 |
+| Gate bar, scaled to 9 runs | ≥ 12 | ≥ 1 | ≥ 24.6 | ≤ 8.6 | ≤ 337.7 | ≤ 0.0752 | — | 0, ≥ 9/10 over the gate | — |
+
+- **A** is the first 1.0 style, at 553 tokens. All 10 identifier subjects came from one case 8 reply that listed its evidence files with each file name first.
+- **B** is A plus one line: the identifier rule also covers list items, with a generic example. That fixed the identifier count, but replies ran longer in 7 of 9 cases.
+- **C** is B with the support after the opening limited to what the reader needs to act on or check the point. That cut the words, but the opening and stakes fell, and a case 9 reply repeated a sentence.
+
+**B goes to the gate.** All three passed the screen. B is the only one that previews no failure on a structural bar: identifiers, repetition and the opening. Its risk is median words. B's 357 is a median of 9 replies against a 337.7 bar, and A, which differs from B by one line, came in at 291.
+
+Every candidate's $0 checks are retained with its screen in `~/factory/retained/quickstop-189/candidate-*/checks.md`:
+- the token count (A 553, B 569, C 582 of 1,000)
+- the required-content checklist
+- the must-not grep
+- the fixture-wording grep over 265 names, people and identifiers (empty)
+
+Spend on screens is $2.6890. The cumulative total after them is $19.8849.
