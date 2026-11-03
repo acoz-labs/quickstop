@@ -1,0 +1,1 @@
+Should we still delete v1 in this release, or wait? Three clients are still using it, so deleting it now would break their integrations. Waiting means the security finding about v1's static tokens stays open past its 30 November deadline.

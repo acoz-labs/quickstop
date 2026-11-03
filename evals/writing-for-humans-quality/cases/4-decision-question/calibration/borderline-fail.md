@@ -1,0 +1,1 @@
+I've looked at the release plan, the access summary and the security finding. There's some client activity on v1 that's relevant to the removal. There's a decision to make here before anyone starts. Each way of going has some risk attached.

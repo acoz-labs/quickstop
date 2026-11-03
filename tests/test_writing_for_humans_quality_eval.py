@@ -35,6 +35,25 @@ class Sentences(unittest.TestCase):
         text = 'Before.\n\n```\nprint("x"). Not prose.\n```\n\n| a | b |\n|---|---|\n| c. | d. |\n\nAfter.'
         self.assertEqual(q.sentences(text), ['Before.', 'After.'])
 
+    def test_bold_label_lines_are_headings(self):
+        text = '**Short version:** do it.\n\n**What the files show**\n- One. Two.\n\n**Why:**\nThree.\n- **Traffic**:\n__Notes__'
+        self.assertEqual(q.units(text), [('sentence', '**Short version:** do it.'), ('heading', 'What the files show'),
+                                         ('sentence', 'One.'), ('sentence', 'Two.'), ('heading', 'Why:'),
+                                         ('sentence', 'Three.'), ('heading', 'Traffic'), ('heading', 'Notes')])
+
+    def test_wholly_bold_sentences_stay_sentences(self):
+        self.assertEqual(q.units('**Delete now or wait?**\n\n**Ship it.**'),
+                         [('sentence', '**Delete now or wait?**'), ('sentence', '**Ship it.**')])
+
+    def test_bold_labels_do_not_use_up_the_opening(self):
+        text = '**What the files show**\n\nOne. Two.\n\n**What I need**\n\nThree. Four.'
+        self.assertEqual(q.opening(text), 'What the files show\nOne.\nTwo.\nWhat I need\nThree.')
+        self.assertTrue(q.ask_question('**Context**\n\nOne. Two.\n\n**Decision:**\n\nDelete now or wait?'))
+
+    def test_split_keeps_closing_markup(self):
+        self.assertEqual(q.sentences('**Use pdfquill (MIT).** It signs. "Quoted." Done.'),
+                         ['**Use pdfquill (MIT).**', 'It signs.', '"Quoted."', 'Done.'])
+
     def test_blockquotes_and_bold_labels_are_prose(self):
         self.assertEqual(q.sentences('> Quoted line. Second.\n\n**Billing** is half done.'),
                          ['Quoted line.', 'Second.', '**Billing** is half done.'])
@@ -107,7 +126,8 @@ class IdentifierSubject(unittest.TestCase):
                          'load.py:16 re-raises the error.', '`deliver()` now loops.', 'deliver() now loops.',
                          'row_group_size defaulted to a million.', 'validateRow raises on blank email.',
                          'config/export.yaml never set it.', 'export.yaml never set it.',
-                         '**`sync-01`** hosts the file.', '(`notes.md:4`) says so.'):
+                         '**`sync-01`** hosts the file.', '(`notes.md:4`) says so.', 'README.md explains it.',
+                         'src/50/x is a path.'):
             self.assertFlagged(sentence)
 
     def test_list_items_are_sentences(self):
@@ -118,7 +138,8 @@ class IdentifierSubject(unittest.TestCase):
                          'The `deliver()` function now loops.', 'In `load.py`, the error is re-raised.',
                          'Version 3.0 raised the default.', 'Billing is half done.', 'pdfquill can sign PDFs.',
                          'Northwind Freight sends 40% of traffic.', 'I need your sign-off.', 'Paperforge is AGPL.',
-                         '2026-10-31 was the first failed night.'):
+                         '2026-10-31 was the first failed night.', 'Node.js is the runtime.', '50/50 is the split.',
+                         'TypeScript is stricter.', 'Config.yaml-style names are rare.'):
             self.assertClear(sentence)
 
     def test_negated_or_quoted_sentences_are_not_exempt(self):
@@ -153,22 +174,36 @@ class Suite(unittest.TestCase):
             self.assertEqual(set(case['key']), set(q.ITEMS), name)
             self.assertTrue(case['prompt'], name)
             self.assertTrue(any((case['dir'] / 'fixture').rglob('*')), name)
-            for sample in ('good', 'bad'):
+            for sample in q.SAMPLES:
                 self.assertTrue((case['dir'] / 'calibration' / f'{sample}.md').is_file(), name)
 
     def test_script_calibration_scores_as_expected(self):
         for name, case in CASES.items():
-            for sample in ('good', 'bad'):
+            for sample in q.SAMPLES:
                 text = (case['dir'] / 'calibration' / f'{sample}.md').read_text()
                 for grader, ok, detail in q.calibration_expectations(sample, case, q.script_grades(text, case)):
                     self.assertTrue(ok, f'{name} {sample} {grader}: {detail}')
 
-    def test_good_openings_fit_the_word_cap(self):
-        # A good sample must make its point before the cold reader's excerpt is cut.
+    def test_passing_openings_fit_the_word_cap(self):
+        # A sample that must pass has to make its point before the cold reader's excerpt is cut.
         for name, case in CASES.items():
-            text = (case['dir'] / 'calibration/good.md').read_text()
-            self.assertLessEqual(len(q.opening(text).split()), q.OPENING_WORDS, name)
-            self.assertTrue(q.opening(text).rstrip().endswith(('.', '?', '!')), name)
+            for sample in ('good', 'borderline-pass'):
+                text = (case['dir'] / 'calibration' / f'{sample}.md').read_text()
+                self.assertLessEqual(len(q.opening(text).split()), q.OPENING_WORDS, f'{name} {sample}')
+                self.assertTrue(q.opening(text).rstrip().endswith(('.', '?', '!')), f'{name} {sample}')
+
+    def test_borderline_fail_expects_every_real_item_to_fail(self):
+        case = CASES['2-design-note']  # its ask is "none", so only claim and stakes are checked
+        def grades(**items):
+            part = {'items': dict({'claim': False, 'ask': False, 'stakes': False}, **items)}
+            return {'cold-read-opening': part, 'cold-read-whole': part}
+        self.assertTrue(all(ok for _, ok, _ in q.calibration_expectations('borderline-fail', case, grades(ask=True))))
+        self.assertFalse(all(ok for _, ok, _ in q.calibration_expectations('borderline-fail', case, grades(stakes=True))))
+
+    def test_keys_have_a_point_per_item(self):
+        for name, case in CASES.items():
+            for item in q.ITEMS:
+                self.assertTrue(case['key'][item]['point'].strip(), f'{name} {item}')
 
     def test_judge_prompts_exist(self):
         for kind in q.SCHEMAS:
@@ -180,9 +215,12 @@ class Suite(unittest.TestCase):
             (case / 'fixture').mkdir(parents=True)
             (case / 'case.json').write_text('{}')
             (case / 'prompt.md').write_text('p')
-            (case / 'key.json').write_text(json.dumps({'claim': 'c', 'ask': ''}))
-            with self.assertRaises(q.Failure):
-                q.load_cases(temp)
+            for key in ({'claim': 'c', 'ask': 'a', 'stakes': 's'},
+                        {'claim': {'point': 'c'}, 'ask': {'point': ''}, 'stakes': {'point': 's'}},
+                        {'claim': {'point': 'c'}, 'ask': {'point': 'a'}}):
+                (case / 'key.json').write_text(json.dumps(key))
+                with self.assertRaises(q.Failure):
+                    q.load_cases(temp)
 
 
 def init(style, model='claude-sonnet-5-5', plugins=(), mcp=()):
@@ -267,10 +305,10 @@ class Commands(unittest.TestCase):
         readers = [p for kind, p in prompts if kind == 'reader']
         self.assertEqual(sorted(readers), sorted([q.reader_prompt(q.opening(text)), q.reader_prompt(text)]))
         for prompt in readers + [p for kind, p in prompts if kind == 'pedantry']:
-            self.assertNotIn(case['key']['stakes'], prompt)
+            self.assertNotIn(case['key']['stakes']['point'], prompt)
         compare = next(p for kind, p in prompts if kind == 'compare')
         self.assertNotIn(text, compare)
-        self.assertIn(case['key']['claim'], compare)
+        self.assertIn(case['key']['claim']['point'], compare)
 
     def test_a_failed_judge_leaves_its_grader_unscored(self):
         def fake(kind, *args, **kwargs):
@@ -281,6 +319,28 @@ class Commands(unittest.TestCase):
         self.assertNotIn('cold-read-whole', grades)
         self.assertFalse(grades['pedantry']['passed'])
         self.assertTrue(errors)
+
+
+class Guard(unittest.TestCase):
+    def test_hashes_settings_and_every_plugin_state_file(self):
+        with tempfile.TemporaryDirectory() as home:
+            plugins = Path(home) / '.claude/plugins'
+            plugins.mkdir(parents=True)
+            (Path(home) / '.claude/settings.json').write_text('{}')
+            for name in ('installed_plugins.json', 'known_marketplaces.json', 'plugin-directory-cache-v2.json'):
+                (plugins / name).write_text('{}')
+            (plugins / 'notes.txt').write_text('not json')
+            before = q.real_config_digests(home)
+            self.assertEqual(sorted(before), ['.claude/plugins/installed_plugins.json',
+                                              '.claude/plugins/known_marketplaces.json',
+                                              '.claude/plugins/plugin-directory-cache-v2.json', '.claude/settings.json'])
+            (plugins / 'plugin-directory-cache-v2.json').write_text('{"changed": 1}')
+            (plugins / 'new-state.json').write_text('{}')
+            (plugins / 'known_marketplaces.json').unlink()
+            self.assertEqual(q.config_changes(before, q.real_config_digests(home)),
+                             ['~/.claude/plugins/known_marketplaces.json changed during the run',
+                              '~/.claude/plugins/new-state.json changed during the run',
+                              '~/.claude/plugins/plugin-directory-cache-v2.json changed during the run'])
 
 
 class BudgetAndLedger(unittest.TestCase):
@@ -303,8 +363,8 @@ class BudgetAndLedger(unittest.TestCase):
 
 
 class Summary(unittest.TestCase):
-    def write_result(self, out, arms=('default',), runs=1, drop=(), invalid=(), filtered=False, guard=()):
-        cases = {name: CASES[name] for name in ('4-decision-question', '6-factual-answer')}
+    def write_result(self, out, arms=tuple(q.ARMS), runs=1, drop=(), invalid=(), filtered=False, guard=()):
+        cases = CASES
         (out / 'suite.json').write_text(json.dumps(q.expected_suite(cases, list(arms), runs, filtered)))
         (out / 'preflight.json').write_text(json.dumps([{'arm': arm, 'passed': True} for arm in arms]))
         (out / 'guard.json').write_text(json.dumps({'problems': list(guard)}))
@@ -331,13 +391,13 @@ class Summary(unittest.TestCase):
             return q.summarize(out, write=False)
 
     def test_complete_result(self):
-        summary = self.summary(arms=('default', 'concise'), runs=3)
+        summary = self.summary(runs=3)
         self.assertEqual(summary['problems'], [])
         self.assertTrue(summary['baseline'])
         metrics = summary['arms']['default']
-        self.assertEqual((metrics['valid_runs'], metrics['opening_hits'], metrics['opening_items']), (6, 18, 18))
+        self.assertEqual((metrics['valid_runs'], metrics['opening_hits'], metrics['opening_items']), (21, 63, 63))
         self.assertEqual((metrics['ask_question_passes'], metrics['ask_question_runs']), (3, 3))
-        self.assertIn('| default | default | 6 | 18/18 |', q.markdown(summary))
+        self.assertIn('| default | default | 21 | 63/63 |', q.markdown(summary))
 
     def test_one_run_is_complete_but_not_a_baseline(self):
         summary = self.summary(runs=1)
@@ -363,6 +423,37 @@ class Summary(unittest.TestCase):
             path.write_text(json.dumps(record))
             problems = q.summarize(out, write=False)['problems']
         self.assertIn('default 6-factual-answer run 1: not graded by pedantry', problems)
+
+    def test_a_result_from_an_edited_suite_is_not_complete(self):
+        suite = {name: CASES[name] for name in ('4-decision-question', '6-factual-answer')}
+        expected = q.expected_suite(suite, list(q.ARMS), 3, False)
+        self.assertIn('case 1-worker-report is in the suite but not in the result', q.suite_drift(expected, CASES))
+        expected = q.expected_suite(CASES, list(q.ARMS), 3, False)
+        self.assertEqual(q.suite_drift(expected, CASES), [])
+        expected['cases']['6-factual-answer'] = expected['cases']['6-factual-answer'][:-1]
+        expected['cases']['9-gone'] = []
+        expected['arms']['concise'] = 'Explanatory'
+        problems = q.suite_drift(expected, CASES)
+        self.assertIn('recorded graders for 6-factual-answer differ from the suite', problems)
+        self.assertIn('recorded case 9-gone is not in the suite', problems)
+        self.assertIn("recorded arm concise runs 'Explanatory', the suite runs 'Concise'", problems)
+        # A subset run may leave cases and arms out, but what it did record must match.
+        subset = q.expected_suite(suite, ['default'], 1, True)
+        self.assertEqual(q.suite_drift(subset, CASES), [])
+
+    def test_counts_tool_calls_from_the_transcript(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            self.write_result(out, runs=1)
+            transcript = out / 'runs/default/6-factual-answer/run-1/transcript.jsonl'
+            lines = [{'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Skill'},
+                                                                    {'type': 'text', 'text': 'x'}]}},
+                     {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'name': 'Read'}]}},
+                     {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'name': 'Skill'}]}}]
+            transcript.write_text('\n'.join(json.dumps(line) for line in lines) + '\nnot json\n')
+            self.assertEqual(q.tool_calls(transcript), ['Skill', 'Read'])
+            metrics = q.summarize(out, write=False)['arms']['default']
+        self.assertEqual((metrics['skill_calls'], metrics['tool_calls']), (1, 2))
 
     def test_a_missing_preflight_is_a_problem(self):
         with tempfile.TemporaryDirectory() as temp:

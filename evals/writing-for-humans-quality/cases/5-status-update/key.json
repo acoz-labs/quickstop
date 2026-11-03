@@ -1,5 +1,14 @@
 {
-  "claim": "Three of the five services (accounts, notifications and gateway) are migrated to the new structured logger with their tests passing; billing and search are not done yet.",
-  "ask": "Get the session access to the search staging environment (or ask Priya to grant it), because search's migration can't be tested without it.",
-  "stakes": "Without staging access the search migration stays untested, and the old logger's planned removal on 14 November slips, since it can't be removed while any service still uses it."
+  "claim": {
+    "point": "Three of the five services (accounts, notifications and gateway) are migrated to the new logger with tests passing; billing and search are not done.",
+    "detail": "Billing has about half its call sites changed, uncommitted, and needs an adapter for a vendored PDF library; search has not been started."
+  },
+  "ask": {
+    "point": "Get the session access to the search staging environment, or ask Priya Raman to grant it.",
+    "detail": "The session's credentials are refused: not a member of search-staging-readers."
+  },
+  "stakes": {
+    "point": "Without that access the search migration can't be tested, which holds up removing the old logger on schedule.",
+    "detail": "The old logger's removal is planned for 14 November and can't happen while any service still uses it."
+  }
 }
