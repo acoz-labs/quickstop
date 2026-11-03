@@ -34,9 +34,13 @@ NEGB = r'\b%s\b|\brather[ \t]+than\b|\binstead[ \t]+of\b' % NEG
 # Clause boundaries for claims: . ; ! ? before a space or the end, "and"/"but"/"then"/"so"/"while"/"whereas" (not
 # when a backticked name or rule follows, as in a list), or a spaced dash. Commas and colons don't end a clause, so
 # "No paths are stale, including X" stays one negated clause.
-JOIN = r'[ \t]+(?:and|but|then|so|while|whereas)[ \t]+(?![\x60*"]|Bash\()|[ \t]+[—–-][ \t]+'
+JOIN = (r'[ \t]+and[ \t]+(?![\x60*"]|Bash\()|[ \t]+(?:but|then|so|while|whereas)[ \t]+'
+        r'|[ \t]+[—–-][ \t]+')
 CEND = r'[.;!?](?=[ \t*_)"\x60]|\n|(?![\s\S]))|' + JOIN
-CSTART = r';[ \t]+|' + JOIN
+IMPER = (r'(?:add|put|move|use|set|create|include|list|register|require|allow|allowlist|pre-?approve|approve'
+         r'|install|wire|configure|enable|mark|give|turn|enforce|gate|inline|fold|merge|copy|fix|remove|delete'
+         r'|update|replace|drop|record|document|make|change|protect)')
+CSTART = r';[ \t]+|:[ \t]+(?=(?:\*\*)?%s\b)|' % IMPER + JOIN
 # A character inside one sentence: . ! ? end it only before a space or the end (not inside a file name).
 SENT = r'(?:[^\n.!?]|[.!?](?=[^\s*_)"\x60]))'
 SOURCE = r'(?![ \t]*(?:[-*>][ \t]+)?(?:\*\*|_)?Sources?\b)'
@@ -44,14 +48,24 @@ QUESTION = r'(?!%s*?(?:\bwhy[ \t]+not\b|\?(?=[ \t*_"\x60)]|\n|(?![\s\S]))))' % S
 # Hypothetical or optional framing: "would do it", "you could", "if you want", "If the parent had".
 HYPO_P = (r'(?:[.;:!?][ \t]+if\b|\bif[ \t]+(?:you|we|they|needed|wanted|desired|preferred|so|there[ \t]+(?:were|was)|it[ \t]+(?:were|had))\b'
           r'|\bif\b[^\n]{0,40}?\bhad\b|\bunless\b|\bwhether\b|\b(?:could|might)\b|\bwould[ \t]+(?:\S+[ \t]+)?(?:do|work'
-          r'|help|fix|cover|be|suffice|stop|catch|gate)\b|\boptional(?:ly)?\b|\bnice[ -]to[ -]have\b)')
+          r'|help|fix|cover|be|suffice|stop|catch|gate|hold|need|go)\b|\boptional(?:ly)?\b|\bnice[ -]to[ -]have\b)')
 # A line or sentence that opens with "If" is a hypothetical too.
 HYPOTHETICAL = r'(?![ \t]*(?:[-*+>]|[0-9]+[.)])?[ \t]*(?:\*\*|_)?if\b)(?!%s*?%s)' % (SENT, HYPO_P)
 # Declined from the plan: "I didn't add it to the plan", "left it out", "not recommended".
 DECLINED_P = (r'(?:\b(?:not|n%st)[ \t]+(?:\S+[ \t]+){0,4}?(?:in|into|to|part[ \t]+of|on)[ \t]+(?:the|my|this)[ \t]+plan\b'
               r'|\bleft[ \t]+(?:\S+[ \t]+){0,2}?out\b|\bout[ \t]+of[ \t]+(?:the[ \t]+)?plan\b|\bnot[ \t]+(?:planned'
-              r'|recommended|recommending|proposing|included)\b|\bdeclin\w*|\bskipped\b)' % Q)
+              r'|recommended|recommending|proposing|included)\b|\bdeclin\w*)' % Q)
 DECLINED = r'(?![^\n]*%s)' % DECLINED_P
+# A sentence that rejects the change or reports someone else's advice: "this repo doesn't need it", "that is wrong
+# here", "Hold off on …", "Some teams add …", "A previous audit said …", "I expected X to be stale", and colon intros
+# such as "Not needed:" or "Don't do this:".
+REJECT_P = (r'(?:\b(?:doesn%(q)st|does[ \t]+not|don%(q)st|do[ \t]+not)[ \t]+need[ \t]+(?:it|this|that|one|them)\b'
+            r'|\b(?:it|this|that)(?:[ \t]+(?:is|was)|%(q)ss)[ \t]+(?:wrong|unnecessary|overkill|fine|not[ \t]+needed)\b'
+            r'|\bhold[ \t]+off\b|\b(?:some|other)[ \t]+(?:teams|projects|repos)\b|\ba[ \t]+previous\b'
+            r'|\b(?:expected|assumed|thought|suspected|feared)\b[^\n.!?]{0,60}?\bto[ \t]+be\b'
+            r'|\b(?:not|no|none|nothing)[ \t]+(?:\S+[ \t]+)?(?:needed|necessary|required|recommended|to[ \t]+add'
+            r'|to[ \t]+do|worth[ \t]+it)\W*:|\b(?:don%(q)st|do[ \t]+not|never|avoid)[ \t]+(?:\S+[ \t]+){0,2}?(?:this'
+            r'|these|that|the[ \t]+following)\W*:)' % {'q': Q})
 # A negated clause runs to . , ; : ! ? before a space or the end, "and", "but", "while", "whereas", "yet", or a line
 # break; it can't stop early at the dot inside a file name.
 CLAUSE = (r'(?:(?![ \t]+(?:and|but|while|whereas|yet)\b)[^\n.,;:!?]|[.,;:!?](?=\S))*'
@@ -101,12 +115,13 @@ def line(parts, drop):
     hypothetical or question in another sentence doesn't hide a recommendation."""
     head = BOL + ''.join(parts[name] for name in ('source', 'declined') if name in parts and name not in drop)
     rest = ''.join(pattern for name, pattern in parts.items() if name not in drop and name not in ('source', 'declined'))
-    return head + r'(?:[^\n]*?[.!?][ \t]+)?' + rest + r'[^\n]*'
+    return head + r'(?:[^\n]*?[.!?][*_\x60)"]*[ \t]+)?' + rest + r'[^\n]*'
 
 
 def framing(drop):
     """The guards every finding line carries."""
-    return {'source': SOURCE, 'question': QUESTION, 'hypothetical': HYPOTHETICAL, 'declined': DECLINED}
+    return {'source': SOURCE, 'question': QUESTION, 'hypothetical': HYPOTHETICAL, 'declined': DECLINED,
+            'rejected': r'(?!%s*?%s)' % (SENT, REJECT_P)}
 
 
 def block(inner, drop=frozenset()):
@@ -158,8 +173,10 @@ def branch_protection(drop=frozenset()):
     # "... branch protection, which is the real gate": the relative clause says what branch protection is.
     which = r'(?=[^\n]*%s[\x60*]{0,2},?[ \t]+which[ \t]+(?:is|are)[ \t]+(?:(?!%s\b)\S+[ \t]+){0,3}?%s)' % (
         BRANCH, NEG, GATE)
+    back = (r'(?=%s*?%s%s*?(?:%s)(?:it|this|that|which)\b(?:(?!%s|%s)[^\n])*?%s)'
+            % (SENT, BRANCH, SENT, CSTART, NEGB, CEND, GATE))
     return line({**framing(drop), 'already': already(BRANCH), 'neg-after': neg_after(BRANCH),
-                 'claim': either(claim(BRANCH, GATE, drop), which if 'which' not in drop else '(?!)')}, drop)
+                 'claim': either(claim(BRANCH, GATE, drop), *(() if 'which' in drop else (which, back)))}, drop)
 
 
 HOOK = r'\b(?:PreToolUse|PostToolUse|Stop|pre-commit|precommit|git[ \t]+hooks?|hooks?)\b'
@@ -195,7 +212,7 @@ ROW = r'(?:\n[ \t]*\|[^\n]*)*?\n[ \t]*\|(?=[^\n]*%s)(?=[^\n]*\b[0-9])[^\n]*'
 
 def always_loaded_table(drop=frozenset()):
     """A Markdown table whose header counts words or tokens and whose rows give CLAUDE.md and the import a number."""
-    header = BOL + r'[ \t]*\|%s[^\n]*\|[ \t]*\n[ \t]*\|?[ \t]*:?-{3,}[^\n]*' % (
+    header = BOL + r'[ \t]*\|%s[^\n]*\|[ \t]*\n[ \t]*\|?[ \t]*:?-+[^\n]*' % (
         '' if 'units' in drop else r'(?=[^\n]*\b(?:words?|tokens?)\b)')
     rows = ''.join('(?=%s)' % (ROW % name) for key, name in (('claude-row', r'CLAUDE\.md'),
                                                               ('import-row', r'architecture\.md')) if key not in drop)
@@ -246,13 +263,30 @@ MISSING = (r'(?:\bdo(?:es)?(?:n%(q)st|[ \t]+not)[ \t]+exist|\bno[ \t]+longer[ \t
            r'[ \t]+(?:the[ \t]+)?(?:repo\w*|tree|project|pyproject)|\b(?:is|are|was)(?:n%(q)st|[ \t]+not)[ \t]+'
            r'(?:present|there|found|in[ \t]+)|\bnot[ \t]+(?:a[ \t]+)?(?:declared[ \t]+|listed[ \t]+|installed[ \t]+)?'
            r'dependenc\w*|\b(?:is|are)(?:n%(q)st|[ \t]+not)[ \t]+(?:declared|listed|installed)\b|\bnot[ \t]+'
-           r'(?:declared|listed|installed)\b|\b(?:none|neither)\b[^\n]{0,30}\bexists?\b)' % {'q': Q})
+           r'(?:declared|listed|installed)\b|\b(?:declares|lists|has)[ \t]+no[ \t]+dependenc\w*|\bdependencies[ \t]*=[ \t]*\[\]'
+           r'|\b(?:none|neither)\b[^\n]{0,30}\bexists?\b)' % {'q': Q})
+SPAN = r'\x60[^\x60\n]*\x60'
+PROOF = r'\x60(?:pyproject\.toml|CLAUDE\.md|package\.json|requirements[\w.-]*|setup\.cfg)\x60'
 NONE_EXIST = (r'\b(?:none|neither)[ \t]+of[ \t]+(?:them|these|those|the[ \t]+three)[ \t]+(?:exists?|is[ \t]+(?:present'
               r'|real|there))\b')
 
 
 def stale(key, drop=frozenset()):
-    return line({**framing(drop), 'key': has(key), 'claim': either(claim(key, MISSING, drop), has(NONE_EXIST))}, drop)
+    """The key and a missing word in one clause, with no other backticked name between them; or a later clause, or
+    the next sentence, that refers back without naming anything but the file that proves it."""
+    if 'claim' in drop:
+        same = has(key) + has(MISSING)
+    else:
+        lead = r'(?:(?!%s|%s)[^\n])*?' % (NEGB, CEND)  # up to the first part
+        run = r'(?:(?!%s|%s|%s)[^\n])*?' % (NEGB, CEND, SPAN)  # between the parts: no other backticked name
+        same = (r'(?=(?:%s*?(?:%s))?(?:%s%s[\x60*"]*%s%s|%s%s%s(?:\x60[^\x60\n]*?)?%s))'
+                % (SENT, CSTART, lead, key, run, MISSING, lead, MISSING, run, key))
+    back = r'(?:%s|(?!%s|%s|\x60)[^\n])*?' % (PROOF, NEGB, CEND)  # a later clause up to the cue
+    later = r'(?=%s*?%s%s*?(?:%s)%s%s)' % (SENT, key, SENT, CSTART, back, MISSING)
+    next_sentence = (r'(?=%s*?%s%s*?[.!?][ \t]+(?:\*\*)?(?:that|this|the|it|those|these)\b(?:(?!%s|%s|\x60)[^\n]){0,40}?%s)'
+                     % (SENT, key, SENT, NEGB, CEND, MISSING))
+    refer = '(?!)' if 'refer' in drop else either(later, next_sentence)
+    return line({**framing(drop), 'key': has(key), 'claim': either(same, has(NONE_EXIST), refer)}, drop)
 
 
 ALIGNMENT_BELOW_A = r'\*\*Alignment: [B-F]\*\*'
@@ -284,6 +318,7 @@ AGENTS_MISSING = (r'(?:AGENTS\.md[\x60*"]{0,2}:?[ \t]+(?:is|was)[ \t]+(?:missing
                   r'|AGENTS\.md[\x60*"]{0,2}:?[ \t]+not[ \t]+found|AGENTS\.md[\x60*"]{0,2}[ \t]+(?:does[ \t]+not|doesn%(q)st'
                   r'|did[ \t]+not|didn%(q)st)[ \t]+exist|\b(?:no|missing|without)[ \t]+(?:an?[ \t]+)?[\x60*"]{0,2}'
                   r'AGENTS\.md[\x60*"]{0,2}(?=[ \t]*(?:[.,;:)]|\n|(?![\s\S]))|[ \t]+(?:file|exists|is[ \t]+present|in)\b)'
+                  r'|\black(?:s|ing)?[ \t]+(?:an?[ \t]+|any[ \t]+)?[\x60*"]{0,2}AGENTS\.md'
                   r'|\b(?:create|add|write)\w*[ \t]+(?:an?[ \t]+|the[ \t]+)?(?:missing[ \t]+)?[\x60*"]{0,2}AGENTS\.md)'
                   % {'q': Q})
 
@@ -295,7 +330,8 @@ def agents_md_missing(drop=frozenset()):
 BLOCK = (r'(?:\bstops?\b|\bstopping\b|\bprevents?\b|\bblocks?\b|\bshadows?\b|\bsuppress\w*|\boverrid\w*|\bmasks?\b'
          r'|\b(?:isn%(q)st|aren%(q)st|won%(q)st[ \t]+be|wouldn%(q)st[ \t]+be|will[ \t]+not[ \t]+be|would[ \t]+not'
          r'[ \t]+be|is[ \t]+not|are[ \t]+not|not|never)[ \t]+(?:\S+[ \t]+)?(?:read|loaded|picked[ \t]+up|used)\b'
-         r'|\bno[ \t]+longer[ \t]+(?:read|loaded)\b|\bignored\b|\bskipped\b)' % {'q': Q})
+         r'|\b(?:never|doesn%(q)st|does[ \t]+not|won%(q)st|will[ \t]+not|no[ \t]+longer)[ \t]+(?:reads?|loads?|picks?'
+         r'[ \t]+up|uses?)\b|\bno[ \t]+longer[ \t]+(?:read|loaded)\b|\bignored\b|\bskipped\b)' % {'q': Q})
 
 
 def parent_blocks_agents(drop=frozenset()):
@@ -305,7 +341,7 @@ def parent_blocks_agents(drop=frozenset()):
                  'claim': claim(r'CLAUDE\.md', BLOCK, drop)}, drop)
 
 
-FIX = r'\b(?:fix|update|remove|delete|replace|correct|change|rewrite|drop)\w*\b'
+FIX = r'\b(?:fix|update|remove|delete|replace|correct|change|rewrite|drop|point|repoint|rename|redirect)\w*\b'
 SCOPE = (r'(?:out[ \t]+of[ \t]+scope|outside[ \t]+(?:the[ \t]+|this[ \t]+)?(?:repo\w*|project|checkout)|not[ \t]+graded'
          r'|(?:is|are)n%s[ \t]+graded|not[ \t]+part[ \t]+of|ungraded|not[ \t]+(?:audited|reviewed|scored)|excluded'
          r'|above[ \t]+(?:the[ \t]+|this[ \t]+)?(?:repo\w*|project|checkout))' % Q)
@@ -321,7 +357,8 @@ def parent_findings(drop=frozenset()):
 
 # f18-check-commands (issue F14).
 ALLOW = r'(?:\ballow\w*|\bpre-?approv\w*|\bpermissions?\b)'
-ALLOW_VERB = r'\b(?:add|adding|put|create|include|use|using|set|Change|allowlist|pre-?approve|approve)\b'
+ALLOW_VERB = (r'(?:\b(?:add|adding|put|create|include|use|using|set|Change|allowlist|pre-?approve|approve)\b'
+              r'|\ballow\b(?![\x60"\x27.]))')
 
 
 def check_allowlist(drop=frozenset()):
@@ -339,7 +376,7 @@ SKILL_CLAIM = (r'(?:' + SKILL_VERB + CL + r'{0,60}?principles' + CL + r'{0,60}?\
                r'|\bskills?\b' + CL + r'{0,30}?\b(?:for|from|of|with|covering)\b' + CL + r'{0,40}?principles'
                r'|principles[\x60*"]{0,2}[ \t]+skills?\b'
                r'|\b(?:as|into)[ \t]+(?:a|an|its[ \t]+own)[ \t]+(?:\S+[ \t]+)?skill\b'
-               r'|\ba[ \t]+skill[ \t]+(?:would|could|will|can|might|should)\b'
+               r'|\ba[ \t]+skill[ \t]+(?:would|could|will|can|might|should)\b|\bfor[ \t]+a[ \t]+skill\b'
                r'|\b(?:needs?|deserves?|warrants?|should[ \t]+(?:be|become|have)|belongs?[ \t]+in|benefit\w*[ \t]+from)'
                r'[ \t]+(?:a[ \t]+|an[ \t]+|its[ \t]+own[ \t]+)?(?:(?!(?:no|not)\b)\S+[ \t]+)?(?:skill|slash[ \t]+command)\b'
                r'|principles' + CL + r'{0,60}?\b(?:is|are|reads?[ \t]+(?:like|as)|looks?[ \t]+like|counts?[ \t]+as'
@@ -360,12 +397,15 @@ DOC_SCRIPT = ('Script-graded{flags}. The parts, and the controls each must pass 
 LINE_RULES = (' or says the change was left out of the plan ("I left it out of the plan", "not recommended", '
               '"declined"). The finding\'s parts must sit in one clause of one sentence that no negation, "rather '
               'than" or "instead of" governs ("Don\'t add X", "No command needs one, including X"); a clause ends at '
-              '`.` `;` `!` `?` before a space, at "and", "but", "then", "so", "while" or "whereas" (unless a '
-              'backticked name follows, as in a list) or at a spaced dash. The sentence must not be a question '
+              '`.` `;` `!` `?` before a space, at "but", "then", "so", "while" or "whereas", at "and" (unless a '
+              'backticked name follows, as in a list), at a spaced dash, or at a colon before an imperative ("…, but '
+              'nothing enforces it: add X"). The sentence must not be a question '
               '("why not", or `?` before a space) or hypothetical or optional ("would do it", "could", "might", "you '
               'could … if you want", "If the repo had …", a sentence that opens with "If", "optional"), and must not '
-              'say the fix is already in place. A hypothetical or question in another sentence of the line doesn\'t '
-              'count against it')
+              'say the fix is already in place or reject the change or report someone else\'s advice ("this repo '
+              'doesn\'t need it", "that is wrong here", "Hold off on …", "Some teams …", "A previous audit …", "I '
+              'expected … to be …", "Not needed:", "Don\'t do this:"). A hypothetical or question in another sentence '
+              'of the line doesn\'t count against it')
 FENCE = ('A fenced block counts when it opens the report or its intro line (the last non-blank line before the fence) '
          'isn\'t negated, hypothetical or declined.')
 
@@ -393,7 +433,7 @@ GRADERS = {
          '"ruleset" or "required reviews") with what it does as the gate: gate, enforce, the real/only/actual '
          'gate or control, server-side, bypass, backstop, guarantee, block/prevent/stop … merges, require … '
          'approval/reviews/status checks; or "branch protection, which is <the gate>" with no negation in the '
-         'relative clause. "Rather than branch protection" or "only matters for humans" doesn\'t count.'),
+         'relative clause, or a later clause of the sentence that refers back ("…; it enforces review"). "Rather than branch protection" or "only matters for humans" doesn\'t count.'),
         ('finding-commit-hook', commit_hook, (), 'i', '',
          'CLAUDE.md says "You must run `bin/check` before every commit", and no hook runs it.\n\nPASS when the '
          'report adds a hook that runs `bin/check`: a fenced JSON `"PreToolUse"` or `"Stop"` block, then '
@@ -433,7 +473,11 @@ GRADERS = {
          '`CLAUDE.md` says `src/labelmaker/carriers/` holds one module per carrier; the folder does not exist.\n\n'
          'PASS when one clause names `carriers/` and says it is missing (doesn\'t exist, no longer exists, '
          'nonexistent, missing, absent, stale, outdated, out of date, wrong, incorrect, false, gone, no such, not '
-         'present/found/there, not in the repo/tree), or the sentence names it and says "none of them exists".'),
+         'present/found/there, not in the repo/tree), with no other backticked name between them. A later clause '
+         'of the sentence, or the next sentence, may carry the missing word when it refers back and names nothing '
+         'else ("…, but that folder does not exist", "…, but there is no such folder", "That file doesn\'t '
+         'exist"), except the file that proves it ("…, but `pyproject.toml` declares no dependencies"). Or the '
+         'sentence names it and says "none of them exists".'),
         ('finding-stale-file', stale, (r'rates\.toml',), 'i', '',
          '`CLAUDE.md` says carrier rates load from `config/rates.toml`; the file does not exist (rates are '
          'constants in `label.py`).\n\nPASS when the report says `rates.toml` is missing, as for '
@@ -441,7 +485,7 @@ GRADERS = {
         ('finding-stale-dependency', stale, (r'reportlab',), 'i', '',
          '`CLAUDE.md` says labels render through `reportlab`, pinned in `pyproject.toml`; the project has no '
          'dependencies.\n\nPASS when the report says `reportlab` is missing or not a (declared, listed, '
-         'installed) dependency, as for `finding-stale-folder`.'),
+         'installed) dependency, or that `pyproject.toml` declares no dependencies, as for `finding-stale-folder`.'),
         ('structure-alignment-below-a', lambda drop=frozenset(): ALIGNMENT_BELOW_A, (), '', '',
          'Alignment is not A while `CLAUDE.md` states false facts (issue #192).\n\nScript-graded (case-sensitive): '
          'a grade `**Alignment: B**` to `**Alignment: F**`. A report without grades fails.'),
@@ -460,20 +504,21 @@ GRADERS = {
          'The repo has an `AGENTS.md` (the real file behind `CLAUDE.md`).\n\nMust not match: a line that says '
          '`AGENTS.md` is missing, absent, not present/there/found or isn\'t present/there/found, doesn\'t exist, '
          '"`AGENTS.md`: not found", "no/missing/without `AGENTS.md`" at the end of a clause or before file/exists/'
-         'is present/in, or creates, adds or writes an `AGENTS.md`. A negated clause (a negation, up to two words, '
+         'is present/in, "lacks an `AGENTS.md`", or creates, adds or writes an `AGENTS.md`. A negated clause (a negation, up to two words, '
          'then create, add, write, missing or absent, to the end of the clause) is skipped, so "no need to create '
          'an AGENTS.md" passes while a later claim on the same line still fails; "why not" is never a negation.'),
         ('finding-parent-blocks-agents', parent_blocks_agents, (), 'i', '',
          'Claude Code reads `AGENTS.md` directly only when no `CLAUDE.md` loads, and a `CLAUDE.md` in a parent '
          'folder counts, so for anyone who has this parent the repo\'s `AGENTS.md` isn\'t read on its own (issue '
          '#192 F13).\n\nPASS when one clause names `CLAUDE.md` and the effect (stops, prevents, blocks, shadows, '
-         'suppresses, overrides, masks, isn\'t / won\'t be / never read, loaded or used, no longer read, ignored, '
-         'skipped) and the sentence names the parent (as in `finding-parent-noted`) and `AGENTS.md`, unless it '
+         'suppresses, overrides, masks, isn\'t / won\'t be / never read, loaded or used, "Claude Code never reads / '
+         'won\'t read / doesn\'t load", no longer read, ignored, skipped) and the sentence names the parent (as in `finding-parent-noted`) and `AGENTS.md`, unless it '
          'says the parent does not (won\'t, never, can\'t) stop, prevent, block or affect it.'),
         ('no-invented-parent-findings', parent_findings, (), 'i', 'not_contains',
          'Only in-repo files are graded. The parent\'s `CLAUDE.md` and `AGENTS.md` name `bin/legacy-build`, '
          'which exists nowhere.\n\nMust not match: a line naming `legacy-build` with a fix word (fix, update, '
-         'remove, delete, replace, correct, change, rewrite, drop) that no negation directly governs, or naming '
+         'remove, delete, replace, correct, change, rewrite, drop, point, rename, redirect) that no negation '
+         'directly governs, or naming '
          'it as missing (as in `finding-stale-folder`, "gone" included) without a scope note (out of scope, outside '
          'the repo, not graded, not part of, excluded, not audited, above the repo).'),
     ],
@@ -483,7 +528,8 @@ GRADERS = {
          'test"`) and CI (`bun run check`); `CLAUDE.md` says only "use bun run", and there is no settings '
          'file.\n\nPASS when the report allowlists the check: a fenced JSON `"allow": [...]` array holding '
          '`"Bash(bun run check`, or a sentence with allow (allowlist, pre-approve, permissions) and `Bash(bun run '
-         'check` where a recommending word shares a clause with the rule or with "one", "it" or "them", as for '
+         'check` where a recommending word (add, put, create, include, use, set, "Change", allowlist, pre-approve, '
+         'approve, or "allow" itself, not the key in `permissions.allow`) shares a clause with the rule or with "one", "it" or "them", as for '
          '`finding-ask-merge`. `Bash(bun run:*)` alone does not name the check and does not count. ' + FENCE),
     ],
     'f19-declarative-list': [
@@ -493,7 +539,8 @@ GRADERS = {
          'Must not match, on a line naming the principles: a verb in any form (add, create, make, turn, convert, '
          'move, wrap, extract, package, write, promote, split, consider, refactor, rewrite, restructure, reshape, '
          'put, break) and "skill" in one sentence with the principles; "skill for/from/of/with … principles"; '
-         '"a `principles` skill"; "as/into a skill"; "a skill would/could/will/can/might/should"; needs, deserves, '
+         '"a `principles` skill"; "as/into a skill"; "for a skill"; "a skill would/could/will/can/might/should"; '
+         'needs, deserves, '
          'warrants, should be, belongs in or benefits from a skill or slash command; the principles called a '
          'procedure (is, are, reads like/as, looks like, counts as, works as … procedure) or "procedure in '
          '`docs/principles`"; or a `.claude/skills/` or `.claude/commands/` path, or a `/principles` command, for '
@@ -997,8 +1044,200 @@ for _name, (_passing, _failing) in ATTACKS.items():
     CONTROLS[_name][0].extend(_passing)
     CONTROLS[_name][1].extend(_failing)
 
+# Review round 2: the false-negative pass. For every positive grader, realistic ways a correct report phrases the
+# finding, taken from the smoke and #184 gate reports where they exist: the fact first, then "but"/"and" the missing
+# word; problem, then fix across a colon or semicolon; a bare imperative; a table row; a bullet with a code span; a fix
+# in a fenced block with an intro line. Then the round 2 attacks.
+def ask_true(cmd):
+    rule = '`Bash(%s:*)`' % cmd
+    return [
+        '- `%s` needs a human, but nothing enforces it: add %s to `permissions.ask`.' % (cmd, rule),  # review N2
+        '- The gate is prose only; add %s to the ask list.' % rule,
+        '- Add %s to `permissions.ask`.' % rule,
+        '| `%s` | prose only | add %s to ask |' % (cmd, rule),
+        '- Ask before %s: put it in `permissions.ask`.' % rule,
+        fenced('   Change: add an ask rule to `.claude/settings.json`:', ASK_BLOCK % cmd),
+        '   Problem: CLAUDE.md requires a human before `%s`, and no ask rule covers it. Change: add %s to ask.' % (
+            cmd, rule),
+    ]
+
+
+def ask_false(cmd):
+    rule = '`Bash(%s:*)`' % cmd
+    return [
+        '- Some teams add %s to ask, but this repo doesn\'t need it.' % rule,  # review N6
+        '- Hold off on adding %s to ask.' % rule,  # review N6
+        '- A previous audit said to add %s to ask; that is wrong here.' % rule,  # review N6
+        '- Not needed: add %s to ask.' % rule,
+        '- Don\'t do this: add %s to ask.' % rule,
+        '- Nothing enforces the gate; no need to add %s to ask.' % rule,
+    ]
+
+
+ROUND2 = {
+    'finding-ask-merge': (ask_true('gh pr merge'), ask_false('gh pr merge')),
+    'finding-ask-deploy': (ask_true('bin/deploy'), ask_false('bin/deploy')),
+    'finding-ask-release': (ask_true('bin/release'), ask_false('bin/release')),
+    'finding-branch-protection': ([
+        '- Ask rules only prompt inside Claude Code, and branch protection on `main` is the real gate.',
+        '- The merge rule is prose only: turn on branch protection that requires an approving review.',
+        '- Protect `main`: branch protection is the only control that holds for every client.',
+        '| merge to main | branch protection | the real gate, enforced server-side |',
+        '- **Branch protection:** require PR approval on `main` in GitHub.',  # smoke (plain)
+        '- Enable a ruleset on `main`; it enforces review for anyone who pushes.',
+    ], [
+        '- Some teams turn on branch protection to enforce reviews, but this repo doesn\'t need it.',
+        '- Not needed: branch protection that enforces review.',
+    ]),
+    'finding-commit-hook': ([
+        '- The rule is prose only, so nothing runs `bin/check` before a commit: add a PreToolUse hook on '
+        '`git commit` that runs it.',
+        '- Add a PreToolUse hook that runs `bin/check` before `git commit`.',
+        '- **Pre-commit hook:** add a `PreToolUse` hook on `Bash(git commit*)` that runs `bin/check` and blocks the '
+        'commit (exit code 2) if it fails.',  # smoke (plain)
+        '| must run `bin/check` | prose only | add a PreToolUse hook that runs `bin/check` |',
+        plan_item(1, 'Enforce the check with a Stop hook', 'Problem: `CLAUDE.md:13` says "You must run `bin/check` '
+                  'before every commit", but `.claude/settings.json` has no hooks.\nChange: add to '
+                  '`.claude/settings.json`:\n```json\n{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": '
+                  '"\\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/stop-check.sh"}]}]}}\n```\nand create '
+                  '`.claude/hooks/stop-check.sh`, which runs `bin/check`.'),  # smoke (Claudit)
+        '- I didn\'t add a hook for `bin/check`, because CI runs it on every push.',
+    ], [
+        '- Some teams wire a pre-commit hook to run `bin/check`, but this repo doesn\'t need it.',
+        '- Not needed: add a PreToolUse hook that runs `bin/check`.',
+    ]),
+    'finding-always-loaded-table': ([
+        '| File | Words |\n|---|---|\n| `CLAUDE.md` (10 lines) | ~610 |\n| `@docs/architecture.md` | ~415 |\n'
+        '| Total | ~1,025 |',
+        '| Always loaded | Lines | Est. tokens |\n|---|---:|---:|\n| CLAUDE.md | 10 | 820 |\n| docs/architecture.md '
+        '| 31 | 560 |',
+        '| Source | Tokens |\n| --- | --- |\n| `CLAUDE.md` | 800 |\n| `docs/architecture.md` (via `@`) | 550 |',
+        '  | File | Words |\n  |---|---|\n  | `CLAUDE.md` | 610 |\n  | `docs/architecture.md` | 415 |',
+        '| What loads | Words | Note |\n|:--|--:|:--|\n| `CLAUDE.md` | 610 | long lines |\n| '
+        '`docs/architecture.md` | 415 | imported |',
+        '| Component | Type | Est. resident tokens |\n|---|---|---|\n| `CLAUDE.md` | memory | ~800 |\n| '
+        '`docs/architecture.md` | import | ~550 |',  # the /doctor table shape from the smoke
+    ], []),
+    'finding-visible-skill': ([
+        '- `schema-rules` is read only by the migrator subagent, but its description loads every session: set '
+        '`disable-model-invocation: true`.',
+        '- Set `disable-model-invocation: true` in `.claude/skills/schema-rules/SKILL.md`.',
+        '| `schema-rules` | read only by `migrator` | add `disable-model-invocation: true` |',
+        fenced('Change: add to the `schema-rules` frontmatter:', 'name: schema-rules\ndescription: Naming rules.\n'
+               'disable-model-invocation: true'),
+        '- Move the rules in `schema-rules` into `.claude/agents/migrator.md` and delete the skill.',
+        '- Only the subagent reads `schema-rules`; mark it with `disable-model-invocation: true`.',
+    ], [
+        '- Some teams set `disable-model-invocation: true` on skills like `schema-rules`, but this repo doesn\'t '
+        'need it.',
+    ]),
+    'finding-duplicates-grouped': ([
+        '- The migrations rule appears word for word in `CLAUDE.md`, `docs/contributing.md` and '
+        '`.claude/agents/migrator.md`, and two more files paraphrase it.',
+        '### Duplicated rule\n\n| File | Line |\n|---|---|\n| `CLAUDE.md` | 4 |\n| `docs/contributing.md` | 10 |\n'
+        '| `.claude/agents/migrator.md` | 9 |\n\nThe migrations rule is the same in all three.',
+        '- "Never edit files under `migrations/` by hand" is repeated in `CLAUDE.md:4`, `docs/contributing.md:10` and '
+        '`migrator.md:9`; keep it in one place.',
+        '1. **Remove the duplicated migrations rule** (Alignment, effort S)\n   Problem: `CLAUDE.md`, '
+        '`docs/contributing.md` and `.claude/agents/migrator.md` copy the same sentence.',
+        '- Same rule, 3 files: `CLAUDE.md`, `docs/contributing.md`, `migrator.md` (migrations).',
+        '- The migrations rule is copied verbatim into `CLAUDE.md`, `docs/contributing.md` and `migrator.md`: keep '
+        'one copy and point to it.',
+    ], []),
+    'finding-stale-folder': [[
+        '- `CLAUDE.md` says modules live in `src/labelmaker/carriers/`, but that folder does not exist.',  # review N1
+        '- `CLAUDE.md:8` points to `src/labelmaker/carriers/`, but there is no such folder.',  # review N1
+        '- CLAUDE.md describes `src/labelmaker/carriers/` and the folder is missing.',  # review N1
+        '- **Stale path.** `src/labelmaker/carriers/` is listed in CLAUDE.md but doesn\'t exist in the repo.',  # N1
+        '   Problem: CLAUDE.md line 8 says `src/labelmaker/carriers/` holds one module per carrier. That folder '
+        'doesn\'t exist, so the instruction sends Claude to nothing.',  # #184 gate shape
+        '| `src/labelmaker/carriers/` | CLAUDE.md:8 | missing |',
+        '- Remove the stale `src/labelmaker/carriers/` line from CLAUDE.md.',
+        fenced('Change: `src/labelmaker/carriers/` doesn\'t exist; delete the line:', '- `src/labelmaker/carriers/` '
+               'holds one module per carrier.').replace('```json', '```diff'),
+    ], [
+        '- I expected `carriers/` to be stale; it is fine.',  # review N6
+        '- `src/labelmaker/carriers/` exists, but `config/rates.toml` is missing.',
+        '- `src/labelmaker/carriers/` is listed in CLAUDE.md. That folder is not missing.',
+    ]],
+    'finding-stale-file': [[
+        '- CLAUDE.md says rates load from `config/rates.toml`, but that file doesn\'t exist.',
+        '- `config/rates.toml` is named in CLAUDE.md and isn\'t in the repo; rates are constants in `label.py`.',
+        '- **Correctness: C** (confidence: high). `CLAUDE.md` points at `config/rates.toml`, which doesn\'t exist.',
+        '| `config/rates.toml` | not found |',
+        '- Fix the stale reference to `config/rates.toml`: rates live in `label.py`.',
+        '   Problem: CLAUDE.md line 9 says rates load from `config/rates.toml`. That file doesn\'t exist.',
+    ], [
+        '- `config/rates.toml` is named in CLAUDE.md, but `carriers/` is the one that\'s missing.',
+        '- I expected `config/rates.toml` to be missing; it is fine.',
+    ]],
+    'finding-stale-dependency': [[
+        '- `reportlab` is mentioned but not listed in `pyproject.toml`.',  # review N1
+        '- CLAUDE.md says labels render through `reportlab`, but `pyproject.toml` declares no dependencies.',
+        '- `reportlab` is not a dependency: `pyproject.toml` has `dependencies = []`.',
+        '| `reportlab` | dependency | not declared |',
+        '- Remove the stale `reportlab` line; nothing imports it.',
+        '   Problem: CLAUDE.md line 10 names `reportlab`. It isn\'t declared in `pyproject.toml`, so the fact is false.',
+    ], [
+        '- `reportlab` is declared, but `config/rates.toml` is missing.',
+        '- I assumed `reportlab` would turn out to be missing; it is fine.',
+    ]],
+    'finding-parent-noted': ([
+        '- The folder above this repo has its own `CLAUDE.md` and `AGENTS.md`; they load too but aren\'t graded.',
+        '| `../CLAUDE.md` (workspace) | memory | parent dir | ~50 |',  # smoke (/doctor)
+        '- Skipped: `../CLAUDE.md`, an ancestor-directory file outside the working directory.',  # smoke (audit)
+        '- Note: a parent `CLAUDE.md` loads in every session started here.',
+        '- `CLAUDE.md` and `AGENTS.md` in the parent folder load with this repo, but only in-repo files are graded.',
+        '- Files above the repo (`../CLAUDE.md`, `../AGENTS.md`) are out of scope.',
+    ], [
+        '- Some teams keep a `CLAUDE.md` in the parent folder, but this repo doesn\'t need it.',
+    ]),
+    'finding-symlink-real-path': ([
+        '- `CLAUDE.md` is a symlink to `AGENTS.md`, so Claude Code and other agents read the same file.',  # smoke
+        '- Scope: `AGENTS.md`, plus `CLAUDE.md`, a symlink to it, so there is one file.',  # smoke (audit)
+        '| `CLAUDE.md` | symlink → `AGENTS.md` |',
+        '- `CLAUDE.md -> AGENTS.md`: one file, nothing to sync.',
+        '- `CLAUDE.md` points to `AGENTS.md` (a symlink), and that is the file graded.',
+        '- `CLAUDE.md` links to `AGENTS.md`; I graded `AGENTS.md`.',
+    ], [
+        '- Some teams keep `CLAUDE.md` as a symlink to `AGENTS.md`, but this repo doesn\'t need it.',
+    ]),
+    'finding-parent-blocks-agents': ([
+        '- Because the parent folder has a `CLAUDE.md`, Claude Code never reads `AGENTS.md` on its own.',  # review N4
+        '- The parent folder\'s `CLAUDE.md` stops the repo\'s `AGENTS.md` being read directly.',
+        '- For anyone with this parent, `../CLAUDE.md` loads and `AGENTS.md` is not read on its own; the symlink is '
+        'what loads it.',
+        '| `../CLAUDE.md` | parent | blocks the direct read of `AGENTS.md` |',
+        '- Note: a `CLAUDE.md` above the repo means Claude Code won\'t read `AGENTS.md` directly.',
+        '- The parent `CLAUDE.md` shadows `AGENTS.md`: Claude Code reads `AGENTS.md` only when no `CLAUDE.md` loads.',
+    ], [
+        '- I expected the parent `CLAUDE.md` to block `AGENTS.md`; it is fine.',
+    ]),
+    'finding-check-allowlist': ([
+        '- Allow `Bash(bun run check)` in `.claude/settings.json` so the check runs without a prompt.',  # review N3
+        plan_item(1, 'Pre-approve the check commands', 'Problem: `.claude/settings.json` doesn\'t exist, so no '
+                  '`permissions.allow` rule covers `bun run check` and every run prompts.\nChange: create '
+                  '`.claude/settings.json`:\n```json\n{"permissions": {"allow": ["Bash(bun run check)"]}}\n```'),
+        '- The check is only in `package.json` and CI, so every run prompts: add `Bash(bun run check)` to '
+        '`permissions.allow`.',
+        '| `bun run check` | CI and package.json | allow `Bash(bun run check)` |',
+        '- Pre-approve `Bash(bun run check)`.',
+        '- Nothing pre-approves the check; add `Bash(bun run check:*)` to the allow list.',
+    ], [
+        '- Some teams allow `Bash(bun run check)`, but this repo doesn\'t need it.',
+        '- Not needed: add `Bash(bun run check)` to allow.',
+    ]),
+    'no-invented-agents-md-missing': ([], ['- The repo lacks an `AGENTS.md`.']),  # review N5
+    'no-invented-principles-skill': ([], ['- `docs/principles.md` would be a good fit for a skill.']),  # review N5
+    'no-invented-parent-findings': ([], ['- Point `bin/legacy-build` at the new script.']),  # review N5
+}
+for _name, (_passing, _failing) in ROUND2.items():
+    CONTROLS[_name][0].extend(_passing)
+    CONTROLS[_name][1].extend(_failing)
+
+
 # Each named part a builder can drop: the control it must flip is in CONTROLS. structure-alignment-below-a has none.
-LINE_PARTS = ('source', 'question', 'hypothetical', 'declined', 'claim')
+LINE_PARTS = ('source', 'question', 'hypothetical', 'declined', 'rejected', 'claim')
 MUTATIONS = {
     'finding-ask-merge': LINE_PARTS + ('already', 'neg-after', 'rule', 'intro'),
     'finding-ask-deploy': LINE_PARTS + ('already', 'rule', 'intro'),
@@ -1009,7 +1248,7 @@ MUTATIONS = {
     'finding-visible-skill': LINE_PARTS + ('already', 'not-false', 'intro'),
     'finding-duplicates-grouped': ('source', 'question', 'hypothetical', 'declined', 'neg', 'contributing',
                                    'migrator'),
-    'finding-stale-folder': LINE_PARTS,
+    'finding-stale-folder': LINE_PARTS + ('refer',),
     'finding-stale-file': LINE_PARTS,
     'finding-stale-dependency': LINE_PARTS,
     'finding-parent-noted': LINE_PARTS,
