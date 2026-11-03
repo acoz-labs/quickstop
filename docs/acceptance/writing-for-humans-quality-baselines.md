@@ -1,5 +1,9 @@
 # Writing for Humans quality baselines (0.3.1)
 
+The current baseline is [the 1.0 re-baseline on the frozen suite](#10-re-baseline-on-the-frozen-suite-189)
+(#189: 9 cases, 5 runs). The 1.0 gate is measured against it. The sections up to there
+record the first, #187 baseline on the earlier 7-case suite.
+
 This is the first measurement of how readable Claude's replies are under three output
 styles, from issue #187. The same 7 writing tasks ran 3 times each under the default
 style, the built-in Concise style and Writing for Humans 0.3.1. Each reply was graded
@@ -276,3 +280,157 @@ ceiling, and every paid invocation is a row in
 | Counted run: task runs | 2.3852 |
 | Counted run: judges | 2.3365 |
 | **Total** | **8.0401** |
+
+## 1.0 re-baseline on the frozen suite (#189)
+
+The suite was fixed and extended for #189, then re-baselined and frozen.
+- Case 2's ask is now keyed as posting the record to the wiki.
+- Capitalised file names count as identifiers.
+- Two long cases were added: 8, an incident report, and 9, a design doc.
+- There are 5 runs per case per arm.
+- Calibration is enforced before counting.
+
+The 1.0 gate is measured against this section. The sections above are the #187 baseline on the earlier 7-case, 3-run suite; don't compare those numbers with these.
+
+**Result.** On the opening, Writing for Humans 0.3.1 leads Concise by 6 items: 44 against 38 of 135, with Default at 28. Opening stakes are still almost absent: 1 item in 135 for 0.3.1, and none for the other arms.
+- Whole-reply reads are level, at 126, 123 and 123.
+- 0.3.1 has the fewest sentences led by an identifier: 43, against 46 for Concise and 55 for Default.
+- 0.3.1 has no repeated sentences on the long cases.
+- 0.3.1 costs about 1.5 times as much per run as Concise ($0.0752 against $0.0488).
+
+The long cases did what they were added for. Replies ran 1,188 to 1,654 median words, and repetition and pedantry each failed at least once.
+
+### Frozen suite
+
+From the merge of this PR, the suite, runner, graders and keys don't change for the rest of #189.
+
+| | |
+|---|---|
+| Suite tree | `evals/writing-for-humans-quality` = `c8a8bf86b6e3f60a096e784c4feec36dcc64513c` |
+| Runner blob | `bin/writing-for-humans-quality-eval` = `f03bee3afd9b36c7329b50bd089a7ea7586b33d2` |
+| Judges | `judges/reader.md`, `judges/compare.md`, `judges/pedantry.md` inside the suite tree |
+| Task model | `claude-sonnet-5-5` |
+| Judge model | `claude-sonnet-5-5`, matched by the runner between calibration and counted runs |
+| Claude Code | 2.1.317, recorded and not matched; a later run on another version says so in its summary |
+
+### Candidate and settings
+
+| | |
+|---|---|
+| Candidate | head `b19cdf3747f22eaaecdebf6b5dde07af2ccb7835`, tree `1d1fe0d5b3be71528ffb5003beee080465a903b2`, clean, no stray suite files |
+| Plugin | writing-for-humans 0.3.1, plugin tree `fa2b6e0f0e34e97dcce3f23b161b40e2b365f8c8`, bytes digest `36268ea8…4898` |
+| Arms, tools, isolation, environment | as for #187 above: `default`, `Concise` and `writing-for-humans:writing-for-humans`. The plugin loads only in its own arm, from a retained copy. All arms get `Read`, `Glob`, `Grep` and `Skill`, plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and `DISABLE_AUTOUPDATER=1`. `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT` and `CLAUDE_CODE_SIMPLE` are unset, and effort is not set. |
+| Limits | `--max-cost-usd 16` for the run; `--max-budget-usd` 0.30 per task and 0.05 per judge call; 3 concurrent jobs |
+| When | 3 November 2026, preflight 19:44 UTC, guard closed 20:06 UTC |
+
+The result dir is not committed: `~/factory/retained/quickstop-189/counted-b19cdf3/`. The calibration is in `~/factory/retained/quickstop-189/calibration-gate/`, and a copy is in the result dir.
+
+### Calibration
+
+The calibration ran on the candidate head, on a clean tree, with no stray files and the Sonnet 5.5 judges. Every sample of every case scored as expected on every grader: **36 of 36 samples, 192 of 192 checks**. It cost $0.8567. The rules are as in the suite README:
+- `good` and `borderline-pass` pass every grader.
+- `bad` fails every grader.
+- `borderline-fail` fails every item whose key isn't `none`, on both reads.
+
+The samples for cases 8 and 9 and the new case 2 samples were written from the keys. Before this run, two case 2 samples failed: one implied the ask, and the other put the ask inside the wiki record, which pedantry flagged. Both were reworded. The run refused to start without this calibration, and summarize checks it.
+
+### Proof of the active style
+
+- **Preflight, $0, per arm.** `/output-style` showed each arm's style as `(current)`, its init record matched, and it cost $0. All three passed.
+  - The reviewer ran negative controls through the same path: `outputStyle` `nosuch`, and the plugin style without `--plugin-dir`. In both, init echoes the value but no `(current)` line appears, so the preflight rejects them.
+- **Per run.** All 135 init records are valid: each shows the arm's `output_style`, `claude-sonnet-5-5` and Claude Code 2.1.317, with no MCP server.
+  - Every writing-for-humans run lists `writing-for-humans` 0.3.1 from the retained copy.
+  - No default or Concise run lists the plugin.
+  - As in #187, this proves the setting resolved to a loaded style and each run started with it. It doesn't show the prompt reaching the model.
+- **Skill use.** The writing-for-humans arm called its `writing-style` skill 20 times, in all 5 runs of cases 1, 2, 8 and 9. The other arms made no `Skill` calls.
+- **Guard.** The guard was hashed before and after the run: `~/.claude/settings.json`, `installed_plugins.json`, `plugin-directory-cache-v2.json` and `known_marketplaces.json`. The retained plugin bytes didn't change. One file did; see the guard exception below.
+
+### Guard exception (accepted by the lead)
+
+`summarize` reports this result as not complete for one reason only: `~/.claude/plugins/known_marketplaces.json changed during the run`. Every other check passes.
+
+- **Before and after.** The sha256 was `f71590d0e1e3ec7642f19f8567d909494478a5f4f88446c11444e6ce881228cf` before the run and `b8cd20663b15f68e0460e88d6a4dbb45f7c22bcde4808e864661785684d88bad` after.
+- **What changed.** The `lastUpdated` field of the `claude-plugins-official` marketplace entry, now `2026-11-03T19:49:53.839Z`. That falls between the preflight and the guard's close. The marketplace's install directory wasn't touched.
+- **What stayed the same.** `settings.json`, `installed_plugins.json` and `plugin-directory-cache-v2.json` are byte-identical.
+- **No effect on the arms.** They run with `--setting-sources project,local` and never load that marketplace.
+- **Likely writer.** Every eval call ran with `DISABLE_AUTOUPDATER=1`. Three quickstop-192 factory sessions started on the same machine at 19:43–19:44 UTC without it. The writer is most likely one of them, but that can't be proven from the bytes.
+- **Why it was accepted.** A re-run would have ended past the $30 cap.
+- **Procedure from here.** Every later paid run copies the guarded files into a sidecar folder next to its result dir before the run and diffs them afterwards. That procedure lives outside the frozen runner, so a future trip can show exactly which bytes changed.
+
+### Per arm
+
+| | default | concise | writing-for-humans |
+|---|---|---|---|
+| Opening cold-read hits (/135) | 28 | 38 | 44 |
+| Opening: claim / ask / stakes (/45 each) | 19 / 9 / 0 | 25 / 13 / 0 | 27 / 16 / 1 |
+| Whole cold-read hits (/135) | 126 | 123 | 123 |
+| Whole: claim / ask / stakes (/45 each) | 45 / 41 / 40 | 45 / 42 / 36 | 45 / 42 / 36 |
+| Pedantry passes (/45) | 45 | 44 | 44 |
+| Repeated-content count (runs with any) | 2 (2) | 1 (1) | 0 (0) |
+| Identifier-subject sentences | 55 | 46 | 43 |
+| Case 4 question in first 3 sentences (/5) | 0 | 0 | 2 |
+| Cases 8 and 9: repeats (runs with any) | 1 (1) | 1 (1) | 0 (0) |
+| Cases 8 and 9: pedantry passes (/10) | 10 | 9 | 9 |
+| Cases 8 and 9: median words | 1,456 | 1,316 | 1,497 |
+| Median words, all runs | 383 | 307 | 323 |
+| Mean task cost per run (USD) | 0.0517 | 0.0488 | 0.0752 |
+| Mean task time per run (s) | 19.4 | 16.1 | 21.9 |
+| Task cost, all 45 runs (USD) | 2.3257 | 2.1938 | 3.3838 |
+| Judge cost, all 45 runs (USD) | 2.0376 | 1.8625 | 1.9809 |
+| Skill calls (all tool calls) | 0 (195) | 0 (194) | 20 (237) |
+| Valid runs | 45 | 45 | 45 |
+
+Hits are out of 135: 9 cases × 3 items × 5 runs. Costs are list price, taken from each run's own result record.
+
+### Per case
+
+Each cell gives the opening hits and then the whole hits for runs 1–5, the pedantry passes, the median words, and any repeats.
+
+| Case | default | concise | writing-for-humans |
+|---|---|---|---|
+| 1-worker-report | 0,1,1,1,1 / 3,3,3,3,3; pedantry 5/5; 455 words | 0,0,1,0,1 / 3,3,3,3,3; pedantry 5/5; 321 words | 2,1,1,2,1 / 3,3,3,3,3; pedantry 5/5; 502 words |
+| 2-design-note | 1,0,2,2,1 / 3,3,3,3,3; pedantry 5/5; 347 words | 1,2,0,2,1 / 3,3,3,3,3; pedantry 5/5; 292 words | 1,1,2,0,2 / 3,3,3,2,3; pedantry 5/5; 367 words |
+| 3-pr-description | 0,1,0,1,1 / 3,3,3,3,3; pedantry 5/5; 390 words | 0,1,1,0,0 / 3,3,3,3,3; pedantry 5/5; 307 words | 1,1,0,0,0 / 3,3,3,3,3; pedantry 5/5; 283 words |
+| 4-decision-question | 0,2,1,0,1 / 3,3,3,3,3; pedantry 5/5; 433 words; 1 repeat | 2,2,1,2,2 / 3,3,3,3,3; pedantry 5/5; 312 words | 2,2,2,1,2 / 3,3,3,3,3; pedantry 5/5; 302 words |
+| 5-status-update | 0,0,0,0,0 / 3,3,3,3,3; pedantry 5/5; 293 words | 0,0,0,1,0 / 3,3,3,3,3; pedantry 5/5; 228 words | 0,1,0,1,0 / 3,3,3,3,3; pedantry 5/5; 280 words |
+| 6-factual-answer | 2,1,2,2,1 / 3,3,3,3,3; pedantry 5/5; 99 words | 2,2,2,2,2 / 2,2,2,2,2; pedantry 5/5; 63 words | 2,2,2,2,2 / 3,2,2,2,2; pedantry 5/5; 89 words |
+| 7-subagent-handoff | 1,0,1,0,1 / 1,2,1,1,1; pedantry 5/5; 191 words | 1,1,1,1,1 / 2,1,1,2,2; pedantry 5/5; 117 words | 1,1,1,1,1 / 2,2,2,1,1; pedantry 5/5; 164 words |
+| 8-incident-report | 0,0,0,0,0 / 3,3,3,3,3; pedantry 5/5; 1654 words | 1,0,1,0,1 / 3,3,3,3,3; pedantry 5/5; 1354 words | 0,1,1,1,0 / 3,3,3,3,3; pedantry 5/5; 1638 words |
+| 9-design-doc | 0,0,0,0,0 / 3,3,3,3,3; pedantry 5/5; 1363 words; 1 repeat | 0,0,0,0,0 / 3,3,3,3,3; pedantry 4/5; 1188 words; 1 repeat | 0,0,0,0,0 / 3,3,3,3,3; pedantry 4/5; 1424 words |
+
+Every arm scored 0 on case 9's opening, and nearly 0 on case 8's. The long replies open with a title and metadata such as status, contributors and dates, so the first 3 sentences rarely reach the point. Bold run-in labels also use up opening sentences in every arm; this is a known limitation, recorded in the suite README.
+
+### 1.0 gate bars from these numbers
+
+Each bar is in the unit that `summary.md` reports.
+
+| Bar | Basis | 1.0 must reach |
+|---|---|---|
+| Opening cold-read ≥ 1.5 × Concise | Concise 38/135 = 0.2815 per item | ≥ 57/135 (0.4222 per item) |
+| Opening stakes above 0 | stakes items in the opening, all arms | ≥ 1/45 |
+| Whole cold-read no lower than 0.3.1 | 0.3.1 123/135 | ≥ 123/135 |
+| Identifier-led sentences no more than 0.3.1 | 0.3.1 43 | ≤ 43 |
+| Repetition on cases 8 and 9 no worse than 0.3.1 | 0.3.1 0 repeats in 10 runs | 0 |
+| Pedantry on cases 8 and 9 no worse than 0.3.1 | 0.3.1 9/10 | ≥ 9/10 |
+| Median words ≤ Concise × 1.1 | Concise 307 | ≤ 337.7 |
+| Mean task cost per run ≤ 0.3.1 | 0.3.1 $0.0752 | ≤ $0.0752 |
+| #172 regression suite | `bin/writing-for-humans-eval` | passes |
+| Style active in every 1.0 run | preflight `(current)` at $0, plus per-run init, as above | every run valid |
+
+**Screen threshold.** A candidate's screen is 1 run per case in the 1.0 arm only: 9 runs, or 27 opening items. It goes to the full gate only if both hold:
+- Its opening reaches 1.5 × 0.2815 = 0.4222 per item, which is at least **12 of 27** opening items (11.4 rounded up). Per run, that's 3 × 0.4222 = 1.27 hits.
+- Its opening stakes are above 0.
+
+Screens are recorded separately and never count toward the gate.
+
+### Spend
+
+The cap for #189 is $30 at list price. Every paid invocation is a row in `~/factory/retained/quickstop-189/spend-ledger.md`.
+
+| Part | USD |
+|---|---|
+| Development calibration (all 9 cases, then case 2 again) | 1.2030 |
+| Smoke (cases 2, 8 and 9 × 3 arms × 1 run) | 1.3509 |
+| Calibration on the candidate head | 0.8567 |
+| Counted re-baseline (135 runs: task 7.9033, judges 5.8810) | 13.7842 |
+| **Cumulative** | **17.1948** |
