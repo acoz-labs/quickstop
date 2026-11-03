@@ -161,22 +161,27 @@ def ask_rule(command, drop=frozenset()):
     return either(block(r'"ask"[ \t]*:[ \t]*\[[^\]]*?"' + rule, drop), recommended(ASK_VERB, rule, ASK, drop))
 
 
-BRANCH = (r'(?:branch[ \t-]+protection|protected[ \t]+branch(?:es)?|branch[ \t]+(?:protection[ \t]+)?rules?'
-          r'|rulesets?|required[ \t]+(?:pull[ \t]+request[ \t]+)?reviews?)')
-GATE = (r'(?:\bgate\w*|\benforc\w*|\breal[ \t]+(?:gate|control|guarantee|enforcement|protection)|\bonly[ \t]+(?:real'
-        r'[ \t]+)?(?:control|gate|guarantee|enforcement|thing)|\bactual[ \t]+(?:gate|control)|\bserver[- ]side\b'
-        r'|\bbypass\w*|\bbackstop\w*|\bguarantee\w*|\b(?:blocks?|prevents?|stops?)[ \t]+(?:\S+[ \t]+){0,2}?merg\w*'
-        r'|\brequir\w*[ \t]+(?:\S+[ \t]+){0,2}?(?:approv\w*|reviews?|status[ \t]+checks?))')
+# Review round 4, O3: "branch protection" (or "protected branch", "ruleset") and main, merge or review in one
+# sentence, in any phrasing. A statement of the gap ("`main` has no branch protection, so anyone can merge") counts;
+# a sentence that advises against it, says it isn't needed or is already in place doesn't.
+BRANCH = r'(?:\bbranch[ \t-]+protections?\b|\bprotected[ \t]+branch(?:es)?\b|\brulesets?\b)'
+BRANCH_WITH = r'(?:\bmain\b|\bmerg\w*|\breview\w*)'
+AGAINST = (r'(?:\b(?:don%(q)st|do[ \t]+not|never|avoid|skip|no[ \t]+need[ \t]+to)[ \t]+(?:\S+[ \t]+){0,2}?(?:enabl'
+           r'|add|us|set|turn|configur|requir|need|bother|rel[yi]|treat|enforc|protect|worr)\w*'
+           r'|\b(?:doesn%(q)st|don%(q)st|do(?:es)?[ \t]+not|needn%(q)st)[ \t]+(?:really[ \t]+)?need\b|\bno[ \t]+need\b'
+           r'|\b(?:rather[ \t]+than|instead[ \t]+of)[ \t]+(?:\S+[ \t]+){0,2}?%(branch)s|\bunnecessar\w*|\boverkill\b'
+           r'|\bnot[ \t]+(?:needed|necessary|required|worth)\b'
+           r'|\bno\b(?:[ \t]+\S+){0,3}?[ \t]+(?:is|are)[ \t]+(?:needed|necessary|required)\b'
+           r'|\bmatters?[ \t]+(?:only[ \t]+)?for[ \t]+humans\b'
+           r'|\b(?:remov|disabl|drop|turn[ \t]+off|relax|loosen)\w*[ \t]+(?:\S+[ \t]+){0,2}?%(branch)s'
+           r'|%(branch)s(?:(?!%(cend)s)[^\n]){0,60}?\b(?:won%(q)st|wouldn%(q)st|doesn%(q)st|does[ \t]+not|can%(q)st'
+           r'|cannot|isn%(q)st)[ \t]+(?:\S+[ \t]+)?(?:help|matter|work|apply|stop|block|prevent|cover|catch)\b)'
+           % {'q': Q, 'branch': BRANCH, 'cend': CEND})
 
 
 def branch_protection(drop=frozenset()):
-    # "... branch protection, which is the real gate": the relative clause says what branch protection is.
-    which = r'(?=[^\n]*%s[\x60*]{0,2},?[ \t]+which[ \t]+(?:is|are)[ \t]+(?:(?!%s\b)\S+[ \t]+){0,3}?%s)' % (
-        BRANCH, NEG, GATE)
-    back = (r'(?=%s*?%s%s*?(?:%s)(?:it|this|that|which)\b(?:(?!%s|%s)[^\n])*?%s)'
-            % (SENT, BRANCH, SENT, CSTART, NEGB, CEND, GATE))
     return line({**framing(drop), 'already': already(BRANCH), 'neg-after': neg_after(BRANCH),
-                 'claim': either(claim(BRANCH, GATE, drop), *(() if 'which' in drop else (which, back)))}, drop)
+                 'against': r'(?!%s*?%s)' % (SENT, AGAINST), 'with': has(BRANCH_WITH), 'claim': has(BRANCH)}, drop)
 
 
 HOOK = r'\b(?:PreToolUse|PostToolUse|Stop|pre-commit|precommit|git[ \t]+hooks?|hooks?)\b'
@@ -327,18 +332,40 @@ def agents_md_missing(drop=frozenset()):
     return free_of(AGENTS_MISSING, r'(?:creat\w*|add\w*|writ\w*|missing|absent)', drop)
 
 
-BLOCK = (r'(?:\bstops?\b|\bstopping\b|\bprevents?\b|\bblocks?\b|\bshadows?\b|\bsuppress\w*|\boverrid\w*|\bmasks?\b'
-         r'|\b(?:isn%(q)st|aren%(q)st|won%(q)st[ \t]+be|wouldn%(q)st[ \t]+be|will[ \t]+not[ \t]+be|would[ \t]+not'
-         r'[ \t]+be|is[ \t]+not|are[ \t]+not|not|never)[ \t]+(?:\S+[ \t]+)?(?:read|loaded|picked[ \t]+up|used)\b'
-         r'|\b(?:never|doesn%(q)st|does[ \t]+not|won%(q)st|will[ \t]+not|no[ \t]+longer)[ \t]+(?:reads?|loads?|picks?'
-         r'[ \t]+up|uses?)\b|\bno[ \t]+longer[ \t]+(?:read|loaded)\b|\bignored\b|\bskipped\b)' % {'q': Q})
+# Review round 4, O2: one paragraph or list item names the parent CLAUDE.md and says the repo's AGENTS.md is not
+# read or loaded, in either order. A line break stays inside the unit unless a blank line, a list marker, a table row
+# or a heading follows, so each table row is its own unit.
+UNIT_MARK = r'[ \t]*(?:[-*+][ \t]|[0-9]+[.)][ \t]|\||#{1,6}[ \t])'
+UNIT_NL = r'\n(?![ \t]*\n|%s)' % UNIT_MARK
+# Where a unit starts: the text start, a line after a blank line, or a list, table or heading line. Only these are
+# tried, so a long paragraph isn't rescanned from each of its lines.
+UNIT_START = r'(?:^|\n(?=%s)|\n[ \t]*\n(?:[ \t]*\n)*)' % UNIT_MARK
+# The parent, as in PARENT, but "above" only as a place ("the `CLAUDE.md` above", "above the repo"), not "as noted
+# above".
+PARENT_DIR = (r'(?:\bparent\b|\benclosing\b|\bancestor\w*|\boutside[ \t]+(?:the[ \t]+|this[ \t]+)?(?:repo\w*|project'
+              r'|checkout)|\bcontaining[ \t]+(?:folder|directory)|\.\./|\bhome[ \t]+(?:folder|directory)|~/'
+              r'|\bup[ \t]+the[ \t]+tree|\bhigher[ \t]+up\b|[\x60*"]{1,2}[ \t]+above\b|\babove[ \t]+(?:the'
+              r'|this|your)[ \t]+(?:repo\w*|project|checkout|folder|directory|tree)\b|\b(?:folder|directory|one)'
+              r'[ \t]+above\b)')
+UNREAD = (r'(?:\b(?:not|never|no[ \t]+longer|isn%(q)st|aren%(q)st|wasn%(q)st|won%(q)st[ \t]+be|wouldn%(q)st[ \t]+be'
+          r'|can%(q)st[ \t]+be|doesn%(q)st[ \t]+get)[ \t]+(?:\S+[ \t]+)?(?:read|loaded|picked[ \t]+up|used|seen)\b'
+          r'|\b(?:never|doesn%(q)st|does[ \t]+not|won%(q)st|will[ \t]+not|can%(q)st|cannot|no[ \t]+longer|don%(q)st'
+          r'|do[ \t]+not)[ \t]+(?:\S+[ \t]+)?(?:reads?|loads?|picks?[ \t]+up|uses?|sees?|looks?[ \t]+at|opens?)\b'
+          r'|\b(?:stops?|stopping|prevents?|blocks?|shadow\w*|suppress\w*|overrid\w*|overrode|masks?|masked|hides?'
+          r'|hidden|ignored|skipped|unread)\b|\binstead[ \t]+of\b|\bonly[ \t]+when[ \t]+no\b)' % {'q': Q})
+# A sentence about a parent AGENTS.md ("the parent `AGENTS.md` isn't read") is not about the repo's.
+PARENT_AGENTS = (r'(?:\.\./|~/|\b(?:parent|ancestor|enclosing|workspace|outer|home)\w*(?:%s?s)?[ \t]+(?:(?:folder'
+                 r'|directory)(?:%ss)?[ \t]+)?)[\x60*"]{0,2}AGENTS\.md' % (Q, Q))
 
 
 def parent_blocks_agents(drop=frozenset()):
-    denied = (r'(?![^\n]*\b(?:does(?:n%st|[ \t]+not)|won%st|will[ \t]+not|never|can%st|cannot|wouldn%st|would[ \t]+not)'
-              r'[ \t]+(?:\S+[ \t]+)?(?:stop|prevent|block|shadow|suppress|override|mask|affect))' % (Q, Q, Q, Q))
-    return line({**framing(drop), 'denied': denied, 'parent': has(PARENT), 'agents': has(r'AGENTS\.md'),
-                 'claim': claim(r'CLAUDE\.md', BLOCK, drop)}, drop)
+    unit_nl = r'\n' if 'unit' in drop else UNIT_NL
+    uchar = r'(?:[^\n]|%s){0,4000}?' % unit_nl
+    named = r'(?:%s%s*?CLAUDE\.md|CLAUDE\.md%s*?%s)' % (PARENT_DIR, SENT, SENT, PARENT_DIR)
+    parent = '' if 'parent' in drop else r'(?=%s%s)' % (uchar, named)
+    said = line({**framing(drop), 'repo-agents': r'(?!%s*?%s)' % (SENT, PARENT_AGENTS),
+                 'claim': claim(r'AGENTS\.md', UNREAD, drop)}, drop)
+    return (BOL if 'unit' in drop else UNIT_START) + parent + r'(?:%s%s)?' % (uchar, unit_nl) + said[len(BOL):]
 
 
 FIX = r'\b(?:fix|update|remove|delete|replace|correct|change|rewrite|drop|point|repoint|rename|redirect)\w*\b'
@@ -366,46 +393,71 @@ def check_allowlist(drop=frozenset()):
     return either(block(r'"allow"[ \t]*:[ \t]*\[[^\]]*?"' + rule, drop), recommended(ALLOW_VERB, rule, ALLOW, drop))
 
 
-# f19-declarative-list (issue F15): any recommendation to make the principles a skill, inflected or nominal, or a
-# claim that they are a procedure.
-CL = r'(?:[^\n.;!?]|[.;!?](?=\S))'  # a character inside one sentence (a colon doesn't end it)
-SKILL_VERB = (r'\b(?:add|creat|mak|turn|convert|mov|wrap|extract|packag|writ|promot|split|consider|refactor|rewrit'
-              r'|restructur|reshap|put|break)\w*')
-SKILL_CLAIM = (r'(?:' + SKILL_VERB + CL + r'{0,60}?principles' + CL + r'{0,60}?\bskills?\b'
-               r'|' + SKILL_VERB + CL + r'{0,40}?\bskills?\b' + CL + r'{0,60}?principles'
-               r'|\bskills?\b' + CL + r'{0,30}?\b(?:for|from|of|with|covering)\b' + CL + r'{0,40}?principles'
-               r'|principles[\x60*"]{0,2}[ \t]+skills?\b'
-               r'|\b(?:as|into)[ \t]+(?:a|an|its[ \t]+own)[ \t]+(?:\S+[ \t]+)?skill\b'
-               r'|\ba[ \t]+skill[ \t]+(?:would|could|will|can|might|should)\b|\bfor[ \t]+a[ \t]+skill\b'
-               r'|\b(?:needs?|deserves?|warrants?|should[ \t]+(?:be|become|have)|belongs?[ \t]+in|benefit\w*[ \t]+from)'
-               r'[ \t]+(?:a[ \t]+|an[ \t]+|its[ \t]+own[ \t]+)?(?:(?!(?:no|not)\b)\S+[ \t]+)?(?:skill|slash[ \t]+command)\b'
-               r'|principles' + CL + r'{0,60}?\b(?:is|are|reads?[ \t]+(?:like|as)|looks?[ \t]+like|counts?[ \t]+as'
-               r'|works?[ \t]+as)[ \t]+(?:a[ \t]+|an[ \t]+)?(?:\S+[ \t]+)?procedur\w*'
-               r'|procedur\w*[ \t]+(?:in|at|from)[ \t]+\x60?(?:docs/)?principles'
-               r'|\.claude/(?:skills|commands)/[\w-]*principl|(?:^|[ \t\x60(])/principles\b)')
-SKILL_NEGATED = (r'(?:skills?|procedur\w*|commands?|add\w*|creat\w*|mak\w*|turn\w*|convert\w*|mov\w*|wrap\w*'
-                 r'|extract\w*|packag\w*|writ\w*|promot\w*|split\w*|consider\w*|needs?|deserves?|warrants?)\b')
+# f19-declarative-list (issue F15), review round 4, O1: a false defect only when a numbered item of the report's
+# changes proposes a skill for the principles. Items under a set-aside heading ("Also worth knowing", "Declined",
+# "Optional", "Not recommended", ...), items whose title is optional or a decline, bullets and prose never count, and
+# a clause with negation or decline wording ("a skill would add nothing", "a skill would be overkill") never counts.
+HEADING = r'(?:#{1,6}[ \t]|\*\*[^\n*]+\*\*:?[ \t]*(?=\n|(?![\s\S])))'  # a Markdown heading or a line of bold text
+SET_ASIDE = (r'(?:\balso[ \t]+worth\b|\bdeclin\w*|\bnot[ \t]+(?:recommended|planned|changing|doing|worth)\b'
+             r'|\boptional\w*|\bskip\w*|\bleft[ \t]+out\b|\bout[ \t]+of[ \t]+(?:scope|the[ \t]+plan)\b'
+             r'|\balready[ \t]+good\b|\bwhat%ss[ \t]+(?:good|fine|working)\b|\bno[ \t]+changes?\b|\bconsidered\b'
+             r'|\bnice[ -]to[ -]have\b)' % Q)
+# An item's title (to its first sentence end or the end of its bold text) that makes it optional or a decline.
+TITLE_OFF = (r'(?:\b%s\b|\boptional\w*|\bnice[ -]to[ -]have\b|\bonly[ \t]+if\b|\bif[ \t]+(?:you|needed|wanted|it)\b'
+             r'|\bmaybe\b|\bkeep\b|\bleave\b|\balso[ \t]+worth\b|\bdeclin\w*)' % NEG)
+TITLE = r'(?:\*\*)?(?:[^\n.!?*]|[.!?](?=\S))*?'
+# A line break inside a list item: the next non-blank line is indented and isn't the next numbered item.
+ITEM_NL = r'\n(?=(?:[ \t]*\n)*(?: {2,}|\t)(?![ \t]*[0-9]+[.)][ \t])\S)'
+HEAD_NL = r'\n(?![ \t]*%s)' % HEADING  # inside a numbered heading's section
+BOUND = (r'[.!?;](?=[ \t*_)"\x60]|\n|(?![\s\S]))|[ \t]+(?:so|because|since|but|then|while|whereas|which|though'
+         r'|although)[ \t]+')
+SKILL = r'(?:\bskills?\b|\bslash[ \t]+commands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|(?:^|[ \t\x60(])/principles\b)'
+REFUSE = (r'(?:%s|\b(?:overkill|unnecessar\w*|unneeded|needless\w*|pointless|redundant|prematur\w*|declin\w*|wrong'
+          r'|keep|leave|fine|already)\b|\b(?:poor|bad)[ \t]+fit\b'
+          r'|\bskills[ \t]+(?:are|suit|fit|work|belong|hold|cover|should)\b)' % NEGB)
 
 
 def principles_skill(drop=frozenset()):
-    return free_of(SKILL_CLAIM, SKILL_NEGATED, drop, '' if 'principles' in drop else has('principles'))
+    """A not_contains pattern for a numbered item that proposes a skill for the principles."""
+    def item(marker, nl):
+        ichar = r'(?:[^\n]|%s)' % nl
+        cchar = ichar if 'clause' in drop else r'(?:(?!%s|\n)%s)' % (BOUND, ichar)
+        bound = nl if 'clause' in drop else r'(?:%s|%s)' % (BOUND, nl)
+        proposes = (('' if 'source' in drop else SOURCE) + ('' if 'refuse' in drop else r'(?!%s*?%s)' % (cchar, REFUSE))
+                    + ('' if 'question' in drop else r'(?!%s*?\?(?=[ \t*_"\x60)]|\n|(?![\s\S])))' % cchar)
+                    + r'%s*?%s' % (cchar, SKILL))
+        return (marker + ('' if 'title' in drop else r'(?!%s%s)' % (TITLE, TITLE_OFF))
+                + ('' if 'principles' in drop else r'(?=%s*?principles)' % ichar)
+                + r'(?=(?:%s*?%s)?%s)' % (ichar, bound, proposes))
+    # The item's section: the text start or a heading that isn't set aside, then text up to the item that crosses no
+    # other heading. The section start doesn't consume the line break, so a numbered heading can be the item itself.
+    aside = r'[ \t]*%s[^\n]*%s' % (HEADING, SET_ASIDE)
+    first, later = ('', '') if 'section' in drop else (r'(?!%s)' % aside, r'(?!\n%s)' % aside)
+    rest = r'(?:(?!\n[ \t]*%s)[\s\S])*?' % HEADING
+    section = r'(?:^%s%s|(?=\n[ \t]*%s)%s(?:[\s\S]%s)?)' % (first, rest, HEADING, later, rest)
+    return section + r'(?:^|\n)[ \t]{0,3}' + either(
+        item(r'(?:\*\*)?[0-9]+[.)](?:\*\*)?[ \t]+', ITEM_NL), item(r'#{1,6}[ \t]+[0-9]+[.)]?[ \t]+', HEAD_NL))
 
 
 DOC_SCRIPT = ('Script-graded{flags}. The parts, and the controls each must pass and fail, are in '
               '`tests/test_claudit_fixture_graders.py`; rebuild with `python3 tests/test_claudit_fixture_graders.py '
               '--write`. A line never counts when it is a `Source:` citation line{line_rules}.')
-LINE_RULES = (' or says the change was left out of the plan ("I left it out of the plan", "not recommended", '
-              '"declined"). The finding\'s parts must sit in one clause of one sentence that no negation, "rather '
-              'than" or "instead of" governs ("Don\'t add X", "No command needs one, including X"); a clause ends at '
-              '`.` `;` `!` `?` before a space, at "but", "then", "so", "while" or "whereas", at "and" (unless a '
-              'backticked name follows, as in a list), at a spaced dash, or at a colon before an imperative ("…, but '
-              'nothing enforces it: add X"). The sentence must not be a question '
-              '("why not", or `?` before a space) or hypothetical or optional ("would do it", "could", "might", "you '
-              'could … if you want", "If the repo had …", a sentence that opens with "If", "optional"), and must not '
-              'say the fix is already in place or reject the change or report someone else\'s advice ("this repo '
-              'doesn\'t need it", "that is wrong here", "Hold off on …", "Some teams …", "A previous audit …", "I '
-              'expected … to be …", "Not needed:", "Don\'t do this:"). A hypothetical or question in another sentence '
-              'of the line doesn\'t count against it')
+DECLINED_RULE = (' or says the change was left out of the plan ("I left it out of the plan", "not recommended", '
+                 '"declined"). ')
+CLAUSE_RULE = ('The finding\'s parts must sit in one clause of one sentence that no negation, "rather than" or '
+               '"instead of" governs ("Don\'t add X", "No command needs one, including X"); a clause ends at `.` `;` '
+               '`!` `?` before a space, at "but", "then", "so", "while" or "whereas", at "and" (unless a backticked '
+               'name follows, as in a list), at a spaced dash, or at a colon before an imperative ("…, but nothing '
+               'enforces it: add X"). ')
+SENTENCE_RULE = ('The sentence must not be a question ("why not", or `?` before a space) or hypothetical or optional '
+                 '("would do it", "could", "might", "you could … if you want", "If the repo had …", a sentence that '
+                 'opens with "If", "optional"), and must not say the fix is already in place or reject the change or '
+                 'report someone else\'s advice ("this repo doesn\'t need it", "that is wrong here", "Hold off on …", '
+                 '"Some teams …", "A previous audit …", "I expected … to be …", "Not needed:", "Don\'t do this:"). A '
+                 'hypothetical or question in another sentence of the line doesn\'t count against it')
+LINE_RULES = DECLINED_RULE + CLAUSE_RULE + SENTENCE_RULE
+# Review round 4: graders matched by structure and co-occurrence rather than by one clause.
+STRUCTURAL = {'finding-branch-protection', 'finding-parent-blocks-agents'}
 FENCE = ('A fenced block counts when it opens the report or its intro line (the last non-blank line before the fence) '
          'isn\'t negated, hypothetical or declined.')
 
@@ -429,11 +481,13 @@ GRADERS = {
          'recommending sentence, as for `finding-ask-merge`.'),
         ('finding-branch-protection', branch_protection, (), 'i', '',
          'An ask rule only prompts in Claude Code; the gate on main that holds for everyone is branch protection on '
-         'the host.\n\nPASS when one clause names branch protection (also "protected branch", "branch rules", '
-         '"ruleset" or "required reviews") with what it does as the gate: gate, enforce, the real/only/actual '
-         'gate or control, server-side, bypass, backstop, guarantee, block/prevent/stop … merges, require … '
-         'approval/reviews/status checks; or "branch protection, which is <the gate>" with no negation in the '
-         'relative clause, or a later clause of the sentence that refers back ("…; it enforces review"). "Rather than branch protection" or "only matters for humans" doesn\'t count.'),
+         'the host.\n\nPASS when one sentence names branch protection (also "protected branch" or "ruleset") and '
+         '`main`, a merge or a review, in any phrasing; a statement of the gap ("`main` has no branch protection, so '
+         'anyone can merge") counts. The sentence must not advise against it ("don\'t enable/rely on …", "doesn\'t '
+         'need", "no need", "rather than / instead of branch protection", "remove/disable … branch protection", '
+         '"unnecessary", "overkill", "not needed", "No … is needed", "matters only for humans", or "branch '
+         'protection won\'t/doesn\'t help/apply/stop …" in its own clause), and must not say branch protection isn\'t '
+         'needed or is already in place (review round 4, O3).'),
         ('finding-commit-hook', commit_hook, (), 'i', '',
          'CLAUDE.md says "You must run `bin/check` before every commit", and no hook runs it.\n\nPASS when the '
          'report adds a hook that runs `bin/check`: a fenced JSON `"PreToolUse"` or `"Stop"` block, then '
@@ -510,10 +564,15 @@ GRADERS = {
         ('finding-parent-blocks-agents', parent_blocks_agents, (), 'i', '',
          'Claude Code reads `AGENTS.md` directly only when no `CLAUDE.md` loads, and a `CLAUDE.md` in a parent '
          'folder counts, so for anyone who has this parent the repo\'s `AGENTS.md` isn\'t read on its own (issue '
-         '#192 F13).\n\nPASS when one clause names `CLAUDE.md` and the effect (stops, prevents, blocks, shadows, '
-         'suppresses, overrides, masks, isn\'t / won\'t be / never read, loaded or used, "Claude Code never reads / '
-         'won\'t read / doesn\'t load", no longer read, ignored, skipped) and the sentence names the parent (as in `finding-parent-noted`) and `AGENTS.md`, unless it '
-         'says the parent does not (won\'t, never, can\'t) stop, prevent, block or affect it.'),
+         '#192 F13).\n\nPASS when one paragraph or list item (a table row is its own item) names the parent '
+         '`CLAUDE.md` (a sentence with `CLAUDE.md` and the parent: parent, enclosing, ancestor, outside the repo, '
+         'containing folder, `../`, `~/`, home folder, higher up, "the `CLAUDE.md` above", "above the repo", not "as '
+         'noted above") and says the repo\'s `AGENTS.md` is not read or loaded, in either order: one clause with '
+         '`AGENTS.md` and not / never / no longer / isn\'t / won\'t be read, loaded, picked up or used, "Claude Code '
+         'never reads / won\'t read / doesn\'t load / never looks at", stops, prevents, blocks, shadows, suppresses, '
+         'overrides, masks, hides, ignored, skipped, unread, "instead of" or "only when no", with no negation before '
+         'them in the clause (review round 4, O2). Both must be within the first 4,000 characters of the paragraph or list item. A sentence about a parent `AGENTS.md` (`../AGENTS.md`, "the parent '
+         '`AGENTS.md`") doesn\'t count.'),
         ('no-invented-parent-findings', parent_findings, (), 'i', 'not_contains',
          'Only in-repo files are graded. The parent\'s `CLAUDE.md` and `AGENTS.md` name `bin/legacy-build`, '
          'which exists nowhere.\n\nMust not match: a line naming `legacy-build` with a fix word (fix, update, '
@@ -536,16 +595,19 @@ GRADERS = {
         ('no-invented-principles-skill', principles_skill, (), 'i', 'not_contains',
          '`docs/principles.md` is a numbered list of standing principles with no imperative verbs or sequence '
          'words. It is not a procedure, so no skill is needed (issue #192 F15, a false-defect grader like F4).\n\n'
-         'Must not match, on a line naming the principles: a verb in any form (add, create, make, turn, convert, '
-         'move, wrap, extract, package, write, promote, split, consider, refactor, rewrite, restructure, reshape, '
-         'put, break) and "skill" in one sentence with the principles; "skill for/from/of/with … principles"; '
-         '"a `principles` skill"; "as/into a skill"; "for a skill"; "a skill would/could/will/can/might/should"; '
-         'needs, deserves, '
-         'warrants, should be, belongs in or benefits from a skill or slash command; the principles called a '
-         'procedure (is, are, reads like/as, looks like, counts as, works as … procedure) or "procedure in '
-         '`docs/principles`"; or a `.claude/skills/` or `.claude/commands/` path, or a `/principles` command, for '
-         'them. A negated clause ("not a procedure", "no skill is needed", "don\'t turn it into a skill") is '
-         'skipped; "why not" is never a negation. "Skills are for procedures" doesn\'t count.'),
+         'Must not match: a numbered item of the report\'s changes (`1.`, `**1.**` or a numbered heading such as `## '
+         '2. Context`) that names the principles and proposes a skill (skill, slash command, a `.claude/skills/` or '
+         '`.claude/commands/` path, `SKILL.md`, a `/principles` command) in a clause with no negation or decline '
+         'wording (no, not, never, nothing, n\'t, avoid, skip, rather than, instead of, overkill, unnecessary, '
+         'pointless, redundant, premature, declined, wrong, poor/bad fit, keep, leave, fine, already, "skills '
+         'are/suit/fit … for") and that isn\'t a question. A clause ends at `.` `;` `!` `?` before a space, a line '
+         'break, or so, because, since, but, then, while, whereas, which, though, although. An item\'s text is its '
+         'first line and the indented lines under it (a numbered heading\'s runs to the next heading). Never counted: '
+         'bullets and prose; items under a heading or bold line that sets them aside (Also worth knowing, Declined, '
+         'Not recommended/planned, Optional, Skipped, Left out, Out of scope, Already good, What\'s good/fine, No '
+         'changes, Considered, Nice to have); items whose title (to its first sentence end or the end of its bold '
+         'text) is optional or a decline (optional, nice to have, only if, if you/needed, maybe, keep, leave, a '
+         'negation, also worth, declined); and a `Source:` line (review round 4, O1).'),
     ],
 }
 
@@ -555,7 +617,8 @@ def built(case):
     out = []
     for name, build, args, flags, match, doc in GRADERS[case]:
         pattern = build(*args)
-        rules = '' if match or name.startswith('structure-') or name == 'finding-always-loaded-table' else LINE_RULES
+        rules = ('' if match or name.startswith('structure-') or name == 'finding-always-loaded-table'
+                 else DECLINED_RULE + SENTENCE_RULE if name in STRUCTURAL else LINE_RULES)
         text = doc if name.startswith('structure-') else doc + '\n\n' + DOC_SCRIPT.format(
             flags=' (case-insensitive)' if 'i' in flags else '', line_rules=rules)
         out.append((name, pattern, flags, match, text))
@@ -633,23 +696,6 @@ CONTROLS = {
         '- Should you add an ask rule for `Bash(bin/release:*)`?',
         '   Source: [Add ask rules](https://code.claude.com/docs/en/permissions) such as `Bash(bin/release:*)`',
         '- `Bash(bin/release:*)` is already in the ask list you set up.',
-    ]),
-    'finding-branch-protection': ([
-        '- Branch protection on `main` is the real gate: an ask rule only prompts inside Claude Code.',
-        '- Ask rules don\'t replace branch protection, which is the gate that holds for everyone.',
-        '- Require reviews with a protected branch; nothing else enforces the merge rule outside Claude Code.',
-        '- Turn on a ruleset for `main` that requires review before a merge.',
-        # Smoke a9fd63c (plain): "already" in a later sentence on the line is not a note that it's in place.
-        '- **Branch protection:** require PR approval on `main` in GitHub. CI already runs on PRs, so also make `ci / '
-        'check` a required status check. This is the only control that holds regardless of what the agent does.',
-    ], [
-        '- No branch protection is needed: the ask rule is enough.',
-        '- No branch protection is needed to gate merges.',
-        '- Branch protection isn\'t needed here, since the ask rule gates merges.',
-        '- Is branch protection the real gate?',
-        '   Source: [About protected branches](https://docs.github.com/en/repositories) enforce reviews',
-        '- Branch protection on `main` is already the real gate.',
-        '- Branch protection exists on GitHub.',
     ]),
     'finding-commit-hook': ([
         '- Add a PreToolUse hook on `git commit` that runs `bin/check`.',
@@ -785,16 +831,6 @@ CONTROLS = {
         '- Why not create an `AGENTS.md`?',
         '- Note: the repo has no AGENTS.md.',
     ]),
-    'finding-parent-blocks-agents': ([
-        '- The parent folder\'s `CLAUDE.md` stops the repo\'s `AGENTS.md` being read directly for anyone who has '
-        'that parent.',
-        '- Because `../CLAUDE.md` loads, `AGENTS.md` won\'t be read on its own; the symlink is what loads it.',
-    ], [
-        '- The parent `CLAUDE.md` does not stop `AGENTS.md` loading.',
-        '- Does the parent `CLAUDE.md` stop `AGENTS.md` being read?',
-        '   Source: [AGENTS.md](https://code.claude.com/docs/en/memory) a parent CLAUDE.md stops it being read',
-        '- The parent `CLAUDE.md` and the repo\'s `AGENTS.md` both load.',
-    ]),
     'no-invented-parent-findings': ([
         '- `../CLAUDE.md` names `bin/legacy-build`, which doesn\'t exist; it is outside the repo, so not graded.',
         '- Don\'t fix `bin/legacy-build` in the parent file: it\'s not this repo\'s.',
@@ -823,22 +859,6 @@ CONTROLS = {
         '   Source: [Add allow rules](https://code.claude.com/docs/en/permissions) such as `Bash(bun run check)`',
         '- `Bash(bun run check)` is already allowed; add nothing.',
         '- `permissions.allow` would hold `Bash(bun run check)`.',
-    ]),
-    'no-invented-principles-skill': ([
-        '- `docs/principles.md` is a list of principles, not a procedure, so it needs no skill.',
-        '- No procedure needs a skill: `docs/principles.md` holds standing principles.',
-        '- Don\'t turn `docs/principles.md` into a skill.',
-        '   Source: [Skills](https://code.claude.com/docs/en/skills) procedures and principles',
-        '- `docs/principles.md` is imported correctly.',
-        '- Add a skill for releases; the principles are fine as they are.',
-        '- The release steps are a procedure; add a skill.',
-    ], [
-        '- Turn `docs/principles.md` into a skill.',
-        '- Why not make `docs/principles.md` a skill?',
-        '- Note: `docs/principles.md` is a procedure.',
-        '- Don\'t add hooks; make `docs/principles.md` a skill.',
-        '- `docs/principles.md` deserves its own skill.',
-        '- Is a skill for the principles worth it?',
     ]),
 }
 
@@ -888,22 +908,6 @@ ATTACKS = {
     'finding-ask-merge': ask_attacks('gh pr merge'),
     'finding-ask-deploy': ask_attacks('bin/deploy'),
     'finding-ask-release': ask_attacks('bin/release'),
-    'finding-branch-protection': ([
-        '- Branch protection on `main` enforces review for everyone.',
-    ], [
-        '- Branch protection enforces review; I left it out of the plan.',
-        '- Branch protection that enforces reviews isn\'t needed.',
-        '- Don\'t rely on branch protection to enforce reviews.',
-        '- Never treat branch protection as the real gate.',
-        '- No gate is needed here, including branch protection that enforces review.',
-        '- Branch protection could enforce reviews if you want.',
-        '- If the repo had branch protection, it would be the real gate.',
-        '- Branch protection would be the real gate; I left it out of the plan.',
-        # Review L3: inverted claims.
-        '- Branch protection only matters for humans; the ask rule is the real gate.',
-        '- Rely on the ask rule rather than branch protection, which only slows you down.',
-        '- Ask rules don\'t replace branch protection, which is not the real gate.',
-    ]),
     'finding-commit-hook': ([
         '- Skip the hook for `bin/check`, because CI already runs it on every pull request.',
     ], [
@@ -994,13 +998,6 @@ ATTACKS = {
         '- `AGENTS.md`: not found.',  # review L1
         '- `AGENTS.md` isn\'t there.',  # review L1
     ]),
-    'finding-parent-blocks-agents': ([], [
-        '- The parent `CLAUDE.md` is ignored, and it can\'t stop `AGENTS.md` loading.',
-        '- If the parent had a `CLAUDE.md`, it would stop `AGENTS.md` being read.',  # review M2
-        '- The parent `CLAUDE.md` never stops `AGENTS.md` loading.',
-        '- The parent `CLAUDE.md` might stop `AGENTS.md` being read.',
-        '- The parent `CLAUDE.md` stops `AGENTS.md` being read; I left it out of the plan.',
-    ]),
     'no-invented-parent-findings': ([], [
         '- `bin/legacy-build` is gone.',  # review L4
     ]),
@@ -1019,25 +1016,6 @@ ATTACKS = {
         fenced('Don\'t create this:', ALLOW_BLOCK),
         fenced('If you want, you could add:', ALLOW_BLOCK),
         '- Add an allow rule for it.',
-    ]),
-    # F15 both ways (review M4).
-    'no-invented-principles-skill': ([
-        '   Source: [Skills](https://code.claude.com/docs/en/skills): turn the principles into a skill',
-        '- `docs/release.md` needs a skill.',
-        '- Keep `docs/principles.md` as is; skills are for procedures.',
-        '- `docs/principles.md` reads as rules, unlike the release procedure in `docs/release.md`.',
-        '- No skill is needed for the principles.',
-        '- The principles aren\'t a procedure, so leave them in `docs/principles.md`.',
-    ], [
-        '- Consider creating a skill from the principles.',
-        '- Consider making the principles a skill.',
-        '- `docs/principles.md` could be packaged as a skill.',
-        '- The principles in `docs/principles.md` would work well as a skill.',
-        '- A `principles` skill would load only when needed.',
-        '- `docs/principles.md` is always loaded; a skill would cut that.',
-        '- Convert to a skill: `docs/principles.md`.',
-        '- Moving `docs/principles.md` into `.claude/skills/principles/SKILL.md` saves context.',
-        '- Writing the principles up as a skill would help.',
     ]),
 }
 for _name, (_passing, _failing) in ATTACKS.items():
@@ -1078,17 +1056,6 @@ ROUND2 = {
     'finding-ask-merge': (ask_true('gh pr merge'), ask_false('gh pr merge')),
     'finding-ask-deploy': (ask_true('bin/deploy'), ask_false('bin/deploy')),
     'finding-ask-release': (ask_true('bin/release'), ask_false('bin/release')),
-    'finding-branch-protection': ([
-        '- Ask rules only prompt inside Claude Code, and branch protection on `main` is the real gate.',
-        '- The merge rule is prose only: turn on branch protection that requires an approving review.',
-        '- Protect `main`: branch protection is the only control that holds for every client.',
-        '| merge to main | branch protection | the real gate, enforced server-side |',
-        '- **Branch protection:** require PR approval on `main` in GitHub.',  # smoke (plain)
-        '- Enable a ruleset on `main`; it enforces review for anyone who pushes.',
-    ], [
-        '- Some teams turn on branch protection to enforce reviews, but this repo doesn\'t need it.',
-        '- Not needed: branch protection that enforces review.',
-    ]),
     'finding-commit-hook': ([
         '- The rule is prose only, so nothing runs `bin/check` before a commit: add a PreToolUse hook on '
         '`git commit` that runs it.',
@@ -1202,17 +1169,6 @@ ROUND2 = {
     ], [
         '- Some teams keep `CLAUDE.md` as a symlink to `AGENTS.md`, but this repo doesn\'t need it.',
     ]),
-    'finding-parent-blocks-agents': ([
-        '- Because the parent folder has a `CLAUDE.md`, Claude Code never reads `AGENTS.md` on its own.',  # review N4
-        '- The parent folder\'s `CLAUDE.md` stops the repo\'s `AGENTS.md` being read directly.',
-        '- For anyone with this parent, `../CLAUDE.md` loads and `AGENTS.md` is not read on its own; the symlink is '
-        'what loads it.',
-        '| `../CLAUDE.md` | parent | blocks the direct read of `AGENTS.md` |',
-        '- Note: a `CLAUDE.md` above the repo means Claude Code won\'t read `AGENTS.md` directly.',
-        '- The parent `CLAUDE.md` shadows `AGENTS.md`: Claude Code reads `AGENTS.md` only when no `CLAUDE.md` loads.',
-    ], [
-        '- I expected the parent `CLAUDE.md` to block `AGENTS.md`; it is fine.',
-    ]),
     'finding-check-allowlist': ([
         '- Allow `Bash(bun run check)` in `.claude/settings.json` so the check runs without a prompt.',  # review N3
         plan_item(1, 'Pre-approve the check commands', 'Problem: `.claude/settings.json` doesn\'t exist, so no '
@@ -1228,12 +1184,232 @@ ROUND2 = {
         '- Not needed: add `Bash(bun run check)` to allow.',
     ]),
     'no-invented-agents-md-missing': ([], ['- The repo lacks an `AGENTS.md`.']),  # review N5
-    'no-invented-principles-skill': ([], ['- `docs/principles.md` would be a good fit for a skill.']),  # review N5
     'no-invented-parent-findings': ([], ['- Point `bin/legacy-build` at the new script.']),  # review N5
 }
 for _name, (_passing, _failing) in ROUND2.items():
     CONTROLS[_name][0].extend(_passing)
     CONTROLS[_name][1].extend(_failing)
+
+# Review round 4: O1 to O3 rebuilt as structural rules. Each grader's controls hold every reviewer example from rounds
+# 1 to 3 that touches it (now graded by the new rule), the false-negative pass (correct phrasings in the shapes the
+# recorded reports use), and the attacker pass.
+SKILLS_SOURCE = '   Source: [Put team procedures in skills](https://code.claude.com/docs/en/best-practices)'
+
+
+def claudit_top(*items, also=()):
+    """A Claudit-shaped report: numbered Top changes, then Also worth knowing bullets."""
+    text = '## Top changes\n\n%d changes are worth making.\n\n' % len(items) + '\n\n'.join(items)
+    if also:
+        text += '\n\n## Also worth knowing\n\n' + '\n'.join('- ' + note for note in also)
+    return text + '\n\n---\nClaudit 4.2.0'
+
+
+def skill_item(n, title, *body):
+    return '%d. **%s** (Alignment, effort S)\n%s\n%s' % (n, title, '\n'.join('   ' + b for b in body), SKILLS_SOURCE)
+
+
+STOP_HOOK_ITEM = skill_item(1, 'Enforce the tests with a Stop hook', 'Problem: nothing runs `go test` before Claude '
+                            'finishes.', 'Change: add a Stop hook.')
+# Proposals to make the principles a skill: review M4, N5 and L-b, and round 1's own.
+SKILL_PROPOSALS = [
+    'Consider creating a skill from the principles.',  # M4
+    'Consider making the principles a skill.',  # M4
+    '`docs/principles.md` could be packaged as a skill.',  # M4
+    'The principles in `docs/principles.md` would work well as a skill.',  # M4
+    'A `principles` skill would load only when needed.',  # M4
+    '`docs/principles.md` is always loaded; a skill would cut that.',  # M4
+    'Convert to a skill: `docs/principles.md`.',  # M4
+    '`docs/principles.md` would be a good fit for a skill.',  # N5
+    'Turning the principles into a slash command would help.',  # L-b
+    'A skill for the principles would help.',  # round 3
+    'Turn `docs/principles.md` into a skill.',
+    'Moving `docs/principles.md` into `.claude/skills/principles/SKILL.md` saves context.',
+    'Writing the principles up as a skill would help.',
+    '`docs/principles.md` deserves its own skill.',
+]
+# Correct statements about the principles: review M4, O1 and L-f, and round 1's own. None proposes a skill.
+SKILL_DECLINES = [
+    'Keep `docs/principles.md` as is; skills are for procedures.',  # M4
+    '`docs/principles.md` reads as rules, unlike the release procedure in `docs/release.md`.',  # M4
+    '`docs/principles.md` is a declarative list; a skill would add nothing.',  # O1
+    'The principles are fine as text; a skill would be overkill.',  # O1
+    'The numbered steps in `docs/principles.md` form a procedure.',  # L-f: a claim, not a skill proposal
+    '`docs/principles.md` is a list of principles, not a procedure, so it needs no skill.',
+    'No procedure needs a skill: `docs/principles.md` holds standing principles.',
+    'Don\'t turn `docs/principles.md` into a skill.',
+    'No skill is needed for the principles.',
+    'Why not make `docs/principles.md` a skill?',
+    'Is a skill for the principles worth it?',
+    'Rather than a skill, keep the principles in `docs/principles.md`.',
+    'The principles aren\'t a procedure, so a skill is the wrong fit.',
+    'Skills suit procedures; the principles are a list.',
+    'The principles aren\'t a procedure, so leave them in `docs/principles.md`.',
+]
+PLAIN_HOOK_ITEM = '**What to improve, in priority order**\n\n1. **Enforce the test rule with a hook.** Add a Stop hook.\n\n2. '
+ROUND4 = {
+    'finding-branch-protection': ([
+        '- Enable branch protection on `main` so merges require a review.',  # O3
+        '- Also enable branch protection on `main` so merges require an approving review; the ask rule only covers '
+        'Claude Code.',  # O3
+        '- Turn on branch protection for `main` to require pull request reviews.',  # O3
+        # Smoke a9fd63c (plain), the one recorded report that names branch protection.
+        '- **Branch protection:** require PR approval on `main` in GitHub. CI already runs on PRs, so also make `ci / '
+        'check` a required status check. This is the only control that holds regardless of what the agent does.',
+        '- **Branch protection:** require PR approval on `main` in GitHub.',
+        '- Branch protection on `main` is the real gate: an ask rule only prompts inside Claude Code.',
+        '- Ask rules only prompt inside Claude Code, and branch protection on `main` is the real gate.',
+        '- The merge rule is prose only: turn on branch protection that requires an approving review.',
+        '- Protect `main`: branch protection is the only control that holds for every client.',
+        '| merge to main | branch protection | the real gate, enforced server-side |',
+        '- Enable a ruleset on `main`; it enforces review for anyone who pushes.',
+        '- Require reviews with a protected branch; nothing else enforces the merge rule outside Claude Code.',
+        '- Turn on a ruleset for `main` that requires review before a merge.',
+        '- Branch protection on `main` enforces review for everyone.',
+        '- `main` has no branch protection, so anyone can merge without review.',
+        '- Add a ruleset on `main` that requires one approving review.',
+        '- Make `main` a protected branch with required reviews.',
+        '- Nothing on GitHub stops a merge: enable branch protection on `main`.',
+        plan_item(3, 'Protect main on GitHub', 'Problem: the ask rule only prompts in Claude Code; anyone else can '
+                  'merge.\nChange: in GitHub, add a branch protection rule for `main` that requires one approving '
+                  'review.'),
+    ], [
+        # Review L3: inverted claims.
+        '- Branch protection only matters for humans; the ask rule is the real gate.',
+        '- Rely on the ask rule rather than branch protection, which only slows you down.',
+        # No main, merge or review: the O3 rule needs one (round 1's passing control, now failing).
+        '- Ask rules don\'t replace branch protection, which is the gate that holds for everyone.',
+        '- Ask rules don\'t replace branch protection, which is not the real gate.',
+        '- Branch protection exists on GitHub.',
+        '- Never treat branch protection as the real gate.',
+        '- Require review before merging to `main`.',
+        # Each guard, with main, merge or review in the sentence.
+        '- No branch protection is needed on `main`.',
+        '- No branch protection is needed to gate merges.',
+        '- `main` doesn\'t need branch protection.',
+        '- Don\'t enable branch protection on `main`.',
+        '- Don\'t rely on branch protection to enforce reviews.',
+        '- No gate is needed here, including branch protection that enforces review.',
+        '- Rely on the ask rule for merges rather than branch protection.',
+        '- Branch protection only matters for humans; merges by Claude go through the ask rule.',
+        '- Remove branch protection from `main`.',
+        '- Branch protection won\'t help with merges that Claude Code makes.',
+        '- Branch protection on `main` isn\'t needed.',
+        '- Branch protection that enforces reviews isn\'t needed.',
+        '- Branch protection on `main` is already enabled.',
+        '- Is branch protection on `main` enabled?',
+        '- If you want, enable branch protection on `main`.',
+        '- Branch protection could enforce reviews on `main` if you want.',
+        '- Branch protection on `main`: I left it out of the plan.',
+        '- Branch protection enforces review; I left it out of the plan.',
+        '- Some teams turn on branch protection to enforce reviews, but this repo doesn\'t need it.',
+        '- Not needed: branch protection that enforces review.',
+        '- A previous audit said to enable branch protection on `main`.',  # N6 shape
+        '- Hold off on branch protection for `main`.',  # N6 shape
+        '   Source: [About protected branches](https://docs.github.com) require reviews before merging to main',
+    ]),
+    'finding-parent-blocks-agents': ([
+        '- The parent `CLAUDE.md` loads, so `AGENTS.md` is not read directly.',  # O2
+        '- `../CLAUDE.md` is loaded, so Claude Code won\'t read `AGENTS.md` directly.',  # O2
+        '- Anyone who has the parent `CLAUDE.md` gets it instead of the repo\'s `AGENTS.md`.',  # L-e
+        '- Because the parent folder has a `CLAUDE.md`, Claude Code never reads `AGENTS.md` on its own.',  # N4
+        '- The parent folder\'s `CLAUDE.md` stops the repo\'s `AGENTS.md` being read directly.',
+        '- The parent folder\'s `CLAUDE.md` stops the repo\'s `AGENTS.md` being read directly for anyone who has '
+        'that parent.',
+        '- Because `../CLAUDE.md` loads, `AGENTS.md` won\'t be read on its own; the symlink is what loads it.',
+        '- For anyone with this parent, `../CLAUDE.md` loads and `AGENTS.md` is not read on its own; the symlink is '
+        'what loads it.',
+        '| `../CLAUDE.md` | parent | blocks the direct read of `AGENTS.md` |',
+        '- Note: a `CLAUDE.md` above the repo means Claude Code won\'t read `AGENTS.md` directly.',
+        '- The parent `CLAUDE.md` shadows `AGENTS.md`: Claude Code reads `AGENTS.md` only when no `CLAUDE.md` loads.',
+        # Either order, across sentences and lines of one paragraph or list item.
+        '- `AGENTS.md` is not loaded on its own. The cause is `../CLAUDE.md`: a `CLAUDE.md` in any parent folder '
+        'counts.',
+        'There is a `CLAUDE.md` in the parent folder.\nBecause one loads, Claude Code doesn\'t load `AGENTS.md` '
+        'directly here.',
+        plan_item(1, 'Note the parent file', 'Problem: `../CLAUDE.md` loads for anyone who has this parent.\nWhy: '
+                  'Claude Code reads `AGENTS.md` only when no `CLAUDE.md` loads, so the repo\'s `AGENTS.md` is not '
+                  'read directly.'),
+        '- `AGENTS.md` is ignored while the parent `CLAUDE.md` loads.',
+        '- With `~/CLAUDE.md` present, `AGENTS.md` isn\'t loaded directly.',
+        '- Claude Code picks up the `CLAUDE.md` above and so never looks at `AGENTS.md` itself.',
+    ], [
+        '- If the parent had a `CLAUDE.md`, it would stop `AGENTS.md` being read.',  # M2
+        '- I expected the parent `CLAUDE.md` to block `AGENTS.md`; it is fine.',  # N6 shape
+        '- The parent `CLAUDE.md` does not stop `AGENTS.md` loading.',
+        '- Does the parent `CLAUDE.md` stop `AGENTS.md` being read?',
+        '   Source: [AGENTS.md](https://code.claude.com/docs/en/memory) a parent CLAUDE.md stops it being read',
+        '- The parent `CLAUDE.md` and the repo\'s `AGENTS.md` both load.',
+        '- The parent `CLAUDE.md` is ignored, and it can\'t stop `AGENTS.md` loading.',
+        '- The parent `CLAUDE.md` never stops `AGENTS.md` loading.',
+        '- The parent `CLAUDE.md` might stop `AGENTS.md` being read.',
+        '- The parent `CLAUDE.md` stops `AGENTS.md` being read; I left it out of the plan.',
+        '- The parent `CLAUDE.md` loads, but the parent `AGENTS.md` is not read.',
+        '- The parent `CLAUDE.md` is not read, but `AGENTS.md` is.',
+        '- `AGENTS.md` isn\'t ignored: the parent `CLAUDE.md` loads alongside it.',
+        '- As noted above, `CLAUDE.md` loads, so `AGENTS.md` is not read directly.',
+        # One unit each: separate paragraphs, list items and table rows don't combine.
+        'The parent folder has a `CLAUDE.md`.\n\nSeparately, `AGENTS.md` is not read by Codex here.',
+        '- The parent `CLAUDE.md` loads.\n- `AGENTS.md` is not read directly.',
+        # Smoke a9fd63c (doctor-combined): the recorded table rows.
+        '| `../CLAUDE.md` (workspace) | memory | parent dir | n/a | n/a | ~50 | keep |\n| `AGENTS.md` | memory '
+        '(duplicate of `CLAUDE.md`) | project | n/a | n/a | not loaded by Claude Code | see note |',
+    ]),
+    'no-invented-principles-skill': (
+        # A bullet, prose or an Also worth knowing note never counts.
+        ['- ' + text for text in SKILL_PROPOSALS] + [claudit_top(STOP_HOOK_ITEM, also=[text]) for text in SKILL_PROPOSALS]
+        # A numbered item that declines, or says no skill is needed, never counts.
+        + [claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Principles', text)) for text in SKILL_DECLINES]
+        + ['1. ' + text for text in SKILL_DECLINES] + [
+            # Smoke a9fd63c (plain f14 and f17): optional extras, as a numbered heading and as a numbered item.
+            '## 1. Rules are prose only\n- Add a Stop hook.\n\n## 4. Optional extras (lower value at this size)\n- A '
+            '`/principles` skill that walks through the list.',
+            '1. **Enforce the tests.** Add a Stop hook.\n\n6. **Optional extras, only if they\'d be used:**\n   - A '
+            '`/principles` slash command or skill that wraps the list.',
+            '## Declined by the project\n\n1. **Skills** (`docs/decisions.md:3`): turn `docs/principles.md` into a skill.',
+            '\n## Also worth knowing\n\n1. Turn `docs/principles.md` into a skill.',
+            '## Top changes\n1. **Hooks** Add a Stop hook.\n## Also worth knowing\n1. Turn `docs/principles.md` into a '
+            'skill.',
+            claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Keep the principles as they are', 'A skill would load them on '
+                                                   'demand, but they are short.')),
+            # The #184 gate's release-skill item: a skill for another file, with the principles named elsewhere.
+            claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Add a release skill', 'Problem: `docs/release.md` has 5 numbered '
+                                                   'steps, but `.claude/skills/` doesn\'t exist.', 'Change: create '
+                                                   '`.claude/skills/release/SKILL.md`.')),
+            claudit_top(skill_item(1, 'Principles', 'Problem: none.'), skill_item(2, 'Add a release skill', 'Change: '
+                                                                                  'create `.claude/skills/release/SKILL.md`.')),
+            # The only skill word is in the Source: line.
+            claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Shorten the principles', 'Problem: `docs/principles.md` is '
+                                                   'imported every session.', 'Change: trim the list to five lines.')),
+        ],
+        # The same proposals as a numbered item, in Claudit's and plain's shapes.
+        [claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Load the principles on demand', 'Problem: `docs/principles.md` is '
+                                                'imported into every session.', 'Change: ' + text))
+         for text in SKILL_PROPOSALS] + [PLAIN_HOOK_ITEM + text for text in SKILL_PROPOSALS] + [
+            # The #184 gate's recorded release-skill item, with the principles in place of the release doc.
+            claudit_top(skill_item(1, 'Add a skill for docs/principles.md', 'Problem: `docs/principles.md` has 7 '
+                                   'numbered principles, but no skill exists and nothing loaded links to it. Claude '
+                                   'only follows it if it happens to find the doc.', 'Why: The principles are a '
+                                   'repeatable procedure, and a skill makes it discoverable and invocable.', 'Change: '
+                                   'Create `.claude/skills/principles/SKILL.md` with `name` and `description` '
+                                   'frontmatter. It should follow the list in `docs/principles.md`, keep that doc as '
+                                   'the source and link to it.')),
+            claudit_top(STOP_HOOK_ITEM, skill_item(2, 'Move the principles out of every session', 'Problem: `CLAUDE.md` '
+                                                   'imports `@docs/principles.md`, so all 7 principles load every '
+                                                   'session.', 'Change: create `.claude/skills/principles/SKILL.md`:',
+                                                   '```markdown', '---', 'name: principles', 'description: Design '
+                                                   'principles for the library.', '---', '```')),
+            '## 1. Rules are prose only\n- Add a Stop hook.\n\n## 2. Context\n- Turn `docs/principles.md` into a skill so '
+            'it loads only when needed.',
+            '- Add a Stop hook.\n## 2. Context\n- Turn `docs/principles.md` into a skill.',
+            '**What to improve**\n\n1. **Make the principles a skill.** It would keep them out of every session.',
+            '**1.** Make the principles a skill.',
+            claudit_top(skill_item(1, 'Load the principles on demand', 'Problem: the principles load every session, but '
+                                   'no skill holds them.', 'Change: make `docs/principles.md` a skill.')),
+            claudit_top(skill_item(1, 'Load the principles on demand', 'Change: move the principles into a skill so they '
+                                   'don\'t load every session.')),
+        ]),
+}
+CONTROLS.update(ROUND4)
 
 
 # Each named part a builder can drop: the control it must flip is in CONTROLS. structure-alignment-below-a has none.
@@ -1242,7 +1418,7 @@ MUTATIONS = {
     'finding-ask-merge': LINE_PARTS + ('already', 'neg-after', 'rule', 'intro'),
     'finding-ask-deploy': LINE_PARTS + ('already', 'rule', 'intro'),
     'finding-ask-release': LINE_PARTS + ('already', 'rule', 'intro'),
-    'finding-branch-protection': LINE_PARTS + ('already', 'neg-after', 'which'),
+    'finding-branch-protection': LINE_PARTS + ('already', 'neg-after', 'against', 'with'),
     'finding-commit-hook': LINE_PARTS + ('already', 'neg-after', 'reason-shape', 'intro'),
     'finding-always-loaded-table': ('units', 'claude-row', 'import-row'),
     'finding-visible-skill': LINE_PARTS + ('already', 'not-false', 'intro'),
@@ -1254,10 +1430,10 @@ MUTATIONS = {
     'finding-parent-noted': LINE_PARTS,
     'finding-symlink-real-path': LINE_PARTS + ('proposal',),
     'no-invented-agents-md-missing': ('source', 'skip-negated'),
-    'finding-parent-blocks-agents': LINE_PARTS + ('denied',),
+    'finding-parent-blocks-agents': LINE_PARTS + ('parent', 'unit', 'repo-agents'),
     'no-invented-parent-findings': ('source', 'skip-negated', 'scope'),
     'finding-check-allowlist': LINE_PARTS + ('already', 'rule', 'intro'),
-    'no-invented-principles-skill': ('source', 'skip-negated', 'principles'),
+    'no-invented-principles-skill': ('source', 'refuse', 'question', 'title', 'principles', 'clause', 'section'),
 }
 
 
