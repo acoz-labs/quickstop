@@ -463,3 +463,83 @@ Every candidate's $0 checks are retained with its screen in `~/factory/retained/
 - the fixture-wording grep over 265 names, people and identifiers (empty)
 
 Spend on screens is $2.6890. The cumulative total after them is $19.8849.
+
+## 1.0 gate (#189)
+
+**1.0 passes every gate bar.** The opening cold-read is 70 of 135, against a bar of 57 (1.5 × Concise's 38) and 0.3.1's 44. Opening stakes went from 1 to 12 of 45, and the #172 regression suite passes.
+
+**Candidate.** Plugin tree `44b0451b0801b28d4b1a2e432bf571a05d8e86d7` at head `0087258203a7f71525aada886e8ee16465b47a48` (tree `526308bf…`, clean), version 1.0.0, bytes digest `29a82bc2…3b1e`. It was screened on de92b47f; gated tree differs only by the retry->cache example word and one writing-audit sentence.
+- Screened tree: `de92b47f9eda9a811e20d61dc02bba101aeb83c5`.
+- Gated tree: `44b0451b0801b28d4b1a2e432bf571a05d8e86d7`.
+- The requester accepted B's screen for the gated tree, so it wasn't re-screened.
+
+**Settings.** The frozen suite (`c8a8bf86`, runner `f03bee3a`) with the gate calibration (`calibration-gate`, 36 of 36) and the re-baseline's settings:
+- Sonnet 5.5 for the task and the judges, Claude Code 2.1.317
+- 5 runs × 9 cases in the 1.0 arm, with `--max-cost-usd 5.5`
+
+**Result.** All 45 runs are valid, and the preflight passed with `(current)` at $0. Every init record shows `writing-for-humans:writing-for-humans`, `claude-sonnet-5-5` and the plugin at 1.0.0 from the retained copy.
+- The guard has no problems, and the config sidecar was unchanged before and after.
+- `summarize` reports a single problem, "subset run", because the gate runs one arm by design. The other arms are the re-baseline above.
+
+Result dir: `~/factory/retained/quickstop-189/candidate-B2-44b0451b/gate/`. The $0 checks for this tree are in `checks.md` next to it:
+- 569 tokens
+- the 12-item checklist
+- an empty must-not grep
+- an empty fixture grep over 265 names, people and identifiers
+- "cache" in 0 suite files
+
+### Gate table
+
+| Bar | default | concise | 0.3.1 | 1.0 (`44b0451b`) | Bar value | 1.0 |
+|---|---|---|---|---|---|---|
+| Opening cold-read ≥ 1.5 × Concise (/135) | 28 | 38 | 44 | 70 | ≥ 57 | **pass** |
+| Opening stakes above 0 (/45) | 0 | 0 | 1 | 12 | ≥ 1 | **pass** |
+| Whole cold-read no lower than 0.3.1 (/135) | 126 | 123 | 123 | 125 | ≥ 123 | **pass** |
+| Identifier-led sentences no more than 0.3.1 | 55 | 46 | 43 | 7 | ≤ 43 | **pass** |
+| Repetition on cases 8 and 9 no worse than 0.3.1 | 1 | 1 | 0 | 0 | ≤ 0 | **pass** |
+| Pedantry on cases 8 and 9 no worse than 0.3.1 (/10) | 10 | 9 | 9 | 10 | ≥ 9 | **pass** |
+| Median words ≤ Concise × 1.1 | 383 | 307 | 323 | 309 | ≤ 337.7 | **pass** |
+| Mean task cost per run ≤ 0.3.1 (USD) | 0.0517 | 0.0488 | 0.0752 | 0.0621 | ≤ 0.0752 | **pass** |
+| #172 regression suite | — | — | — | Suite: PASS | passes | **pass** |
+| Style active in every 1.0 run | — | — | — | preflight `(current)` $0; 45/45 init valid | every run | **pass** |
+
+The #172 suite ran on the same tree with `--max-cost-usd 0.5` and cost $0.2007. Host checks passed, both cases passed (`audit-not-automatic`, `audit-typed`), and the plugin loaded at 1.0.0 (`candidate-B2-44b0451b/regression-172/`).
+
+### 1.0 details
+
+| | 1.0 |
+|---|---|
+| Opening: claim / ask / stakes (/45 each) | 26 / 32 / 12 |
+| Whole: claim / ask / stakes (/45 each) | 45 / 42 / 38 |
+| Pedantry passes (/45) | 45 |
+| Repeated content (runs with any) | 1 (1), in case 4 run 3 |
+| Case 4 question in first 3 sentences (/5) | 1 |
+| Cases 8 and 9 median words | 1,228.5 |
+| Task cost, all 45 runs / judge cost (USD) | 2.7967 / 1.8897 |
+| Mean task time per run (s) | 19.7 |
+| Skill calls (all tool calls) | 20 (241) |
+
+| Case | Opening hits, runs 1–5 | Whole hits | Pedantry | Median words |
+|---|---|---|---|---|
+| 1-worker-report | 3,1,2,1,2 | 3,3,3,3,3 | 5/5 | 396 |
+| 2-design-note | 2,2,1,1,0 | 3,3,2,3,3 | 5/5 | 324 |
+| 3-pr-description | 2,3,3,2,2 | 3,3,3,3,3 | 5/5 | 328 |
+| 4-decision-question | 2,2,3,2,2 | 3,3,3,3,3 | 5/5 | 297 |
+| 5-status-update | 0,0,1,2,1 | 3,3,3,3,3 | 5/5 | 251 |
+| 6-factual-answer | 2,3,2,2,2 | 2,2,3,2,3 | 5/5 | 103 |
+| 7-subagent-handoff | 2,2,2,2,3 | 2,2,1,2,2 | 5/5 | 160 |
+| 8-incident-report | 3,1,0,1,0 | 3,3,3,3,3 | 5/5 | 1241 |
+| 9-design-doc | 0,1,0,0,0 | 3,3,3,3,3 | 5/5 | 1216 |
+
+The long design doc (case 9) still rarely opens with its point. The gain over 0.3.1 comes mostly from the short and medium cases, and from stakes.
+
+### Spend for #189
+
+| Part | USD |
+|---|---|
+| Part A (development, smoke, calibration, re-baseline) | 17.1948 |
+| `disallowed-tools` probe (2 Haiku calls) | 0.0011 |
+| 3 candidate screens | 2.6890 |
+| Gate (45 runs) | 4.6864 |
+| #172 regression suite | 0.2007 |
+| **Cumulative** | **24.7768** of the $30 cap |
