@@ -17,7 +17,8 @@ q = importlib.util.module_from_spec(spec)
 loader.exec_module(q)
 
 CASES = q.load_cases()
-HEAD_IDS = dict(q.frozen_ids(), clean=True)
+HEAD_IDS = dict(q.frozen_ids(), clean=True, stray_files=[])
+JUDGE = 'claude-sonnet-5-5'
 
 
 def passing_calibration(ids=HEAD_IDS, cases=CASES):
@@ -26,7 +27,8 @@ def passing_calibration(ids=HEAD_IDS, cases=CASES):
         for sample in q.SAMPLES:
             graders = ['cold-read-opening', 'cold-read-whole'] + ([] if sample == 'borderline-fail' else ['pedantry'])
             rows += [{'case': name, 'sample': sample, 'grader': grader, 'ok': True, 'detail': ''} for grader in graders]
-    return {'judges': True, 'judge_model': 'claude-sonnet-5-5', 'candidate': dict(ids), 'rows': rows}
+    return {'judges': True, 'judge_model': JUDGE, 'claude_version': '2.1.317 (Claude Code)', 'candidate': dict(ids),
+            'rows': rows}
 
 
 class Sentences(unittest.TestCase):
@@ -371,19 +373,34 @@ class Guard(unittest.TestCase):
 
 class Calibration(unittest.TestCase):
     def test_a_passing_matching_calibration_clears(self):
-        self.assertEqual(q.calibration_problems(passing_calibration(), CASES, HEAD_IDS), [])
+        self.assertEqual(q.calibration_problems(passing_calibration(), CASES, HEAD_IDS, JUDGE), [])
 
     def test_each_gap_is_named(self):
         calibration = passing_calibration(cases={k: v for k, v in CASES.items() if k != '9-design-doc'})
         calibration['candidate']['runner_blob'] = 'f' * 40
         calibration['rows'][0]['ok'] = False
-        problems = q.calibration_problems(calibration, CASES, HEAD_IDS)
+        problems = q.calibration_problems(calibration, CASES, HEAD_IDS, JUDGE)
         self.assertIn(f"calibration runner_blob {'f' * 40} differs from {HEAD_IDS['runner_blob']}", problems)
         self.assertIn('calibration did not grade 9-design-doc good with cold-read-opening, cold-read-whole, pedantry',
                       problems)
         self.assertIn('calibration failed: 1-worker-report good cold-read-opening', problems)
-        self.assertEqual(q.calibration_problems(None, CASES, HEAD_IDS),
+        self.assertEqual(q.calibration_problems(None, CASES, HEAD_IDS, JUDGE),
                          ['no calibration: a counted run needs a passing `calibrate --judges` on the same tree'])
+
+    def test_another_judge_model_does_not_clear(self):
+        self.assertEqual(q.calibration_problems(passing_calibration(), CASES, HEAD_IDS, 'claude-haiku-5-5'),
+                         ["calibration judge model 'claude-sonnet-5-5' differs from 'claude-haiku-5-5'"])
+
+    def test_ignored_files_in_a_fixture_make_the_tree_unclean(self):
+        stray = CASES['6-factual-answer']['dir'] / 'fixture' / '.DS_Store'
+        self.assertFalse(stray.exists())
+        try:
+            stray.write_text('x')
+            ids = q.frozen_ids()
+        finally:
+            stray.unlink()
+        self.assertIn('evals/writing-for-humans-quality/cases/6-factual-answer/fixture/.DS_Store', ids['stray_files'])
+        self.assertFalse(ids['clean'])
 
     def test_counted_runs_are_the_whole_suite_or_five_runs(self):
         self.assertTrue(q.counted(False, 1))
@@ -393,7 +410,7 @@ class Calibration(unittest.TestCase):
     def run_args(self, temp, **kwargs):
         import argparse
         defaults = dict(case=None, arm=None, runs=5, calibration=None, output_dir=str(Path(temp) / 'out'),
-                        plugin=None, model='m', judge_model='j', max_cost_usd=1.0, task_max_usd=0.3,
+                        plugin=None, model='m', judge_model=JUDGE, max_cost_usd=1.0, task_max_usd=0.3,
                         judge_max_usd=0.05, jobs=1, no_judges=False, ledger=None)
         return argparse.Namespace(**dict(defaults, **kwargs))
 
@@ -438,6 +455,7 @@ class Summary(unittest.TestCase):
         cases = CASES
         (out / 'candidate.json').write_text(json.dumps(HEAD_IDS))
         (out / 'calibration.json').write_text(json.dumps(passing_calibration()))
+        (out / 'settings.json').write_text(json.dumps({'judge_model': JUDGE, 'claude_version': '2.1.317 (Claude Code)'}))
         (out / 'suite.json').write_text(json.dumps(q.expected_suite(cases, list(arms), runs, filtered)))
         (out / 'preflight.json').write_text(json.dumps([{'arm': arm, 'passed': True} for arm in arms]))
         (out / 'guard.json').write_text(json.dumps({'problems': list(guard)}))
@@ -550,6 +568,30 @@ class Summary(unittest.TestCase):
             (out / 'candidate.json').unlink()
             self.assertIn('no candidate.json: the suite tree and runner blob were not recorded',
                           q.summarize(out, write=False)['problems'])
+
+    def test_a_haiku_calibration_does_not_clear_a_sonnet_result(self):
+        summary = self.edited('calibration.json', lambda d: d.update(judge_model='claude-haiku-5-5'))
+        self.assertIn("calibration judge model 'claude-haiku-5-5' differs from 'claude-sonnet-5-5'", summary['problems'])
+        self.assertFalse(summary['baseline'])
+
+    def test_another_claude_code_version_is_a_note_not_a_problem(self):
+        summary = self.edited('settings.json', lambda d: d.update(claude_version='2.2.0 (Claude Code)'))
+        self.assertTrue(summary['baseline'])
+        self.assertEqual(summary['notes'],
+                         ['Claude Code 2.2.0 (Claude Code) ran this result; the calibration ran on 2.1.317 (Claude Code)'])
+        self.assertIn('Note: Claude Code 2.2.0', q.markdown(summary))
+        self.assertEqual(self.summary(runs=5)['notes'], [])
+
+    def test_regrading_with_another_judge_model_is_refused(self):
+        import argparse
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            self.write_result(out)
+            args = argparse.Namespace(result_dir=str(out), judges=True, judge_model='claude-haiku-5-5',
+                                      max_cost_usd=1.0, judge_max_usd=0.05, ledger=None)
+            with mock.patch.object(q, 'call_claude') as call, self.assertRaisesRegex(q.Failure, 'same --judge-model'):
+                q.grade(args)
+            call.assert_not_called()
 
     def test_a_counted_result_needs_its_matching_calibration(self):
         def failed_row(d):

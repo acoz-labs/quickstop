@@ -151,11 +151,19 @@ The borderline samples were written from each case's prompt and key, not from an
 reply. They test the comparator where real replies fall, between the extremes. Script
 graders cost nothing; `--judges` adds the model judges (about $1.10 for all 36
 samples). The unit tests run the script half on every `bin/ci`.
-`calibrate --output-dir` records the suite tree, runner blob and whether the working
-tree was clean. A counted run (the whole suite, or 5 runs) refuses to start unless the
-working tree is clean and `--calibration <dir>` points to a calibration that ran the
-judges on a clean tree with the same suite tree and runner blob, graded every sample of
-every case, and got every row as expected. The run copies it into the result dir.
+`calibrate --output-dir` records the suite tree, runner blob, whether the working tree
+was clean, the judge model and the Claude Code version. A counted run (the whole suite,
+or 5 runs) refuses to start unless the working tree is clean and `--calibration <dir>`
+points to a calibration that ran the same judge model on a clean tree with the same
+suite tree and runner blob, graded every sample of every case, and got every row as
+expected. The run copies it into the result dir. The Claude Code version is recorded,
+not matched: a result that ran on a different version from its calibration says so in a
+`Note:` line of its summary.
+
+`git status` doesn't show ignored files such as `.DS_Store` or `*.pyc`, but a fixture
+copies everything in its directory into the task's workspace. So any untracked file
+under `cases/` or `judges/`, ignored or not, also makes the tree unclean, and a counted
+run refuses to start until it is removed.
 
 ## Pass rule and summary
 
@@ -192,7 +200,7 @@ bin/writing-for-humans-quality-eval grade <result dir> --judges --max-cost-usd 3
 
 A result dir (default `evals/writing-for-humans-quality/results/<UTC timestamp>/`,
 git-ignored) holds `CANDIDATE.txt` (head, tree, plugin tree and digest, suite tree,
-runner blob), `candidate.json` (suite tree, runner blob, clean), `calibration.json`
+runner blob), `candidate.json` (suite tree, runner blob, clean, stray files), `calibration.json`
 (counted runs), `suite.json`, `settings.json` (model, Claude Code version, flags,
 environment), `preflight.json`, `guard.json`, the retained `plugin/`, and per run
 `runs/<arm>/<case>/run-<n>/` with `transcript.jsonl`, `init.json`, `output.md`,

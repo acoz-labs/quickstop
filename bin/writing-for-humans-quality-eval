@@ -493,9 +493,13 @@ def config_changes(before, after):
 
 
 def frozen_ids():
-    """What a result is tied to: the suite tree and runner blob at HEAD, and whether the working tree is clean."""
+    """What a result is tied to: the suite tree and runner blob at HEAD, and whether the working tree is clean.
+
+    `git status` doesn't show ignored files (.DS_Store, *.pyc), but a fixture copies them into the task's
+    workspace, so any untracked file under the cases or judges, ignored or not, also makes the tree unclean."""
+    stray = (git('ls-files', '--others', '--', f'{SUITE_PATH}/cases', f'{SUITE_PATH}/judges') or '').splitlines()
     return {'suite_tree': git('rev-parse', f'HEAD:{SUITE_PATH}'), 'runner_blob': git('rev-parse', f'HEAD:{RUNNER_PATH}'),
-            'clean': not git('status', '--porcelain')}
+            'clean': not git('status', '--porcelain') and not stray, 'stray_files': stray}
 
 
 def candidate(plugin_source, ids):
@@ -516,14 +520,16 @@ def counted(filtered, runs):
     return not filtered or runs >= BASELINE_RUNS
 
 
-def calibration_problems(calibration, cases, ids):
+def calibration_problems(calibration, cases, ids, judge_model):
     """Why a calibration doesn't clear a counted run on this suite, or [] when it does.
 
-    It must have run the judges on a clean tree with the same suite tree and runner blob, and graded every
-    sample of every case as expected."""
+    It must have run the run's judge model on a clean tree with the same suite tree and runner blob, and
+    graded every sample of every case as expected. The Claude Code version is recorded, not matched."""
     if calibration is None:
         return ['no calibration: a counted run needs a passing `calibrate --judges` on the same tree']
     problems = [] if calibration.get('judges') else ['calibration ran without the judges']
+    if calibration.get('judge_model') != judge_model:
+        problems.append(f"calibration judge model {calibration.get('judge_model')!r} differs from {judge_model!r}")
     recorded = calibration.get('candidate') or {}
     if not recorded.get('clean'):
         problems.append('calibration ran on a dirty working tree')
@@ -613,11 +619,12 @@ def run(args):
     calibration = None
     if counted(filtered, args.runs):
         if not ids['clean']:
-            raise Failure('a counted run needs a clean working tree')
+            raise Failure('a counted run needs a clean working tree' +
+                          (f"; untracked files in the suite: {', '.join(ids['stray_files'])}" if ids['stray_files'] else ''))
         if not args.calibration:
             raise Failure('a counted run needs --calibration: the output dir of a passing `calibrate --judges`')
         calibration = read_json(Path(args.calibration) / 'calibration.json')
-        problems = calibration_problems(calibration, all_cases, ids)
+        problems = calibration_problems(calibration, all_cases, ids, args.judge_model)
         if problems:
             raise Failure('the calibration does not clear this run: ' + '; '.join(problems))
     out = Path(args.output_dir).resolve() if args.output_dir else SUITE / 'results' / \
@@ -804,9 +811,10 @@ def summarize(out, write=True):
     cases = load_cases()
     problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'),
                               cases)
-    problems += provenance_problems(out, expected, cases)
+    settings = read_json(out / 'settings.json', {})
+    problems += provenance_problems(out, expected, cases, settings.get('judge_model'))
     summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == BASELINE_RUNS,
-               'problems': problems, 'settings': read_json(out / 'settings.json', {}),
+               'problems': problems, 'notes': version_notes(out, settings), 'settings': settings,
                'arms': {arm: arm_metrics([r for r in records if r['arm'] == arm], cases) for arm in expected['arms']},
                'cases': {arm: {name: case_metrics([r for r in records if r['arm'] == arm and r['case'] == name])
                                for name in expected['cases']} for arm in expected['arms']},
@@ -817,7 +825,16 @@ def summarize(out, write=True):
     return summary
 
 
-def provenance_problems(out, expected, cases):
+def version_notes(out, settings):
+    """A counted result whose Claude Code version differs from its calibration's says so; it isn't a problem."""
+    calibration = read_json(Path(out) / 'calibration.json') or {}
+    ran, calibrated = settings.get('claude_version'), calibration.get('claude_version')
+    if calibration and ran != calibrated:
+        return [f'Claude Code {ran} ran this result; the calibration ran on {calibrated}']
+    return []
+
+
+def provenance_problems(out, expected, cases, judge_model):
     """A result must come from the suite and runner at HEAD, and a counted one from a matching calibration."""
     recorded = read_json(Path(out) / 'candidate.json')
     if recorded is None:
@@ -826,7 +843,7 @@ def provenance_problems(out, expected, cases):
     problems = [f'result {key} {recorded.get(key)} differs from HEAD {head[key]}'
                 for key in ('suite_tree', 'runner_blob') if recorded.get(key) != head[key]]
     if counted(expected.get('filtered'), expected['runs']):
-        problems += calibration_problems(read_json(Path(out) / 'calibration.json'), cases, recorded)
+        problems += calibration_problems(read_json(Path(out) / 'calibration.json'), cases, recorded, judge_model)
     return problems
 
 
@@ -851,7 +868,8 @@ def case_metrics(records):
 def markdown(summary):
     lines = [f"Complete: {summary['complete']} | baseline: {summary['baseline']} | "
              f"total cost ${summary['total_cost_usd']:.4f}",
-             *[f'Problem: {problem}' for problem in summary['problems']], '',
+             *[f'Problem: {problem}' for problem in summary['problems']],
+             *[f'Note: {note}' for note in summary.get('notes', [])], '',
              '| Arm | Style | Valid runs | Opening hits | Whole hits | Pedantry passes | Repeats (runs) '
              '| Identifier subjects | Case 4 question | Median words | Skill calls (all tools) | Task $/run | Task s/run | Judge $ |',
              '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|']
@@ -868,6 +886,9 @@ def grade(args):
     """Regrade recorded outputs with the script graders ($0); --judges reruns the judges (paid)."""
     out = Path(args.result_dir)
     cases = load_cases()
+    recorded = read_json(out / 'settings.json', {}).get('judge_model')
+    if args.judges and recorded and recorded != args.judge_model:
+        raise Failure(f'this result was judged by {recorded}; regrade it with the same --judge-model')
     budget = Budget(args.max_cost_usd) if args.judges else None
     for path in sorted(out.glob('runs/*/*/run-*/record.json')):
         record = json.loads(path.read_text())
@@ -928,7 +949,7 @@ def calibration_expectations(sample, case, grades):
 
 
 def calibrate(args):
-    ids = frozen_ids()
+    ids, version = frozen_ids(), claude_version()
     cases = load_cases()
     names = args.case or list(cases)
     out = Path(args.output_dir).resolve() if args.output_dir else None
@@ -960,7 +981,8 @@ def calibrate(args):
     if out:
         out.mkdir(parents=True, exist_ok=True)
         (out / 'calibration.json').write_text(json.dumps(
-            {'judges': bool(args.judge_model and args.judges), 'judge_model': args.judge_model, 'candidate': ids,
+            {'judges': bool(args.judge_model and args.judges), 'judge_model': args.judge_model, 'claude_version': version,
+             'candidate': ids,
              'cost_usd': round(budget.spent, 4) if budget else 0, 'rows': rows}, indent=2) + '\n')
     print('| Case | Sample | Grader | As expected | Detail |\n|---|---|---|---|---|')
     for row in rows:
