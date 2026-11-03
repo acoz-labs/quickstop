@@ -30,7 +30,7 @@
     },
     {
       "name": "writing-for-humans",
-      "description": "The original Writing for Humans kit, packaged as a selectable Claude Code output style and two skills.",
+      "description": "An output style that makes what Claude writes easy to take in at reading speed: the point, the ask and the stakes first, for a reader who wasn't in the session.",
       "category": "Productivity",
       "targets": {
         "claude-code": {

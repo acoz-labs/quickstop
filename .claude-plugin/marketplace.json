@@ -26,14 +26,21 @@
     },
     {
       "name": "writing-for-humans",
-      "version": "0.3.1",
-      "description": "The original Writing for Humans kit, packaged as a selectable Claude Code output style and two skills.",
+      "version": "1.0.0",
+      "description": "An output style that makes what Claude writes easy to take in at reading speed: the point, the ask and the stakes first, for a reader who wasn't in the session.",
       "source": {
         "source": "git-subdir",
         "url": "https://github.com/acoz-labs/quickstop.git",
         "path": "plugins/claude-code/writing-for-humans",
-        "sha": "9754a2fa8cb67ee509bc61faac78df6ef17410cd"
-      }
+        "sha": "5581a159e10d523c68a514fec0237c46a44ac988"
+      },
+      "keywords": [
+        "writing",
+        "output-style",
+        "readability",
+        "communication",
+        "documentation"
+      ]
     }
   ]
 }
