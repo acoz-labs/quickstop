@@ -38,8 +38,9 @@ User settings, MCP servers and session files are left out. The environment sets
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and `DISABLE_AUTOUPDATER=1`; the second also stops
 the background marketplace refresh, which would otherwise rewrite
 `~/.claude/plugins/known_marketplaces.json` during a run. The runner hashes
-`~/.claude/settings.json` and `~/.claude/plugins/{installed_plugins,known_marketplaces}.json`
-before and after, and a change makes the result incomplete.
+`~/.claude/settings.json` and every `~/.claude/plugins/*.json`, found by glob when the
+run starts and ends, and records the file list in `guard.json`. A file that changes,
+appears or disappears makes the result incomplete.
 
 ### Proof of the active style
 
@@ -55,15 +56,24 @@ things:
    copy (writing-for-humans arm), or not list it at all (other arms), and load no MCP
    server. A run that fails this is invalid and doesn't count.
 
+Together these prove that the setting resolved to a loaded style and that each run
+started with it. They don't show the style's prompt reaching the model; no check
+without a model call can show that. The replies are the indirect evidence.
+
 `bin/writing-for-humans-quality-eval preflight` runs just the preflight.
+
+The arms also differ in the plugin: only the writing-for-humans arm has its
+`writing-style` skill to call. The summary counts `Skill` calls per arm from the
+transcripts, so the baseline can say whether the skill played any part.
 
 ## Cases
 
 Each case directory holds `prompt.md` (the request), `fixture/` (the workspace),
-`key.json` (the answer key) and `calibration/good.md` and `bad.md`. Fixtures are
-invented. The key gives the reply's correct **claim** (what's true or done), **ask**
-(what the reader must decide or do, or `none`) and **stakes** (what changes depending
-on the answer).
+`key.json` (the answer key) and four calibration samples. Fixtures are invented. The
+key gives the reply's correct **claim** (what's true or done), **ask** (what the
+reader must decide or do, or `none`) and **stakes** (what changes depending on the
+answer). Each item has a `point`, which a reply must get across, and optional
+`detail`, which it needn't.
 
 1. `1-worker-report`: summarise an investigation from logs, notes and a config.
 2. `2-design-note`: a decision record from a meeting transcript.
@@ -72,14 +82,18 @@ on the answer).
 5. `5-status-update`: resume a work session from its log.
 6. `6-factual-answer`: a short answer about a small repository.
 7. `7-subagent-handoff`: relay a subagent's raw, identifier-heavy return to the user.
-   The subagent's return is a fixture, so every arm relays the same text.
+   The subagent's return is a fixture, so every arm relays the same text. The user's
+   licence requirement leaves one library, so the ask is whether to accept its
+   maintenance risk, not a choice between libraries.
 
 ## Graders
 
 What counts as a sentence: fenced code and table rows are left out as structured data.
 Each heading, list item and paragraph starts a new unit, and paragraphs split into
 sentences at `.`, `?` or `!` followed by a capital, digit or code span (common
-abbreviations such as "e.g." don't split). Headings are not sentences.
+abbreviations such as "e.g." don't split). Headings are not sentences, and neither is
+a line that is wholly bold with no sentence ending (`**What changes**`, `**Why:**`),
+which works as a heading. A bold sentence such as `**Ship it.**` stays a sentence.
 
 Model judges (`judges/*.md`; Sonnet, `--system-prompt` replacing Claude Code's, no
 tools, JSON schema output):
@@ -90,7 +104,9 @@ tools, JSON schema output):
   the claim, ask and stakes. It never sees the key.
 - **Cold read, whole.** Another reader does the same with the whole reply.
 - A comparator gets the key and both sets of notes, never the reply, and gives
-  PASS or FAIL per item. It grades substance, not which label the reader used.
+  PASS or FAIL per item. The notes must carry each item's point; its detail is never
+  required. It grades substance, not which label the reader used, and grades against
+  the key, so notes saying "none" fail an item whose key has a point.
 - **Pedantry.** Given the request and the reply, FAIL when the reply explains what a
   competent colleague already knows or pads with process narration and filler.
 
@@ -101,26 +117,40 @@ Script graders (no model):
   repeat still counts. Reported as a count.
 - **Words:** words outside fenced code. Reported, not pass/fail.
 - **Identifier subject:** sentences whose first token is a code span, `file:line`, a
-  call, a snake_case or camelCase name, a path or a file name. "The `deliver()`
+  call, a snake_case or camelCase name, a path or a file name. Capitalised names such
+as Node.js and numbers such as 50/50 are not identifiers. "The `deliver()`
   function loops" passes; "`deliver()` loops" doesn't. Negated or quoted sentences
   are not exempt.
 - **Case 4 question:** one of the first three sentences ends in `?`.
 
 ## Calibration
 
-`calibrate` grades every case's good and bad samples. The good sample must pass every
-grader: no repeats, no identifier subjects, the case 4 question, 3 of 3 on both cold
-reads, and pedantry PASS. The bad sample must fail every one: at least one repeat and
-one identifier subject, no early question, an opening that misses the claim and gets
-at most 1 of 3, a whole read that gets at most 2 of 3, and pedantry FAIL. Script
-graders cost nothing; `--judges` adds the model judges (about $0.35 for all 14
+`calibrate` grades four samples per case:
+
+- `good` must pass every grader: no repeats, no identifier subjects, the case 4
+  question, 3 of 3 on both cold reads, and pedantry PASS.
+- `bad` must fail every one: at least one repeat and one identifier subject, no early
+  question, an opening that misses the claim and gets at most 1 of 3, a whole read that
+  gets at most 2 of 3, and pedantry FAIL.
+- `borderline-pass` gives each point in plain words with little detail, and the ask as
+  a plain either-or question. It must pass every grader, as `good` does.
+- `borderline-fail` names each item's topic but not its point ("there's a decision to
+  make", "there are some risks"). Every item whose key point isn't `none` must fail,
+  on both cold reads.
+
+The borderline samples were written from each case's prompt and key, not from any
+reply. They test the comparator where real replies fall, between the extremes. Script
+graders cost nothing; `--judges` adds the model judges (about $0.65 for all 28
 samples). The unit tests run the script half on every `bin/ci`.
 
 ## Pass rule and summary
 
 `summarize <result dir>` checks the result against `suite.json`, the suite the run
 recorded: every arm and case with `--runs` valid runs, every grader scored, a passing
-preflight per arm, and an unchanged guard. Anything short of that is listed as a
+preflight per arm, and an unchanged guard. It also checks `suite.json` against the
+suite on disk (cases, their graders, arms and styles), so a result from an edited
+suite can't read as complete. Compare the `suite tree` line in `CANDIDATE.txt` with the
+merged tree too. Anything short of that is listed as a
 problem and the result is not complete. A `--case` or `--arm` run is a subset and
 never a baseline; a baseline is a complete result with 3 runs. A run whose judges
 failed or hit the budget is reported as not graded, never as a fail.
