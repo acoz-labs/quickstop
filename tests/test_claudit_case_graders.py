@@ -450,6 +450,14 @@ class CaseGraders(unittest.TestCase):
                     with self.subTest(case=case, grader=path.stem):
                         self.assertTrue(verdict(grader, text), text)
 
+    def test_a_report_written_from_the_scan_meets_the_gate_graders(self):
+        """#193 rule 6: the scan's own f19 wording proposes no principles skill; rule 4: across f1-f19 only the
+        procedure docs the scan plans (f1's and f7's release docs) count as documentation-page skills."""
+        self.assertEqual(ce.principles_skill_units(render(self.scans['f19-declarative-list'])), [])
+        pages = {case: [p for p, _, _ in ce.doc_skill_items(render(scan))] for case, scan in self.scans.items()}
+        self.assertEqual({case: found for case, found in pages.items() if found},
+                         {'f1-agent-run': ['docs/release-procedure.md'], 'f7-fixture-noise': ['docs/release.md']})
+
     @unittest.skipUnless(shutil.which('node'), 'node not installed')
     def test_javascript_engine_agrees(self):
         checks = self.checks()
