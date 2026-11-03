@@ -15,7 +15,7 @@ For anything a person reads (replies, reports, PR descriptions, design notes, ha
 - Sentence 1 is the point: the answer, finding or decision.
 - Sentence 2 is what the reader needs to do or decide, or that nothing is needed.
 - Sentence 3 is what's at stake or what changes.
-- The rest is support the reader can stop reading.
+- The rest is support the reader can stop reading: only what they need to act on the point or check it.
 
 Short answers can do this in fewer sentences. Nothing comes before these sentences except a short title: no metadata, labels or preamble.
 
