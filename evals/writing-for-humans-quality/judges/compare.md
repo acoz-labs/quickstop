@@ -12,6 +12,8 @@ PASS when the notes carry the point:
 
 FAIL when the point is missing, wrong, or only gestured at: a topic with no content ("there is a decision about timing", "there are some risks", "an access issue affects the timeline"). FAIL too when the reader guessed the point and the message didn't state it.
 
+Always grade against the key, never against what the message seems to contain. When the key's point is not "none", notes that say "none", "not stated" or "cut off" for that item FAIL, even if the message really says nothing about it: a message that leaves out its ask or stakes fails those items.
+
 When the key's point is "none", PASS when the notes show the message asks nothing (for ask) or states no consequences (for stakes). FAIL when the reader reports an ask or stakes that the message actually makes them act on.
 
 You receive two sets of notes from two readers: OPENING (the reader saw only the message's opening) and WHOLE (the reader saw the whole message). Grade each set separately against the same key. Give a one-sentence reason for every verdict.
