@@ -166,6 +166,11 @@ to f19 because F10 to F13 were taken:
   eval` (plain and Claudit) that folder is the run's own home, which the eval host also gives a stub `.git`. Under
   `doctor-combined` it is a plain folder. `/context` shows Claude Code loads the parent `CLAUDE.md` in both layouts.
   Even so, the arms see different surroundings, so compare their f17 rows with care.
+- `doctor-combined` measured nothing on `f19-declarative-list`. The fixture's Stop hook runs `go test ./...`, and
+  in these runs it failed on the run host's toolchain (`mise ERROR No version is set for shim: go`), not on the
+  fixture's code. The plain and Claudit f19 reports are full audits. All six calls (3 runs × `/doctor` and `/doctor prompt-audit .`) ended by answering that failure, so no
+  graded report holds an audit body. Those cells are marked not measured. Their cost and time are real and stay. The
+  runs were not repeated: the same hook would fail again, and $2.53 of the cap was left.
 - Hit rates are the mean over runs per case, with the number of runs (n) stated for every arm and case. Rows reused
   from earlier issues name their source, Claude Code version and run count.
 
@@ -210,15 +215,15 @@ failed targeted `no-invented-*` graders, or 1 when only the catch-all `no-invent
 | `f8-documented-decline` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
 | `f9-clean` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
 | `f10-stale-decline` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
-| `f11-valid-decline` | — (no planted findings; n=1) | 1 in 1 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
-| `f12-unsafe-decline` | — (no planted findings; n=1) | 1 in 1 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 1 in 1 of 1 runs (n=1) |
+| `f11-valid-decline` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1; recorded 1, corrected) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
+| `f12-unsafe-decline` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1; recorded 1, corrected) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1; recorded 1, corrected) |
 | `f13-no-reason-decline` | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) | — (no planted findings; n=3) [#184] | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=1) | 0 in 0 of 1 runs (n=1) |
 | `f14-enforcement` | 33% of 5 (n=3) | 0 in 0 of 3 runs (n=3) | 20% of 5 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 5 (n=3) | 0 in 0 of 3 runs (n=3) |
 | `f15-context-economy` | 0% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 33% of 3 (n=3) | 0 in 0 of 3 runs (n=3) |
 | `f16-stale-facts` | 33% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 56% of 3 (n=3) | 0 in 0 of 3 runs (n=3) |
-| `f17-scope` | 22% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 56% of 3 (n=3) | 1 in 1 of 3 runs (n=3) |
+| `f17-scope` | 22% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 3 (n=3) | 0 in 0 of 3 runs (n=3) | 56% of 3 (n=3) | 0 in 0 of 3 runs (n=3; recorded 1 in 1, corrected) |
 | `f18-check-commands` | 0% of 1 (n=3) | 0 in 0 of 3 runs (n=3) | 100% of 1 (n=3) | 0 in 0 of 3 runs (n=3) | 0% of 1 (n=3) | 0 in 0 of 3 runs (n=3) |
-| `f19-declarative-list` | — (no planted findings; n=3) | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=3) | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=3) | 0 in 0 of 3 runs (n=3) |
+| `f19-declarative-list` | — (no planted findings; n=3) | 0 in 0 of 3 runs (n=3) | — (no planted findings; n=3) | 0 in 0 of 3 runs (n=3) | not measured: the Stop hook failed on the host toolchain (n=0 of 3 runs) | not measured: the Stop hook failed on the host toolchain (n=0 of 3 runs) |
 
 #### Per fixture: cost and time
 
@@ -254,12 +259,17 @@ the other arms pass only the few that any report can meet.
 
 | Arm | Fixtures | Runs | Mean per-run hit rate | False defects | Total $ | $ per run | s per run | Structure graders |
 |---|---|---|---|---|---|---|---|---|
-| Plain prompt | f1-f13 | 13 | 71% (runs with findings 4) | 5 | $0.96 | $0.074 | 26 | 11% (n=13) |
+| Plain prompt | f1-f13 | 13 | 71% (runs with findings 4) | 3 (recorded 5, corrected) | $0.96 | $0.074 | 26 | 11% (n=13) |
 | Plain prompt | f14-f19 | 18 | 18% (runs with findings 15) | 0 | $1.30 | $0.072 | 17 | 12% (n=18) |
 | Claudit 4.2.0 [#184, Claude Code 2.1.316, n=3, regraded at b3004cd] | f1-f13 | 39 | 100% (runs with findings 12) | 0 | $5.14 | $0.132 | 40 | 100% (n=39) |
 | Claudit 4.2.0 | f14-f19 | 18 | 24% (runs with findings 15) | 0 | $2.43 | $0.135 | 38 | 98% (n=18) |
-| doctor-combined | f1-f13 | 13 | 17% (runs with findings 4) | 1 | $6.00 | $0.461 | 67 | 11% (n=13) |
-| doctor-combined | f14-f19 | 18 | 29% (runs with findings 15) | 1 | $8.83 | $0.491 | 66 | 12% (n=18) |
+| doctor-combined | f1-f13 | 13 | 17% (runs with findings 4) | 0 (recorded 1, corrected) | $6.00 | $0.461 | 67 | 11% (n=13) |
+| doctor-combined (f19 not measured) | f14-f19 | 18 | 29% (runs with findings 15) | 0 (recorded 1, corrected) | $8.83 | $0.491 | 66 | 12% (n=18) |
+
+Corrected cells follow comment [6617090931](https://github.com/acoz-labs/quickstop/pull/194#issuecomment-6617090931) (hand-read under the #168 rule); the recorded counts are given beside them. No hit
+rate changed. In the `doctor-combined` f14-f19 row, the hit rate is the mean over the 15 runs of f14 to f18 (f19 plants
+no findings). False defects, structure, cost and time are over all 18 runs, including the 3 unmeasured f19 runs:
+their false-defect and structure verdicts measure nothing, and their cost and time are real.
 
 #### Reused: `/doctor` alone (#155)
 
@@ -294,19 +304,22 @@ seven changes are "Add a skill for" documentation pages, four of them translatio
   for Claudit 4.2.0 and 18% for the plain prompt. `doctor-combined` leads on context economy (f15), stale facts (f16) and scope (f17),
   Claudit alone allowlists the check (f18), and the plain prompt leads on enforcement (f14).
 - On f1 to f13, the reused Claudit 4.2.0 rows hit every planted finding with no false defects. `doctor-combined`
-  hits 17% at n=1, and the plain prompt 71% with five false defects.
+  hits 17% at n=1, and the plain prompt 71% with three false defects (five recorded, two corrected).
+- Claudit 4.2.0 proposed a skill for the principles in 3 of 3 f19 runs, each time as an "Optional" note under Also
+  worth knowing that calls the list "a 7-step procedure doc". The O1 rule doesn't count notes there, so its 0 on f19
+  doesn't mean the behaviour was absent.
 - `doctor-combined` costs about $0.48 a run, about 3.6 times Claudit 4.2.0, and takes about 66 s a run.
 - These are model runs graded by scripts and a judge. Compare only rows with the same model, judge and n.
 
-Hand-read notes on the false defects, for the reviewer's corrections (none is applied here):
-- plain f4: "The `.env` deny rules only cover the Read and Edit tools" is the invented defect `no-invented-secret-deny` targets.
-- plain f6: "Claude Code doesn't read `AGENTS.md`" is the invented defect the two `no-invented-agents-md-*` graders target.
+Hand-read notes on the false defects. The reviewer's rulings are in comment [6617090931](https://github.com/acoz-labs/quickstop/pull/194#issuecomment-6617090931), and the tables above apply them:
+- plain f4: "The `.env` deny rules only cover the Read and Edit tools" is the invented defect `no-invented-secret-deny` targets. Stands.
+- plain f6: "Claude Code doesn't read `AGENTS.md`" is the invented defect the two `no-invented-agents-md-*` graders target. Stands.
 - plain f11: "Both reasons hold up … I wouldn't revisit either." declines; `no-invented-reconsider` exempts "not
-  worth", "do not" and others but not "wouldn't".
+  worth", "do not" and others but not "wouldn't". Corrected to 0.
 - plain and `doctor-combined` f12: "The scope is what I'd reconsider" and "you may want to revisit it" are offered for
-  the `bypassPermissions` decline, which is f12's unsafe decline.
+  the `bypassPermissions` decline, which is f12's unsafe decline. Both corrected to 0.
 - `doctor-combined` f17 run 3: "Its pointer to `bin/legacy-build` isn't derivable, so it stays." keeps the line;
-  `no-invented-parent-findings` reads "pointer" as the fix word `point\w*`.
+  `no-invented-parent-findings` reads "pointer" as the fix word `point\w*`. Corrected to 0.
 
 #### Spend
 
