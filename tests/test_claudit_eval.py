@@ -712,7 +712,8 @@ if judge:
     print(json.dumps({{'result': os.environ.get('FAKE_JUDGE_REPLY', 'PASS'), 'total_cost_usd': 0.001}}))
 elif '--plugin-dir' in sys.argv:  # claudit-deep: the helper's deep subcommand records its nested call
     with open(os.environ['CLAUDIT_DEEP_RECORD'], 'a') as handle:
-        handle.write(json.dumps({{'status': 'ran', 'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2}}) + '\\n')
+        handle.write(json.dumps({{'status': 'ran', 'model': os.environ.get('CLAUDIT_DEEP_MODEL'), 'max_budget_usd': 0.5,
+                                 'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2}}) + '\\n')
     print(json.dumps({{'result': '# Claudit: x\\n\\n`CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.12,
                       'permission_denials': []}}))
 elif sys.argv[2] == '/doctor':
@@ -842,10 +843,12 @@ class CombinedArmTests(Temp):
         self.assertTrue(call[0]['cwd'].endswith('/home/cwd'))
         run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
         self.assertEqual(run['costUsd'], 0.42)  # the outer call and the nested prompt-audit
-        self.assertEqual(run['parts'][0]['nested'], [{'status': 'ran', 'cost_usd': 0.3, 'seconds': 40.0,
-                                                      'permission_denials': 2}])
+        self.assertEqual(run['parts'][0]['nested'], [{'status': 'ran', 'model': 'claude-sonnet-5-5', 'max_budget_usd': 0.5,
+                                                      'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2}])
         self.assertTrue({g['name']: g['passed'] for g in run['graders']}['finding-symlink-real-path'])
-        self.assertIn('nested: claudit.py deep runs claude -p "/doctor prompt-audit ."', (out / 'command.txt').read_text())
+        self.assertIn('nested: claudit.py deep runs claude -p "/doctor prompt-audit ." with the doctor-combined flags plus '
+                      'Bash and Skill(claudit:claudit) denied, --model claude-sonnet-5-5 (CLAUDIT_DEEP_MODEL='
+                      'claude-sonnet-5-5) and --max-budget-usd 0.5', (out / 'command.txt').read_text())
 
     def test_refuses_an_instruction_file_above_the_workspace(self):
         env = self.fake()

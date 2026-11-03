@@ -57,6 +57,31 @@ ATTACKS = [
     '`docs/principles.md` is a list. Optionally, wrap it in a skill so it loads on demand.',  # back-reference
     'Is a skill for the principles worth it? Yes: add one.',
     '- **Also worth knowing:** the principles could become a skill later.',
+    # Review round 1, M2: a rejection reversed later in the sentence.
+    "A principles skill isn't necessary today, but worth adding later.",
+    'A skill for the principles is unnecessary right now, though you could add it later.',
+    "Don't hesitate to turn the principles into a skill.",  # a negation that urges
+    'Nothing else is wrong and a skill for the principles would help.',  # a negation whose scope ends at "and"
+    'Declined: nothing. Add a skill for `docs/principles.md`.',  # a decline line, then a proposal
+]
+# Recorded skill proposals for another doc (#184 gate: tallyho's release procedure, quickstop's SDLC doc), with
+# `docs/principles.md` in place of that doc: the shapes Claudit has actually written.
+RECORDED = [
+    '- Optional: add a skill for `docs/principles.md`, which `CLAUDE.md:10` already links. Create '
+    "`.claude/skills/principles/SKILL.md` with `name` and `description` frontmatter that follows the doc's steps and "
+    'links back to it. The doc stays the source.',
+    '- Optional: add a skill for `docs/principles.md`. `CLAUDE.md:10` already links it from the loaded instructions. '
+    "You could create `.claude/skills/principles/SKILL.md` with `name` and `description` frontmatter that follows the "
+    "doc's steps and links back to it, so the doc stays the source.",
+    '2. **Add a skill for docs/principles.md** (Coverage, effort M)\n   Problem: `docs/principles.md` has 7 numbered '
+    'steps, but no skill exists and nothing loaded links to it.\n   Change: Create '
+    '`.claude/skills/principles/SKILL.md` with `name` and `description` frontmatter. It should follow the steps in '
+    '`docs/principles.md`, keep that doc as the source and link to it.',
+    '3. **Turn the principles into a skill** (Coverage, effort M)\n   Problem: `docs/principles.md` has 7 numbered '
+    'steps, and agents follow them. No skill exists.\n   Why: a skill makes them invocable by name.',
+    '   Change: Create `.claude/skills/principles/SKILL.md` with `name` and `description` frontmatter. Make it follow '
+    'the steps in `docs/principles.md`, keep the doc as the source, and link it.',
+    '   Why: The principles are a repeatable procedure that agents would carry out. A skill loads it on demand.',
 ]
 # Correct statements: none proposes a skill for the principles.
 SAFE = [
@@ -75,6 +100,28 @@ SAFE = [
     '`docs/principles.md` is fine. Add a skill for `docs/release.md`.',  # a skill for another file
     'Import the principles with `@docs/principles.md` so they load every session.',
     '- `docs/principles.md` holds standing principles, so no skill is proposed for it.',
+    # Review round 1, M2: real rejections and another skill.
+    "Don't turn the principles list into a skill; it isn't a procedure.",
+    'There is no need to turn the principles into a skill.',
+    'I considered a skill for docs/principles.md and decided against it.',
+    'Declined: a skill for docs/principles.md (it states values, not steps).',
+    'Run the `review` skill; it reads docs/principles.md.',
+    'No skill is needed for the principles, now or later.',
+]
+# Recorded lines about the principles that propose no skill (#192 plain and doctor-combined f19 reports).
+RECORDED_SAFE = [
+    '- `CLAUDE.md:10` says `docs/principles.md` holds for every change, but it only mentions the path. Claude reads it '
+    'only if it decides to.',
+    "- Once the principles are loaded, this is the kind of gap Claude will start flagging. Fix it so the rule isn't "
+    'already violated.',
+    "- The file is 9 lines, so import it with `@docs/principles.md`. That way it's in context every session.",
+    '- `CLAUDE.md` says the principles "hold for every change", but it only names the path. Claude has to decide to '
+    'open `docs/principles.md`, and it may not.',
+    '- Add a "conventions" line to `CLAUDE.md`, such as "table-driven tests" and "new exported funcs need an Example". '
+    'The principles already imply these.',
+    '**1. Import the principles file in `CLAUDE.md`.**',
+    '1. **`docs/principles.md` may not load.** `CLAUDE.md` mentions it in prose only, so Claude has to decide to open it. '
+    'The file says it holds "for every change", so import it with `@docs/principles.md`. It\'s only 7 lines.',
 ]
 
 
@@ -86,12 +133,12 @@ def report(body, where='## Also worth knowing'):
 class PrinciplesSkill(unittest.TestCase):
     def test_proposals_fail_anywhere(self):
         for where in ('## Also worth knowing', '## Top changes', '## From /doctor prompt-audit', ''):
-            for body in PROPOSALS + ATTACKS:
+            for body in PROPOSALS + ATTACKS + RECORDED:
                 with self.subTest(where=where, body=body):
                     self.assertTrue(ce.principles_skill_units(report(body, where)), body)
 
     def test_correct_statements_pass(self):
-        for body in SAFE:
+        for body in SAFE + RECORDED_SAFE:
             with self.subTest(body=body):
                 self.assertEqual(ce.principles_skill_units(report(body)), [], body)
 
@@ -112,27 +159,69 @@ class PrinciplesSkill(unittest.TestCase):
                     self.assertEqual(bool(ce.principles_skill_units(path.read_text())), expected)
 
 
+def plan(*titles):
+    return report('- Nothing else.').replace('1. **Install a code-intelligence plugin** (Coverage, effort S)\n'
+                                             '   Problem: no LSP.', ''.join(
+        '%d. **%s** (Coverage, effort M)\n   Why: because agents follow it.\n\n' % (n, t)
+        for n, t in enumerate(titles, 1)))
+
+
 class DocSkills(unittest.TestCase):
+    def test_any_skill_proposal_for_a_page_counts_each_page(self):
+        # Review round 1, M1: the structure (a skill proposal whose target is a doc page), not one phrasing.
+        for title, pages in (('Turn `docs/testing.md` into a skill', ['docs/testing.md']),
+                             ('Add skills for docs/testing.md and docs/release.md', ['docs/testing.md',
+                                                                                     'docs/release.md']),
+                             ('Add a `testing` skill from docs/testing.md', ['docs/testing.md']),
+                             ('Make `docs/api/reference.md` a skill', ['docs/api/reference.md']),
+                             ('Package `docs/deploy.md` as a slash command', ['docs/deploy.md'])):
+            with self.subTest(title=title):
+                self.assertEqual([p for p, _, _ in ce.doc_skill_items(plan(title))], pages)
+        self.assertFalse(ce.doc_skills_pass(ce.doc_skill_items(plan('Make `docs/api/reference.md` a skill'))))
+
+    def test_items_that_propose_no_skill_for_a_page(self):
+        for title in ('Fix the stale facts in docs/x.md', 'Keep each repeated rule in one place',
+                      'Fix the dangling `docs/architecture.md` reference before changing the skill',
+                      "Don't add a skill for docs/testing.md", 'Hide .claude/skills/a/SKILL.md from the skill listing'):
+            with self.subTest(title=title):
+                self.assertEqual(ce.doc_skill_items(plan(title)), [])
+
+    def test_recorded_gate_reports(self):
+        """The 4.0.1 gate's f1 reports title the change "Turn the release procedure into a skill" and name the page in
+        its Problem line; the f2 reports mention "the skill" in a stale-reference change and propose none."""
+        reports = ROOT / 'tests/claudit_gate_reports'
+        for path in sorted(reports.glob('*.md')):
+            with self.subTest(report=path.name):
+                pages = [p for p, _, _ in ce.doc_skill_items(path.read_text())]
+                self.assertEqual(pages, ['docs/release-procedure.md'] if path.name.startswith('f1-') else [])
+
+    def test_one_page_needs_a_reason(self):
+        text = plan('Add a skill for RELEASE.md').replace('   Why: because agents follow it.\n', '   Problem: x.\n')
+        self.assertEqual(ce.doc_skill_items(text), [('RELEASE.md', False, False)])
+        self.assertFalse(ce.doc_skills_pass(ce.doc_skill_items(text)))
+        self.assertTrue(ce.doc_skills_pass(ce.doc_skill_items(plan('Add a skill for RELEASE.md'))))
+
     def test_counts_documentation_page_skills_in_top_changes(self):
         text = report('- Optional: add a skill for `docs/x.md`.', '## Also worth knowing').replace(
             '1. **Install a code-intelligence plugin** (Coverage, effort S)',
             '1. **Add a skill for docs/whats-new.md** (Coverage, effort M)\n\n'
             '2. **Add a skill for i18n/de/pages/whats-new.md** (Coverage, effort M)\n\n'
             '### 3. **Add a skill for `docs/reference/cli.md`**')
-        self.assertEqual(ce.doc_skill_items(text), [('docs/whats-new.md', False),
-                                                    ('i18n/de/pages/whats-new.md', True),
-                                                    ('docs/reference/cli.md', True)])
+        self.assertEqual([i[:2] for i in ce.doc_skill_items(text)], [('docs/whats-new.md', False),
+                                                                    ('i18n/de/pages/whats-new.md', True),
+                                                                    ('docs/reference/cli.md', True)])
 
     def test_recorded_python_sdk_reports(self):
         items = ce.doc_skill_items((REAL / 'python-sdk-claudit.md').read_text())
         self.assertEqual(len(items), 6)  # 4.2.0: six of seven changes, four of them translations
-        self.assertEqual(sum(page for _, page in items), 4)
+        self.assertEqual(sum(page for _, page, _ in items), 4)
+        self.assertFalse(ce.doc_skills_pass(items))
         self.assertEqual(ce.doc_skill_items((REAL / 'python-sdk-doctor-combined.md').read_text()), [])
 
     def test_one_procedure_skill_and_notes_outside_the_plan_pass(self):
         text = report('- Optional: add a skill for `i18n/de/pages/x.md`.').replace(
             'Install a code-intelligence plugin', 'Add a skill for RELEASE.md')
-        self.assertEqual(ce.doc_skill_items(text), [('RELEASE.md', False)])
+        self.assertEqual([i[:2] for i in ce.doc_skill_items(text)], [('RELEASE.md', False)])
 
 
 class HistoryLines(unittest.TestCase):
@@ -154,6 +243,11 @@ class HistoryLines(unittest.TestCase):
         '- `docs/repository.md:42` (the 3.9.6 compatibility run) is not stale; keep it.\n'
         '- `docs/repository.md:64` (retired push hooks) is not outdated.',
         '- The history in `CHANGELOG.md` mentions Python 3.9.6 and retired hooks.',  # another file
+        # Review round 1, L1: a decline is not a finding.
+        '- Declined: docs/repository.md lines about retired hooks and the 3.9.6 compatibility run are history, kept on '
+        'purpose.',
+        '## Declined by the project\n\n- **Hooks** (`docs/repository.md:64`): history, "have been retired".\n'
+        '- `docs/repository.md:42`: a stale record of the 3.9.6 compatibility run.',
     ]
 
     def test_both_lines_found(self):

@@ -60,6 +60,8 @@ CALL_TIMEOUT = 1500  # seconds, as each case's timeout_seconds
 DEFAULT_INVOKE = '/claudit:claudit --read-only'
 DEEP_INVOKE = DEFAULT_INVOKE + ' --deep'
 DEEP_RECORD = 'CLAUDIT_DEEP_RECORD'
+DEEP_MODEL = 'CLAUDIT_DEEP_MODEL'  # pins the nested prompt-audit to the arm's model
+NESTED_FIELDS = ('status', 'model', 'max_budget_usd', 'cost_usd', 'seconds', 'permission_denials')
 # The judge `claude plugin eval` 2.1.317 uses for an llm grader: this system prompt, this user prompt (the focus is the
 # final message, `last_message`), three votes, PASS by majority; a vote passes when it says PASS and not FAIL.
 JUDGE_SYSTEM = 'You are a strict, terse evaluation judge for coding-agent traces.'
@@ -689,7 +691,8 @@ def claudit_deep(workspace, args, record, log):
     prompt = args.invoke if args.invoke != DEFAULT_INVOKE else DEEP_INVOKE
     plugin = Path(args.plugin or DEFAULT_PLUGIN).resolve()
     command, raw, stdout, stderr, code, wall = claude_call(prompt, workspace, deep_flags(plugin), args.model,
-                                                           args.max_budget_usd, env={DEEP_RECORD: str(log)})
+                                                           args.max_budget_usd,
+                                                           env={DEEP_RECORD: str(log), DEEP_MODEL: args.model})
     record('claudit-deep', stdout, stderr)
     nested = nested_calls(log)
     text = raw.get('result') if isinstance(raw.get('result'), str) else ''
@@ -699,7 +702,7 @@ def claudit_deep(workspace, args, record, log):
             'costUsd': round(outer + sum(number(c.get('cost_usd')) for c in nested), 6), 'agentCostUsd': outer,
             'durationSeconds': round(wall, 1), 'isError': bool(raw.get('is_error')) or code != 0 or not text.strip(),
             'permissionDenials': len(denials) if isinstance(denials, list) else 0,
-            'nested': [{k: c.get(k) for k in ('status', 'cost_usd', 'seconds', 'permission_denials')} for c in nested]}
+            'nested': [{k: c.get(k) for k in NESTED_FIELDS} for c in nested]}
     return text, [part]
 
 
@@ -828,8 +831,9 @@ def run_combined(args):
         + 'judge: ' + shlex.join(['claude', '-p', *JUDGE_FLAGS, '--model', args.judge_model, '--max-budget-usd',
                                   str(args.judge_budget_usd)]) + ' < prompt\n'
         + 'headless cwd: <tmp>/claudit-combined-XXXX/home/cwd (a fresh scaffold per run)\n'
-        + ('nested: claudit.py deep runs claude -p "/doctor prompt-audit ." with the doctor-combined flags plus '
-           'Skill(claudit:claudit) denied\n' if args.arm == 'claudit-deep' else ''))
+        + ('nested: claudit.py deep runs claude -p "/doctor prompt-audit ." with the doctor-combined flags plus Bash and '
+           'Skill(claudit:claudit) denied, --model %s (%s=%s) and --max-budget-usd 0.5 (SKILL.md step 1)\n'
+           % (args.model, DEEP_MODEL, args.model) if args.arm == 'claudit-deep' else ''))
     version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
     lock, spent, partial, runs = threading.Lock(), [0.0], [False], {}
     started = time.monotonic()
@@ -947,7 +951,7 @@ def headless(args):
             started = dt.datetime.now(dt.timezone.utc)
             log = work / 'deep-record.jsonl'  # what a --deep run's nested prompt-audit cost
             proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                  env=dict(claude_env(), **{DEEP_RECORD: str(log)}))
+                                  env=dict(claude_env(), **{DEEP_RECORD: str(log), DEEP_MODEL: args.model}))
             wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
             nested = nested_calls(log)
             scan = subprocess.run([sys.executable, str(plugin / HELPER), 'scan', '--root', str(clone)],
@@ -1002,19 +1006,35 @@ def grade(args):
 PRINCIPLES = re.compile(r'\bprinciples\b|principles\.md', re.I)
 SKILL_WORD = re.compile(r'\bskills?\b|\bslash[ \t]+commands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|'
                         r'(?:^|[\s`(])/principles\b', re.I)
-# A negation whose scope (up to four words, not past a comma) reaches the skill word: "No skill is needed",
-# "don't turn it into a skill", "rather than a skill", "without a skill".
-SKILL_NEGATED = re.compile(r"(?:\b(?:no|none|not|never|nothing|without|avoid|skip|rather than|instead of)\b|n[’']t\b)"
-                           r"(?:[ \t]+[^\s,;:]+){0,4}?[ \t]+$", re.I)
+NEGATOR = re.compile(r"\b(?:no|none|not|never|nothing|without|avoid|skip|rather than|instead of|against)\b|"
+                     r"n[’']t\b", re.I)
+# A negation reaches the skill word when no comma, semicolon, colon or conjunction (and, or, but, then, so) and at
+# most eight words sit between them: "No skill is needed", "There is no need to turn the principles into a skill".
+SCOPE_BREAK = re.compile(r'[,;:]|\b(?:and|or|but|then|so|yet)\b', re.I)
+# A negation that urges rather than rejects: "Don't hesitate to add a skill", "don't forget".
+URGES = re.compile(r"\b(?:don[’']t|do not|never)[ \t]+(?:hesitate|wait|forget|delay|overlook|miss)\b", re.I)
 WHY_NOT = re.compile(r"\bwhy (?:not|don[’']t (?:we|you))\b", re.I)  # a rhetorical proposal, never a negation
-# A judgement that rejects the skill, in the clause after it, and isn't itself negated: "a skill would be overkill".
+# A judgement that rejects the skill, later in its sentence, and isn't itself negated: "a skill would be overkill",
+# "I considered a skill … and decided against it".
 REJECTS = re.compile(r"\b(?:overkill|unnecessary|unneeded|pointless|redundant|premature|wrong(?: fit)?|"
                      r"(?:poor|bad) fit|no value|add(?:s)? nothing|not (?:needed|worth|necessary|a (?:good )?fit)|"
-                     r"(?:is|are)n[’']t (?:needed|worth|necessary|a (?:good )?fit))\b", re.I)
+                     r"(?:is|are)n[’']t (?:needed|worth|necessary|a (?:good )?fit)|decided against|ruled (?:it )?out|"
+                     r"rejected|declined|left (?:it )?out|chose not to)\b", re.I)
 REJECT_NEGATED = re.compile(r"\b(?:not|never|n[’']t|hardly)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
+# A rejection reversed later in the sentence: "isn't necessary today, but worth adding later", "unnecessary right
+# now, though you could add it later", "no skill yet; add one when the list grows".
+REVERSAL = re.compile(r"(?:\b(?:but|though|although|however|yet)\b|;)[^.;]*?\b(?:worth (?:adding|having|it|one)|"
+                      r"(?:could|should|might|may|can|will|would) (?:still |later |eventually )?(?:add|create|write|"
+                      r"make|turn|have|use|help)\b(?![ \t]+(?:nothing|no\b|little|much))|add (?:it|one|them)|later\b|eventually|"
+                      r"someday|in (?:the )?future|"
+                      r"once (?:it|the list|they)|when (?:it|the list|they) grows?)", re.I)
 # "Skills are for procedures": a statement of what skills fit, about something other than the principles.
 SKILLS_FIT = re.compile(r'\bskills?[ \t]+(?:are[ \t]+for|suit|fit|belong[ \t]+to|work[ \t]+best[ \t]+for)[ \t]+'
                         r'(?:\w+[ \t]+){0,2}(?:procedures?|steps|workflows?|tasks)\b', re.I)
+# A skill the report names that isn't a principles skill: "Run the `review` skill; it reads docs/principles.md".
+OTHER_SKILL = re.compile(r'`/?([\w:-]+)`[ \t]+(?:skill|slash command|command)\b', re.I)
+# A line that records a decline or a dropped finding, not a proposal: "Declined: a skill for docs/principles.md".
+SET_ASIDE = re.compile(r'^\W*(?:Declined|Rejected|Not proposed|Not counted|Dropped|Left out)\b[^:\n]{0,40}:', re.I)
 BACK_REFERENCE = re.compile(r'\b(?:it|them|this|that|these|those|the (?:list|doc|file|page))\b', re.I)
 MAKE_ONE = re.compile(r'\b(?:add|create|write|make|build|turn[ \t]+\w+[ \t]+into|wrap[ \t]+\w+[ \t]+in)[ \t]+one\b',
                       re.I)
@@ -1055,17 +1075,33 @@ def unit_sentences(unit):
     return [s.strip() for s in re.split(r'(?<=[.!?])\s+(?=[A-Z`*_(\[])', re.sub(r'\s*\n\s*', ' ', unit)) if s.strip()]
 
 
-def proposes_skill(clause):
-    """True when a clause puts a skill forward: a skill word no negation reaches and no unnegated judgement rejects."""
+def negated(before):
+    """True when a negation's scope reaches the end of `before` (the text up to a skill word)."""
+    before = WHY_NOT.sub('why', before)
+    for match in reversed(list(NEGATOR.finditer(before))):
+        if URGES.match(before, before.rfind(' ', 0, match.start()) + 1):
+            continue  # "Don't hesitate to …" urges
+        gap = before[match.end():]
+        return not SCOPE_BREAK.search(gap) and len(gap.split()) <= 8
+    return False
+
+
+def proposes_skill(clause, sentence, named_skills=False):
+    """True when a clause puts a skill forward: a skill word no negation reaches and that no later unnegated judgement
+    in the sentence rejects. Unless `named_skills`, a skill named in the clause other than a principles one ("the
+    `review` skill") is an existing skill, not a proposal."""
     if SKILLS_FIT.search(clause):
         return False
     for match in SKILL_WORD.finditer(clause):
-        before = WHY_NOT.sub('why', clause[:match.start()].rsplit(',', 1)[-1])
+        other = [n for n in OTHER_SKILL.findall(clause[:match.end()]) if 'principle' not in n.lower()]
+        if other and not named_skills:
+            continue
+        before = clause[:match.start()]
         if clause.rstrip().endswith('?'):  # "Wouldn't a skill help?" asks for one
             before = re.sub(r"^\s*\w+n[’']t\b", '', before)
-        if SKILL_NEGATED.search(before):
+        if negated(before):
             continue
-        after = clause[match.end():]
+        after = sentence[sentence.find(clause) + match.end():] if clause in sentence else clause[match.end():]
         reject = REJECTS.search(after)
         if reject and not REJECT_NEGATED.search(after[:reject.start()]):
             continue
@@ -1076,38 +1112,46 @@ def proposes_skill(clause):
 def principles_skill_units(text):
     """The units (line, text) of a report that propose a skill for the principles, anywhere in the report.
 
-    A sentence counts when one of its clauses proposes a skill (a question counts too: "Why not make it a skill?")
-    and the sentence names the principles, or refers back to them ("it", "the list") with the principles named
-    earlier in the same paragraph or list item and no other Markdown file named in the sentence. "Add one" after a
-    sentence that raised a skill counts as well."""
+    A sentence counts when it names the principles (or refers back to them, with the principles named earlier in the
+    same paragraph or list item and no other Markdown file named) and either a clause proposes a skill (a question
+    counts too: "Why not make it a skill?"), or it raises a skill and a later clause reverses the rejection ("isn't
+    necessary today, but worth adding later", "add one when the list grows"). A line that records a decline
+    ("Declined: …") proposes nothing."""
     found = []
     for line, unit in report_units(text):
         named, raised = False, False
         for sentence in unit_sentences(unit):
-            seen = False
-            clauses = [c for c in CLAUSE_SPLIT.split(sentence) if c and c.strip()]
             here = PRINCIPLES.search(sentence) is not None
             others = [m for m in OTHER_MD.findall(sentence) if 'principles' not in m.lower()]
             about = here or (named and BACK_REFERENCE.search(sentence) and not others)
-            proposal = any(proposes_skill(c) for c in clauses)
+            skill = SKILL_WORD.search(sentence) is not None
+            if SET_ASIDE.match(sentence):
+                named = named or here
+                continue
+            clauses = [c for c in CLAUSE_SPLIT.split(sentence) if c and c.strip()]
+            proposal = any(proposes_skill(c, sentence) for c in clauses)
+            reversal = (skill or raised) and REVERSAL.search(sentence) is not None and not URGES.search(sentence)
             again = False
+            seen = False
             for clause in clauses:  # "add one" after a clause or sentence that raised a skill
                 one = MAKE_ONE.search(clause)
-                if one and (raised or seen) and not SKILL_NEGATED.search(clause[:one.start()]):
+                if one and (raised or seen) and not negated(clause[:one.start()]):
                     again = True
                 seen = seen or SKILL_WORD.search(clause) is not None
-            if (proposal or again) and about:
+            if (proposal or again or reversal) and about:
                 found.append((line, unit))
                 break
             named = named or here
-            raised = raised or (SKILL_WORD.search(sentence) is not None and (here or named))
+            raised = raised or (skill and (here or named))
     return found
 
 
 # Rule 4: real repositories.
-DOC_SKILL_ITEM = re.compile(r'^(?:#{3,4}[ \t]+)?(?:\*\*)?\d+[.)][ \t]+(?:\*\*)?(?:Add|Create|Write)[ \t]+a[ \t]+skill'
-                            r'[ \t]+for[ \t]+`?([\w./-]+\.md)`?', re.I | re.M)
 NOT_PROCEDURE_PAGE = re.compile(r'(?:^|/)(?:i18n|l10n|locales?|translations|reference|references|api)/', re.I)
+PAGE = re.compile(r'(?<![\w./-])`?((?:[\w.-]+/)*[\w.-]+\.md)`?', re.I)
+# Not documentation pages: instruction files, skill files and anything under .claude/.
+NOT_A_PAGE = re.compile(r'(?:^|/)(?:CLAUDE|AGENTS|CLAUDE\.local|SKILL)\.md$|^\.claude/', re.I)
+REASON = re.compile(r'\b(?:because|since|as it|so that|reason|why:)', re.I)
 
 
 def top_changes(text):
@@ -1115,9 +1159,59 @@ def top_changes(text):
     return match.group(1) if match else ''
 
 
+def change_items(section):
+    """The numbered items of a Top changes section: each column-0 numbered line (or ###/#### numbered heading) with
+    the lines under it, up to the next one."""
+    items = []
+    for line in section.splitlines():
+        if re.match(r'(?:#{3,4}[ \t]+)?(?:\*\*)?\d+[.)][ \t]', line):
+            items.append(line)
+        elif items:
+            items[-1] += '\n' + line
+    return items
+
+
+CREATES_SKILL = re.compile(r'\b(?:create|add|write|make|move)\b[^.]{0,60}\.claude/(?:skills|commands)/', re.I)
+# The shape of a proposal: a creating or converting verb with the skill word, or "a skill for/from X".
+PROPOSE_SHAPE = re.compile(r'\b(?:add|create|write|make|turn|convert|package|wrap|move|put|deserves?|as a|into a)\b'
+                           r'[^;\n]{0,80}?\b(?:skills?|slash commands?)\b|\b(?:skills?|slash commands?)[ \t]+(?:for|from)\b',
+                           re.I)
+SKILL_PATH = re.compile(r'`?[\w./-]*(?:\.claude/[\w./-]*|SKILL\.md)`?', re.I)
+
+
 def doc_skill_items(text):
-    """(path, translation or reference page) for each numbered "Add a skill for <page>.md" item under Top changes."""
-    return [(path, bool(NOT_PROCEDURE_PAGE.search(path))) for path in DOC_SKILL_ITEM.findall(top_changes(text))]
+    """(page, translation or reference page, a reason given) for each documentation page a numbered Top changes item
+    proposes a skill for. An item proposes one when a sentence (not a Source line) proposes a skill, as rule 6 reads a
+    proposal, with skill files' paths set aside, or creates a `.claude/skills/` file. Then each page the item names
+    counts, outside instruction files, skill files and `.claude/`: "Add a skill for X", "Turn X into a skill", "Add
+    skills for A and B", "Add a `testing` skill from X", "Make X a skill", or a title "Turn the release procedure into
+    a skill" with the page in its Problem line."""
+    found = []
+    for item in change_items(top_changes(text)):
+        body = '\n'.join(l for l in item.splitlines() if not re.match(r'\s*Source:', l))
+        proposal = False
+        for sentence in unit_sentences(body):
+            bare = SKILL_PATH.sub(' ', sentence)
+            clauses = [c for c in CLAUSE_SPLIT.split(bare) if c and c.strip()]
+            if CREATES_SKILL.search(sentence) or (PROPOSE_SHAPE.search(bare) and any(
+                    proposes_skill(c, bare, named_skills=True) for c in clauses if PROPOSE_SHAPE.search(c))):
+                proposal = True
+                break
+        if not proposal:
+            continue
+        pages = []
+        for page in PAGE.findall(body):
+            if not NOT_A_PAGE.search(page) and page not in pages:
+                pages.append(page)
+        reasoned = REASON.search(item) is not None
+        found += [(page, bool(NOT_PROCEDURE_PAGE.search(page)), reasoned) for page in pages]
+    return found
+
+
+def doc_skills_pass(items):
+    """Rule 4 on python-sdk: at most one documentation-page skill, never a translation or reference page, and the
+    one allowed item states a reason."""
+    return len(items) <= 1 and not any(page for _, page, _ in items) and all(reason for _, _, reason in items)
 
 
 HISTORY_LINES = (('compatibility-run', re.compile(r'repository\.md:4[0-9]\b|initial compatibility run|3\.9\.6', re.I)),
@@ -1129,13 +1223,20 @@ STALE_WORD = re.compile(r"\b(?:histor\w*|past (?:events?|setups?)|narrat\w*|obso
                         r"archaeolog\w*|migration-relative|records? (?:a|one) past|describes? (?:a )?past|"
                         r"no longer (?:needed|true|relevant|applies))", re.I)
 STALE_DENIED = re.compile(r"\b(?:not|never|n[’']t|no)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
+DECLINE_HEAD = re.compile(r'#+[ \t]+(?:Declined|Not counted)\b', re.I)
+KEPT = re.compile(r'\b(?:kept on purpose|keep (?:it|them|as is)|deliberately kept|on purpose)\b', re.I)
 
 
 def finding_blocks(text):
     """A heading or column-0 numbered item with the bullets and paragraphs under it, up to the next one; a finding
-    is often a numbered title with Location and Evidence bullets below it."""
-    blocks = []
+    is often a numbered title with Location and Evidence bullets below it. Units that record a decline ("Declined:",
+    "Not counted:", or anything under a Declined heading) are left out."""
+    blocks, declined = [], False
     for _, unit in report_units(text):
+        if unit.startswith('#'):
+            declined = DECLINE_HEAD.match(unit) is not None
+        if declined or SET_ASIDE.match(re.sub(r'^\s*(?:[-*+]|\d+[.)])\s+', '', unit)) or KEPT.search(unit):
+            continue
         if not blocks or re.match(r'#|(?:\*\*)?\d+[.)]\s', unit):
             blocks.append(unit)
         else:
@@ -1172,8 +1273,7 @@ def gate(args):
             row = {'report': str(path), 'passed': not units, 'units': [line for line, _ in units]}
         elif args.rule == 'doc-skills':
             items = doc_skill_items(text)
-            pages = [p for p, page in items if page]
-            row = {'report': str(path), 'passed': len(items) <= 1 and not pages, 'items': items}
+            row = {'report': str(path), 'passed': doc_skills_pass(items), 'items': items}
         else:
             hits = history_lines(text)
             row = {'report': str(path), 'passed': len(hits) == len(HISTORY_LINES), 'lines': hits}
