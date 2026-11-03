@@ -16,7 +16,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_claudit import Project, cl  # noqa: E402
 
-STEPS = ''.join('%d. Step %d\n' % (n, n) for n in range(1, 6))
+STEPS = ''.join('%d. Run step %d\n' % (n, n) for n in range(1, 6))
 SETTINGS = {'permissions': {'allow': ['Bash(bin/ci)']}}
 GIT_ENV = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
 
@@ -631,8 +631,8 @@ class Plan(unittest.TestCase):
         plan = cl.plan_of(findings)
         self.assertEqual([(i['n'], i['title'], i['finding_ids']) for i in plan['items']], [
             (1, 'Replace .claudeignore with deny rules', ['claudeignore', 'secret-deny']),
-            (2, 'Fix the stale paths in AGENTS.md', ['stale-ref:AGENTS.md:c']),
-            (3, 'Fix the stale paths in CLAUDE.md', ['stale-ref:CLAUDE.md:a', 'stale-ref:CLAUDE.md:b']),
+            (2, 'Fix the stale facts in AGENTS.md', ['stale-ref:AGENTS.md:c']),
+            (3, 'Fix the stale facts in CLAUDE.md', ['stale-ref:CLAUDE.md:a', 'stale-ref:CLAUDE.md:b']),
             (4, 'Cut CLAUDE.md to what Claude needs', ['oversized:CLAUDE.md']),
             (5, 'Pre-approve the check commands', ['allowlist']),
             (6, 'Install a code-intelligence plugin', ['lsp'])])
@@ -929,7 +929,7 @@ class SameTreeSameResult(Project):
             for key in ('plan', 'grades', 'optional', 'declined', 'footer'):
                 self.assertEqual(again[key], first[key], key)
         self.assertEqual([i['title'] for i in first['plan']['items']], [
-            'Fix the stale paths in CLAUDE.md', 'Pre-approve the check commands', 'Add a skill for docs/release.md',
+            'Fix the stale facts in CLAUDE.md', 'Pre-approve the check commands', 'Add a skill for docs/release.md',
             'Enforce the check with a Stop hook', 'Install a code-intelligence plugin'])
 
 

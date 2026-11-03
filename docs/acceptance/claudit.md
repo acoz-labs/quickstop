@@ -25,7 +25,7 @@ action, an agent's success claim or matching headings is not evidence it happene
 ## Eval suite and baselines
 
 [`evals/claudit/`](../../evals/claudit/README.md) is Claudit's `claude plugin eval`
-release gate: thirteen synthetic fixtures with planted findings, run by
+release gate: nineteen synthetic fixtures with planted findings, run by
 `bin/claudit-eval` with a pinned model and `--max-cost-usd`. It isn't a per-PR
 check. A release compares its numbers with the recorded
 [baselines](claudit-eval-baselines.md) using the same model, judge and run count,
@@ -35,6 +35,41 @@ Claude Code version). Claudit reads docs live, so the gate runs it twice: with
 the release bars; the live path must also beat a plain prompt given the same
 WebFetch grant. The suite ships in the repository rather than in the plugin, so
 measuring Claudit doesn't change plugin bytes.
+
+### `--deep` and the #193 gate graders
+
+The suite itself is frozen at the #192 baseline (its scan-derived `structure-*`
+graders follow the scan, rebuilt with `python3 tests/test_claudit_case_graders.py
+--write`). Two additions live outside it, in `bin/claudit-eval`:
+
+- `run --arm claudit-deep` runs `/claudit:claudit --read-only --deep` headless on the
+  candidate (`--plugin`, default `plugins/claudit`), the way `headless` runs Claudit,
+  in the same fresh `<tmp>/claudit-combined-*/home/cwd` scaffolds as
+  `doctor-combined`, and grades the report with each case's graders. `--deep`'s
+  nested `claude -p` can't run inside `claude plugin eval`, whose sandbox has no
+  network, so this arm stands in for it. The nested `/doctor prompt-audit .` runs with
+  `doctor-combined`'s flags (project settings only, Edit, Write and NotebookEdit
+  denied, in a folder that is never trusted, so Bash is denied too) plus
+  `Skill(claudit:claudit)` denied; the comparison with `doctor-combined` is
+  symmetric. The helper appends the nested call's status, cost, time and denials to
+  `CLAUDIT_DEEP_RECORD`, and the run's cost adds them to the outer call's. `headless`
+  records the same for a real repository.
+- `gate --rule principles-skill|doc-skills|history-lines <reports or folders>`
+  grades saved reports at $0. `principles-skill` (rule 6) fails a report that
+  proposes a skill or slash command for the principles anywhere, Optional notes and
+  Also worth knowing included; a question, a qualifier or "add one" after a negated
+  form still counts. `doc-skills` (rule 4) lists the numbered "Add a skill for
+  <page>.md" items under Top changes and fails more than one, or any translation or
+  reference page. `history-lines` (rule 4) passes when a finding block names
+  `docs/repository.md`, each of quickstop's two stale history lines (by line number or
+  its words) and calls it history or stale. Their positive, negative and attacker
+  controls are in `tests/test_claudit_gate_graders.py`.
+
+Before a paid run, every fixture hook must run on the host toolchain: scaffold each
+case and run its Stop hook with the run's environment. f19's Stop hook runs
+`go test ./...`, so a mise-managed host needs a Go version selected for folders
+outside any project (for example `MISE_GO_VERSION`); otherwise the hook fails and
+`doctor-combined` answers that failure instead of auditing (#192).
 
 ## Required scenarios
 
@@ -60,7 +95,15 @@ measuring Claudit doesn't change plugin bytes.
 - Run the helper's unit tests on Python 3.9 and the pinned 3.11.
 - Apply one selected change in place and verify only its intended content changes.
   A declined or unselected change must not be applied. Dismissing a suggestion
-  writes only `.claude/claudit-dismissed.json`, and the next audit omits it.
+  writes only the user's own file under `${CLAUDE_PLUGIN_DATA}/dismissed/`, and the
+  next audit by that user omits it; with `--shared` it writes only
+  `.claude/claudit-dismissed.json`, and every audit omits it.
+- Run a `--deep` audit headless (`bin/claudit-eval run --arm claudit-deep`, or
+  `headless --invoke "/claudit:claudit --read-only --deep"`): the nested
+  `/doctor prompt-audit .` runs read-only with project settings only and Bash
+  denied, its cost and time are recorded with the run, and each of its findings is
+  kept or dropped with a reason. Without a login for the nested call the footer says
+  the prompt audit couldn't run and the report stays graded.
 - Exercise branch delivery with staged unrelated changes, unstaged edits and an
   existing branch name against a local test remote: the user's index and working
   tree are preserved, the PR branch holds only the selected paths and an existing

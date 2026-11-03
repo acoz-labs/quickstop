@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_claudit import cl  # noqa: E402
 from test_claudit_eval import ce  # noqa: E402
 from test_claudit_eval_graders import js_verdicts, regex_grader, verdict  # noqa: E402
+from claudit_render import render  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / 'evals/claudit/cases'
@@ -437,6 +438,17 @@ class CaseGraders(unittest.TestCase):
         for case, grader, text, want in self.checks():
             with self.subTest(case=case, pattern=grader['pattern'][:40], want=want):
                 self.assertEqual(verdict(grader, text), want, text)
+
+    def test_a_report_written_from_the_scan_passes_every_regex_grader(self):
+        """Claudit 4.3 (#193): the scan's own wording (each problem, fix, the always-loaded table, the scope lines)
+        meets every frozen finding-* and no-invented-* regex grader, so a report that keeps it can't miss on wording."""
+        for case, scan in self.scans.items():
+            text = render(scan)
+            for path in sorted((CASES / case / 'graders').glob('*.md')):
+                grader = ce.read_grader(path)
+                if grader.get('type') == 'regex':
+                    with self.subTest(case=case, grader=path.stem):
+                        self.assertTrue(verdict(grader, text), text)
 
     @unittest.skipUnless(shutil.which('node'), 'node not installed')
     def test_javascript_engine_agrees(self):
