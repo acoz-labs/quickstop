@@ -1,0 +1,1 @@
+The notes for the photo upload redesign in the Larchwood inspection app are in `notes/`, along with our design doc template. Write the design doc. The mobile and platform teams will review it next week, and most of them haven't seen any of these notes.

@@ -1,0 +1,15 @@
+# Current rule (unchanged since 2025).
+- alert: PayoutVolumeLow
+  expr: payouts_sent_total{job="payout-batch"} < 0.5 * avg_over_time(payouts_sent_total{job="payout-batch"}[7d])
+  for: 10m
+  labels: {severity: page, team: payments-ops}
+  annotations:
+    summary: Nightly payout count is under half the 7-day average.
+
+# Draft, not deployed: page when the batch skips more than 20 merchants.
+- alert: PayoutMerchantsSkipped
+  expr: payout_merchants_skipped{job="payout-batch"} > 20
+  for: 5m
+  labels: {severity: page, team: payments-ops}
+  annotations:
+    summary: The payout batch skipped merchants whose ledger partition was still open.

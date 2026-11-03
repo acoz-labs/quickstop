@@ -1,0 +1,14 @@
+{
+  "claim": {
+    "point": "312 merchants were paid late on 2-4 November because the move of the payout batch to the new scheduler on 1 November dropped its wait for the ledger close, so on nights the close ran past 02:00 the batch skipped merchants whose ledgers weren't closed yet.",
+    "detail": "358 skipped payouts, GBP 1.94M delayed, 46 merchants two days late; the old cron wrapper waited up to 3 hours; the volume alert never fired; everyone was paid by the 4 November catch-up, and the restored dependency has worked since 5 November."
+  },
+  "ask": {
+    "point": "Approve reimbursing the bank fees that 41 merchants have claimed because of the late payouts, GBP 3,140 in total.",
+    "detail": "The payout terms need the head of payments operations to approve an incident's claims above GBP 1,000."
+  },
+  "stakes": {
+    "point": "Without approval by 12 November, the first claims reach the 7-day reply deadline and support will decline them.",
+    "detail": "Support can't promise money that isn't approved."
+  }
+}

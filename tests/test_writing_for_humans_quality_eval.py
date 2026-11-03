@@ -127,7 +127,9 @@ class IdentifierSubject(unittest.TestCase):
                          'row_group_size defaulted to a million.', 'validateRow raises on blank email.',
                          'config/export.yaml never set it.', 'export.yaml never set it.',
                          '**`sync-01`** hosts the file.', '(`notes.md:4`) says so.', 'README.md explains it.',
-                         'src/50/x is a path.'):
+                         'src/50/x is a path.', 'Config.json is wrong.', '**Config.json** is wrong.',
+                         'Export.yaml never set it.', 'Notes.md has the timeline.', 'Index.ts exports it.',
+                         'fee-claims.csv has 41 rows.'):
             self.assertFlagged(sentence)
 
     def test_list_items_are_sentences(self):
@@ -139,7 +141,7 @@ class IdentifierSubject(unittest.TestCase):
                          'Version 3.0 raised the default.', 'Billing is half done.', 'pdfquill can sign PDFs.',
                          'Northwind Freight sends 40% of traffic.', 'I need your sign-off.', 'Paperforge is AGPL.',
                          '2026-10-31 was the first failed night.', 'Node.js is the runtime.', '50/50 is the split.',
-                         'TypeScript is stricter.', 'Config.yaml-style names are rare.'):
+                         'TypeScript is stricter.', 'Config.yaml-style names are rare.', 'Next.js renders the page.'):
             self.assertClear(sentence)
 
     def test_negated_or_quoted_sentences_are_not_exempt(self):
@@ -168,8 +170,8 @@ class AskQuestion(unittest.TestCase):
 
 
 class Suite(unittest.TestCase):
-    def test_seven_cases_with_keys_prompts_fixtures_and_samples(self):
-        self.assertEqual(len(CASES), 7)
+    def test_nine_cases_with_keys_prompts_fixtures_and_samples(self):
+        self.assertEqual(len(CASES), 9)
         for name, case in CASES.items():
             self.assertEqual(set(case['key']), set(q.ITEMS), name)
             self.assertTrue(case['prompt'], name)
@@ -193,7 +195,7 @@ class Suite(unittest.TestCase):
                 self.assertTrue(q.opening(text).rstrip().endswith(('.', '?', '!')), f'{name} {sample}')
 
     def test_borderline_fail_expects_every_real_item_to_fail(self):
-        case = CASES['2-design-note']  # its ask is "none", so only claim and stakes are checked
+        case = CASES['6-factual-answer']  # its ask is "none", so only claim and stakes are checked
         def grades(**items):
             part = {'items': dict({'claim': False, 'ask': False, 'stakes': False}, **items)}
             return {'cold-read-opening': part, 'cold-read-whole': part}
@@ -391,18 +393,19 @@ class Summary(unittest.TestCase):
             return q.summarize(out, write=False)
 
     def test_complete_result(self):
-        summary = self.summary(runs=3)
+        summary = self.summary(runs=5)
         self.assertEqual(summary['problems'], [])
         self.assertTrue(summary['baseline'])
         metrics = summary['arms']['default']
-        self.assertEqual((metrics['valid_runs'], metrics['opening_hits'], metrics['opening_items']), (21, 63, 63))
-        self.assertEqual((metrics['ask_question_passes'], metrics['ask_question_runs']), (3, 3))
-        self.assertIn('| default | default | 21 | 63/63 |', q.markdown(summary))
+        self.assertEqual((metrics['valid_runs'], metrics['opening_hits'], metrics['opening_items']), (45, 135, 135))
+        self.assertEqual((metrics['ask_question_passes'], metrics['ask_question_runs']), (5, 5))
+        self.assertIn('| default | default | 45 | 135/135 |', q.markdown(summary))
 
-    def test_one_run_is_complete_but_not_a_baseline(self):
-        summary = self.summary(runs=1)
-        self.assertTrue(summary['complete'])
-        self.assertFalse(summary['baseline'])
+    def test_fewer_runs_are_complete_but_not_a_baseline(self):
+        for runs in (1, 3):
+            summary = self.summary(runs=runs)
+            self.assertTrue(summary['complete'])
+            self.assertFalse(summary['baseline'])
 
     def test_missing_invalid_unscored_or_filtered_runs_are_not_complete(self):
         self.assertIn('default 6-factual-answer: 1 valid runs of 2',

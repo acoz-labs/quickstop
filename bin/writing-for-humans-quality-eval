@@ -42,6 +42,7 @@ OPENING_SENTENCES = 3
 OPENING_WORDS = 80
 SHINGLE = 5
 NEAR_DUPLICATE = 0.6
+BASELINE_RUNS = 5
 
 
 class Failure(Exception):
@@ -186,6 +187,7 @@ def word_count(text):
     return len(re.findall(r'\w\S*', '\n'.join(kept)))
 
 
+# Capitalised file names (Config.json) count; only product names like Node.js are exempt.
 IDENTIFIER = re.compile(
     r'''^(?:`[^`]+`                                # any code span
         |[\w./-]+:\d+(?:[-:]\d+)?\b                # file:line
@@ -193,7 +195,7 @@ IDENTIFIER = re.compile(
         |[A-Za-z0-9]*_[\w.]*                       # snake_case
         |[a-z][a-z0-9]*[A-Z]\w*                    # camelCase
         |(?=[\w./-]*[A-Za-z])[\w.-]*/[\w./-]+        # a path (not 50/50)
-        |(?![A-Z][a-z]+\.)[\w-]+\.(?:py|js|ts|tsx|rb|go|rs|java|md|ya?ml|json|toml|sh|txt|log|diff|sql|css|html)\b  # a file
+        |(?![A-Z][A-Za-z]*\.js\b)[\w-]+\.(?:py|js|ts|tsx|rb|go|rs|java|md|ya?ml|json|toml|sh|txt|csv|log|diff|sql|css|html)(?![\w-])  # a file
         )''', re.X)
 
 
@@ -751,7 +753,7 @@ def summarize(out, write=True):
     cases = load_cases()
     problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'),
                               cases)
-    summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == 3,
+    summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == BASELINE_RUNS,
                'problems': problems, 'settings': read_json(out / 'settings.json', {}),
                'arms': {arm: arm_metrics([r for r in records if r['arm'] == arm], cases) for arm in expected['arms']},
                'cases': {arm: {name: case_metrics([r for r in records if r['arm'] == arm and r['case'] == name])

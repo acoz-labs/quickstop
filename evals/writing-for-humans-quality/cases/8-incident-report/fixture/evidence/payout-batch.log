@@ -1,0 +1,54 @@
+2026-11-02T02:00:01Z INFO payout-batch start business_date=2026-11-01 scheduler=ridgeline
+2026-11-02T02:00:03Z INFO ledger partitions closed=55/64
+2026-11-02T02:00:03Z WARN partitions open, merchants in them are deferred to next run
+2026-11-02T02:00:03Z WARN partition=26 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=33 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=17 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=47 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=61 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=51 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=48 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=10 state=OPEN action=defer
+2026-11-02T02:00:03Z WARN partition=08 state=OPEN action=defer
+2026-11-02T02:00:04Z INFO merchants eligible=2361 deferred=188 to_pay=2173
+2026-11-02T02:31:35Z INFO bank file written payouts=2173
+2026-11-02T02:42:30Z INFO bank upload ok ack=BANK-429981
+2026-11-02T02:58:12Z INFO payout-batch done exit=0 paid=2173 deferred=188
+
+2026-11-03T02:00:01Z INFO payout-batch start business_date=2026-11-02 scheduler=ridgeline
+2026-11-03T02:00:03Z INFO ledger partitions closed=60/64
+2026-11-03T02:00:03Z WARN partitions open, merchants in them are deferred to next run
+2026-11-03T02:00:03Z WARN partition=22 state=OPEN action=defer
+2026-11-03T02:00:03Z WARN partition=17 state=OPEN action=defer
+2026-11-03T02:00:03Z WARN partition=30 state=OPEN action=defer
+2026-11-03T02:00:03Z WARN partition=05 state=OPEN action=defer
+2026-11-03T02:00:04Z INFO merchants eligible=2298 deferred=74 to_pay=2224
+2026-11-03T02:31:47Z INFO bank file written payouts=2224
+2026-11-03T02:42:44Z INFO bank upload ok ack=BANK-646494
+2026-11-03T02:49:40Z INFO payout-batch done exit=0 paid=2224 deferred=74
+
+2026-11-04T02:00:01Z INFO payout-batch start business_date=2026-11-03 scheduler=ridgeline
+2026-11-04T02:00:03Z INFO ledger partitions closed=59/64
+2026-11-04T02:00:03Z WARN partitions open, merchants in them are deferred to next run
+2026-11-04T02:00:03Z WARN partition=63 state=OPEN action=defer
+2026-11-04T02:00:03Z WARN partition=02 state=OPEN action=defer
+2026-11-04T02:00:03Z WARN partition=22 state=OPEN action=defer
+2026-11-04T02:00:03Z WARN partition=14 state=OPEN action=defer
+2026-11-04T02:00:03Z WARN partition=61 state=OPEN action=defer
+2026-11-04T02:00:04Z INFO merchants eligible=2402 deferred=96 to_pay=2306
+2026-11-04T02:31:49Z INFO bank file written payouts=2306
+2026-11-04T02:40:35Z INFO bank upload ok ack=BANK-604558
+2026-11-04T02:55:03Z INFO payout-batch done exit=0 paid=2306 deferred=96
+
+2026-11-04T14:30:07Z INFO payout-batch start business_date=2026-11-03 mode=catch-up scheduler=manual operator=oskar
+2026-11-04T14:30:08Z INFO ledger partitions closed=64/64
+2026-11-04T14:30:09Z INFO merchants eligible=96 deferred=0 to_pay=96 (deferred balances only)
+2026-11-04T14:47:31Z INFO bank upload ok ack=BANK-873014
+2026-11-04T14:52:15Z INFO payout-batch done exit=0 paid=96 deferred=0
+
+2026-11-05T02:00:00Z INFO ridgeline payout-batch waiting on dependency ledger-close (timeout 3h)
+2026-11-05T02:09:22Z INFO ridgeline dependency ledger-close satisfied
+2026-11-05T02:09:23Z INFO payout-batch start business_date=2026-11-04 scheduler=ridgeline
+2026-11-05T02:09:25Z INFO ledger partitions closed=64/64
+2026-11-05T02:09:25Z INFO merchants eligible=2417 deferred=0 to_pay=2417
+2026-11-05T02:51:48Z INFO payout-batch done exit=0 paid=2417 deferred=0

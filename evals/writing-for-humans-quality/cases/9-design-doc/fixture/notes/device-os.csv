@@ -1,0 +1,6 @@
+platform,os_version,active_inspectors,share
+iOS,17+,1490,0.40
+iOS,16,710,0.19
+iOS,15,335,0.09
+Android,12+,960,0.26
+Android,10-11,235,0.06

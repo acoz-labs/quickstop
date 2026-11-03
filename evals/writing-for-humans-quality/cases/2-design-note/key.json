@@ -4,7 +4,8 @@
     "detail": "It is simpler to operate and has been quiet since WAL; peak load is about 40 jobs a minute against a 2,000 a minute benchmark; Postgres would add a network hop and a two-week wait."
   },
   "ask": {
-    "point": "none"
+    "point": "Post the record to the team wiki.",
+    "detail": "The writer has no way to write to the wiki from the session, so the reader posts it."
   },
   "stakes": {
     "point": "The queue works on only one host, so if sync ever needs more than one worker host the team must revisit the decision and move the queue to Postgres.",
