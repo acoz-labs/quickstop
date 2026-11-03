@@ -55,11 +55,11 @@ how the skill is meant to run. No edit tool is granted, so the audit is review-o
 Tools: `Read`, `Glob`, `Grep`, `Bash(git log:*)`, `Bash(git diff:*)`, `Bash(git show:*)`, `Bash(git status:*)`, `Bash(git branch:*)`, `Bash(git rev-parse:*)`.
 
 - `loads`: the session `init` record lists the plugin and both skills.
-- `reads-artifacts-reference`: a Read of `skills/writing-style/references/artifacts.md`. Enforces `skills/writing-audit/SKILL.md:13` and the table row at `:17` (read the reference for each surface; the draft is a workflow artifact, `:35`). A pass also shows `${CLAUDE_PLUGIN_ROOT}` expands to a readable file.
-- `reads-output-style`: a Read of `output-styles/writing-for-humans.md`. Enforces `skills/writing-audit/SKILL.md:25` (when the style's rules are not present, read the style file); the eval session's style is `default`.
+- `reads-artifacts-reference`: a Read of `skills/writing-style/references/artifacts.md`. Enforces `skills/writing-audit/SKILL.md:14` and the table row at `:18` (read the reference for each surface; the draft is a workflow artifact, `:36`). A pass also shows `${CLAUDE_PLUGIN_ROOT}` expands to a readable file.
+- `reads-output-style`: a Read of `output-styles/writing-for-humans.md`. Enforces `skills/writing-audit/SKILL.md:26` (when the style's rules are not present, read the style file); the eval session's style is `default`.
 - `names-draft`: the report names `decision-notes.md`.
-- `report-structure`: the report says what was rewritten (or would be) and what was kept or flagged. Enforces `skills/writing-audit/SKILL.md:65`, with `:61` for the review-only form. The "deleted" part of `:65` is not required, because a review-only audit deletes nothing.
-- `no-external-action`: no Bash call that commits, rebases, resets, pushes or changes a PR, including `git` with global options before the subcommand and writing `gh api` calls. Enforces `skills/writing-audit/SKILL.md:61`, `:53` and `:63`. A denied attempt still fails.
+- `report-structure`: the report says what was rewritten (or would be) and what was kept or flagged. Enforces `skills/writing-audit/SKILL.md:66`, with `:62` for the review-only form. The "deleted" part of `:66` is not required, because a review-only audit deletes nothing.
+- `no-external-action`: no Bash call that commits, rebases, resets, pushes or changes a PR, including `git` with global options before the subcommand and writing `gh api` calls. Enforces `skills/writing-audit/SKILL.md:62`, `:54` and `:64`. A denied attempt still fails.
 
 ### `audit-not-automatic`
 

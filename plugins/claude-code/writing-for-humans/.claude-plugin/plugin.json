@@ -1,6 +1,19 @@
 {
   "name": "writing-for-humans",
-  "version": "0.3.1",
-  "description": "Plain, direct Claude Code writing with context, evidence and an opinionated voice preset.",
-  "license": "MIT"
+  "version": "1.0.0",
+  "description": "An output style that makes what Claude writes easy to take in at reading speed: the point, the ask and the stakes first, for a reader who wasn't in the session.",
+  "author": {
+    "name": "quickstop",
+    "url": "https://github.com/acoz-labs/quickstop"
+  },
+  "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/claude-code/writing-for-humans",
+  "repository": "https://github.com/acoz-labs/quickstop",
+  "license": "MIT",
+  "keywords": [
+    "writing",
+    "output-style",
+    "readability",
+    "communication",
+    "documentation"
+  ]
 }
