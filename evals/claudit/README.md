@@ -48,8 +48,10 @@ A fenced settings block counts only when its intro line passes the same checks. 
 negated clause as a unit, so a negation elsewhere on the line never exempts a claim, and "why not" is never a
 negation. Each grader has passing and failing controls, run in Python and node: for every accepted form, a direct
 negation, an earlier negation, a hypothetical or optional framing, a declined-in-plan clause, a rhetorical question,
-a `Source:` line and an invented note. A mutation check drops each named part of each pattern and needs a control to
-flip. f17's scaffold writes the parent's files to the workspace's
+a `Source:` line and an invented note. The passing controls hold at least six realistic phrasings of each positive
+finding, several taken from recorded reports: the fact first, then "but"/"and" the missing word; problem, then fix
+across a colon or semicolon; a bare imperative; a table row; a bullet with a code span; a fix in a fenced block. A
+mutation check drops each named part of each pattern and needs a control to flip. f17's scaffold writes the parent's files to the workspace's
 parent folder, which is the run's own home under `claude plugin eval`.
 
 Every case also has these `structure-*` regex graders: the report states the
