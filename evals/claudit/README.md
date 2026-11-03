@@ -31,12 +31,12 @@ the suite moves into the plugin.
 | `f11-valid-decline` | Shell toolkit that retired hooks for a review checklist and dropped code intelligence because it has no typed code | none: both declines with their reason, no Worth reconsidering note, no hooks recommended |
 | `f12-unsafe-decline` | Project that dropped pre-approved commands in favour of project `bypassPermissions` | the `defaultMode` defect as the one plan item, citing `docs/decisions.md:3` (`structure-defect-cited`), Correctness D |
 | `f13-no-reason-decline` | TypeScript library that retired hooks and dropped LSP plugins without a reason | none: both declines say "no reason given", no Worth reconsidering note |
-| `f14-enforcement` | Service whose merge, deploy and release gates and "must run `bin/check` before every commit" are prose only | an ask rule each for `gh pr merge`, `bin/deploy` and `bin/release`, branch protection as the real gate, a hook for `bin/check` or the reason for none |
+| `f14-enforcement` | Service whose merge, deploy and release gates and "must run `bin/check` before every commit" are prose only | an ask rule each for `gh pr merge`, `bin/deploy` and `bin/release`, branch protection named with `main`, merges or review, a hook for `bin/check` or the reason for none |
 | `f15-context-economy` | Service whose 10-line `CLAUDE.md` is about 610 words and imports a long doc, with a subagent-only skill left model-invocable, a skill description that retells its body, one rule copied into 3 files and paraphrased in 2, and the lint exempt list restated in prose | an always-loaded table in words or tokens, `disable-model-invocation` on the subagent-only skill (or its rules moved into the subagent), the copies grouped |
 | `f16-stale-facts` | CLI whose `CLAUDE.md` names a folder, a file and a dependency that don't exist | each flagged, and `structure-alignment-below-a` |
-| `f17-scope` | Repo inside a parent folder with its own `CLAUDE.md` and `AGENTS.md`; the repo's `CLAUDE.md` is a symlink to its `AGENTS.md` | the files above noted, the symlink named with its real file, the parent's `CLAUDE.md` flagged as stopping `AGENTS.md` being read; `no-invented-agents-md-missing` and `no-invented-parent-findings` |
+| `f17-scope` | Repo inside a parent folder with its own `CLAUDE.md` and `AGENTS.md`; the repo's `CLAUDE.md` is a symlink to its `AGENTS.md` | the files above noted, the symlink named with its real file, one paragraph or list item naming the parent's `CLAUDE.md` and saying the repo's `AGENTS.md` isn't read; `no-invented-agents-md-missing` and `no-invented-parent-findings` |
 | `f18-check-commands` | Library whose check command is only in `package.json` and CI, with `CLAUDE.md` saying "use bun run" | `Bash(bun run check)` allowlisted |
-| `f19-declarative-list` | Healthy library with a numbered list of standing principles | none: `no-invented-principles-skill` fails on a "procedure needs a skill" finding |
+| `f19-declarative-list` | Healthy library with a numbered list of standing principles | none: `no-invented-principles-skill` fails when a numbered change proposes a skill for the principles |
 
 Cases f14 to f19 are issue #192's fixtures F10 to F15, renumbered because F10 to F13 were already taken. Every
 grader they add is a script grader, built from named parts in `tests/test_claudit_fixture_graders.py` (rebuild with
@@ -51,7 +51,13 @@ negation, an earlier negation, a hypothetical or optional framing, a declined-in
 a `Source:` line and an invented note. The passing controls hold at least six realistic phrasings of each positive
 finding, several taken from recorded reports: the fact first, then "but"/"and" the missing word; problem, then fix
 across a colon or semicolon; a bare imperative; a table row; a bullet with a code span; a fix in a fenced block. A
-mutation check drops each named part of each pattern and needs a control to flip. f17's scaffold writes the parent's files to the workspace's
+mutation check drops each named part of each pattern and needs a control to flip. Three graders match structure
+and co-occurrence instead of one clause: `finding-branch-protection` needs branch protection (or a ruleset) and
+`main`, a merge or a review in one sentence; `finding-parent-blocks-agents` needs one paragraph or list item that
+names the parent `CLAUDE.md` and says the repo's `AGENTS.md` isn't read, in either order; and
+`no-invented-principles-skill` counts only a numbered change (not a bullet, an Also worth knowing note, an optional
+or declined item, or a clause with negation or decline wording) that proposes a skill for the principles. An arm that
+lists its changes as bullets therefore never scores this false defect. f17's scaffold writes the parent's files to the workspace's
 parent folder, which is the run's own home under `claude plugin eval`.
 
 Every case also has these `structure-*` regex graders: the report states the
