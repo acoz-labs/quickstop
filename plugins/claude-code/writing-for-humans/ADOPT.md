@@ -1,11 +1,9 @@
 # Adopt the writing style
 
-Install and select the plugin using the [README](README.md). Confirm the active style through `/output-style` before judging its effect on a short writing task.
+Install and select the plugin using the [README](README.md). Run `/output-style` to confirm the style is active before judging its effect on a short writing task.
 
-The default is the original kit's opinionated preset. Start there if it suits you. If you want a different voice, choose the particular preferences you want to change, such as punctuation, tone or numeral formatting. Keep the context-independence and evidence-placement mechanisms unless you deliberately want different behavior.
+Try it on writing you need to understand quickly, such as a report or a handoff. Check whether the first three sentences tell you the point, what you need to do and what's at stake. When a reply misses, name the missing context or unclear consequence rather than asking only for fewer words.
 
-Use your own explicitly supplied examples to describe your voice. Do not ask an agent to mine private messages or other people's work. Keep those examples and resulting preferences outside this public package.
+The style has no personal voice. To add one (punctuation, tone, numerals), write your own native output style with a distinct name, or put the preferences in your own instructions. Use examples you supply yourself, keep them outside this public package, and don't edit the plugin cache. A separate style copy is yours to maintain and won't track plugin updates.
 
-Make changes in your own native instructions or a separately named native output style, not in the plugin cache. A separate style copy is yours to maintain and will not silently track plugin updates. Preserve `keep-coding-instructions: true` when using it for coding.
-
-Try the result on a piece of writing you need to understand. Identify the missing context or unclear consequence, rather than asking only for fewer words. Use the optional cold-reader technique for a difficult question when the extra check is worthwhile. Neither adoption nor a writing audit grants permission to publish messages, rewrite history or change project policies.
+Use the optional cold-reader check for a difficult question when the extra check is worthwhile. Neither adoption nor a writing audit grants permission to publish messages, rewrite history or change project policies.

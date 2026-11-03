@@ -2,6 +2,7 @@
 name: writing-audit
 description: Audit and adjust the writing a piece of work produced, including workflow artifacts, code comments in the diff, PR descriptions, and unpushed commit messages. Run it once draft PRs are open and before they go ready for review; running it before the PRs exist leaves their descriptions unaudited. Takes no arguments and audits the current branch.
 disable-model-invocation: true
+disallowed-tools: Bash(git push *) Bash(git rebase *) Bash(git commit --amend *) Bash(git reset *) Bash(git filter-branch *) Bash(git filter-repo *) Bash(gh pr merge *)
 ---
 
 # Writing Audit
@@ -16,13 +17,13 @@ Read the reference for each surface before auditing it. Do not audit from memory
 |---|---|
 | Workflow artifacts | `${CLAUDE_PLUGIN_ROOT}/skills/writing-style/references/artifacts.md` |
 | Questions asked of me | `${CLAUDE_PLUGIN_ROOT}/skills/writing-style/references/questions.md` |
-| Code comments | *(none yet; use the output style's section)* |
-| PR descriptions | *(none yet; use the output style's section)* |
-| Commit messages | *(none yet; use the output style's section)* |
+| Code comments | *(none; use the output style and the team's coding standards)* |
+| PR descriptions | *(none; use the output style)* |
+| Commit messages | *(none; use the output style)* |
 
-A surface with no reference falls back to that surface's section in the output style, which is thinner but not nothing. Package maintainers adding a reference update this table and the `writing-style` skill in the source repository. An ordinary audit does not edit installed plugin files.
+A surface with no reference uses the output style alone. Package maintainers adding a reference update this table and the `writing-style` skill in the source repository. An ordinary audit does not edit installed plugin files.
 
-**The floor is the `writing-for-humans` output style, and this audit is void without it.** It carries rules that live in no reference: the punctuation preferences, the spoken-voice test, personal voice patterns, and the context-independence test that item 1 below leans on entirely. Check whether its rules are already present. If they are not, read `${CLAUDE_PLUGIN_ROOT}/output-styles/writing-for-humans.md` directly. Do not change the selected output style. Auditing against the references alone silently drops half the standard.
+**The floor is the `writing-for-humans` output style, and this audit is void without it.** It carries rules that live in no reference: the opening (point, ask, stakes), the cold-read test that item 1 below leans on entirely, and the rules on repetition, narration and evidence. Check whether its rules are already present. If they are not, read `${CLAUDE_PLUGIN_ROOT}/output-styles/writing-for-humans.md` directly. Do not change the selected output style. Auditing against the references alone silently drops half the standard.
 
 With the floor confirmed present, the per-surface references are what you still need to load.
 
@@ -34,7 +35,7 @@ With the floor confirmed present, the per-surface references are what you still 
 
 Any durable markdown this work produced for me to read: design notes, triage write-ups, decision records, scratch docs. They get audited first because this is the surface where the damage is worst and least visible.
 
-The failure to hunt for is prose that is terse, precise, correct, and undecipherable to anyone who wasn't in the session. It passes every voice rule, which is why it survives. Run the output style's context-independence test against every line.
+The failure to hunt for is prose that is terse, precise, correct, and undecipherable to anyone who wasn't in the session. It passes every voice rule, which is why it survives. Run the output style's cold-read test against every line, and check that each artifact opens with its point, ask and stakes.
 
 The fix is never to delete the citation. Say the thing in plain words, move the `file:line` behind the sentence, leave the evidence intact.
 
@@ -42,15 +43,15 @@ Anything that asks me a question gets checked against `${CLAUDE_PLUGIN_ROOT}/ski
 
 ### 2. Code comments we added or modified
 
-Comments we authored in the requested branch diff plus relevant uncommitted changes. Leave unrelated or other authors’ work untouched. Judge each against the code-comments reference if one exists, otherwise the output style's Code comments section, plus any team coding standards. Load them; don't work from a remembered version.
+Comments we authored in the requested branch diff plus relevant uncommitted changes. Leave unrelated or other authors’ work untouched. Judge each against the team's coding standards and the output style's cold-read rules. Load them; don't work from a remembered version.
 
 ### 3. PR descriptions
 
-For this branch's PRs (`gh pr view`), against the PR-descriptions reference if one exists, otherwise the output style's section. Template sections are structure, not verbosity: where the repo has a PR template, every section stays, with a short `N/A` where it doesn't apply. Tighten the prose inside them; never strip the scaffold.
+For this branch's PRs (`gh pr view`), against the output style. Template sections are structure, not verbosity: where the repo has a PR template, every section stays, with a short `N/A` where it doesn't apply. Tighten the prose inside them; never strip the scaffold.
 
 ### 4. Unpushed commit messages
 
-Only if they have not been pushed and history rewriting is already authorized. Otherwise suggest revised wording. Same sources as above. Never rewrite pushed history.
+Suggest revised wording only. This audit never rewrites history, pushed or not, never pushes and never merges; the skill's frontmatter removes those commands while it runs.
 
 ## Out of scope, deliberately
 

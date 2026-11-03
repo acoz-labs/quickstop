@@ -2,7 +2,7 @@
 
 Every workflow stage tends to end by asking something: open questions from an investigation, a design gate, a review's "needs your attention," a decision that can't be made without input. These are the highest-stakes prose an agent writes. A review comment nobody can parse wastes a colleague's minute; **a question nobody can parse blocks the work until they ask what it means**, and they have to spend that round trip before they can even start thinking about the answer.
 
-The context-independence rule in the `writing-for-humans` output style is the floor. This file is how it gets applied to asking.
+The cold-read rules in the `writing-for-humans` output style are the floor. This file is how they apply to asking.
 
 ## The shape
 
@@ -30,9 +30,9 @@ A short list. Each option says what it means in practice and what it gives up. I
 
 An option nobody would pick isn't an option, it's padding. Two real ones beat four where two are strawmen.
 
-### 4. The evidence, accessible without obscuring the ask
+### 4. The evidence, kept but out of the way
 
-Keep the decision, meaningful uncertainty, consequences and context needed to evaluate the options visible. Keep short citations nearby in a trailing parenthetical or a plain evidence paragraph. Lengthy optional supporting evidence can go in plain Markdown sections, appendices or links, the default for ordinary documents and unknown renderers. GitHub comments and PR descriptions may use `<details>`; other destinations may use documented native collapsible blocks when useful and supported. Do not invent syntax, assume Markdown supports raw HTML, or fold every evidence section. Brevity never justifies hiding or deleting evidence needed for the decision.
+Short citations go in a trailing parenthetical or a plain evidence paragraph after the options. Lengthy optional evidence follows the artifacts reference's destination rules. Never hide or cut evidence the decision needs.
 
 ## Worked example
 
@@ -62,7 +62,6 @@ Same facts, same citations, no lookups needed to understand the ask.
 - **Ask sharp questions, not a survey.** Three that change the shape of the work beat ten that prove you read everything.
 - **A question whose answer changes nothing doesn't get asked.** If you'd proceed the same way either way, decide it yourself and say what you decided.
 - **Never ask someone to hold two things in their head at once** to answer one question. If the question needs a comparison, put the comparison in the question.
-- **Quote, don't point.** An acceptance criterion, a ticket line, a documented rule: paste the words. "AC 3" is a lookup; the sentence itself is an answer someone can react to.
 - **One question per question.** Two asks bundled into a paragraph get one answer covering whichever was noticed.
 - **Say what you'd do.** A recommendation can be overruled in a word. An open-ended question makes the reader redo structuring you already did and threw away.
 

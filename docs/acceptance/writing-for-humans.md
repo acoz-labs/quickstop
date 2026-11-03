@@ -10,6 +10,10 @@ For destination-aware evidence placement, cover ordinary Markdown, an unknown re
 
 Verify discovery, style selection and a fresh writing session. Disable and uninstall in the isolated configuration and compare unrelated settings before and after. Use the artifact delivery procedure below, including a fresh public marketplace writing smoke and retained previous-version recovery. Issue-specific findings remain findings; historical conversion failures are not new passes.
 
+## 1.0 quality gate
+
+1.0 is accepted on the frozen quality suite (suite tree `c8a8bf86`, runner blob `f03bee3a`), against the re-baseline in [the quality baselines](writing-for-humans-quality-baselines.md#10-re-baseline-on-the-frozen-suite-189). It needs a passing calibration for those hashes and 5 runs of the 1.0 arm with the re-baseline's settings, with the style proven active in every run. The gate bars are listed in that document, and its gate table records each one as a pass or a fail. Candidates are named by plugin tree hash and screened first; screens never count toward the gate. The #172 regression suite (`bin/writing-for-humans-eval`) must also pass on the candidate. After release, verify that a clean marketplace install selects the style and loads both skills.
+
 ## Historical conversion fidelity
 
 Independently compare the retained original kit with the package. Account for every material difference: native metadata and selection, preserved coding instructions, package-local references, explicit task/repository/authorization precedence, removed orchestration mandates, bounded optional cold-reader use, and independently invented public examples. Preserve the substantive context-independence and evidence-placement guidance and clearly label the opinionated voice. Keep original ZIPs and private configuration out of public artifacts.

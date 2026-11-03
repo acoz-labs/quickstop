@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUITE = ROOT / 'evals/writing-for-humans'
 CASES = SUITE / 'cases'
 PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+VERSION = json.loads((PLUGIN / '.claude-plugin/plugin.json').read_text())['version']
 RUNNER = ROOT / 'bin/writing-for-humans-eval'
 
 loader = importlib.machinery.SourceFileLoader('wfh_eval', str(RUNNER))
@@ -44,7 +45,7 @@ def init_line(plugins=None, skills=None, tools=None, style='default'):
               'agents': ['Explore'], 'skills': skills if skills is not None else SKILLS,
               'plugins': plugins if plugins is not None else [
                   {'name': 'writing-for-humans', 'path': '/tmp/p', 'source': 'writing-for-humans@inline',
-                   'version': '0.3.1'},
+                   'version': VERSION},
                   {'name': 'cc-plugin-agents-md', 'path': 'builtin', 'source': 'cc-plugin-agents-md@builtin'}]}
     return json.dumps(record, separators=(',', ':'))
 
@@ -164,14 +165,14 @@ TOOL_CORPUS = {
 CITATIONS = {
     'skills/writing-audit/SKILL.md': {
         4: 'disable-model-invocation: true',
-        13: 'Read the reference for each surface before auditing it.',
-        17: '| Workflow artifacts | `${CLAUDE_PLUGIN_ROOT}/skills/writing-style/references/artifacts.md` |',
-        25: 'If they are not, read `${CLAUDE_PLUGIN_ROOT}/output-styles/writing-for-humans.md` directly.',
-        35: 'Any durable markdown this work produced for me to read: design notes',
-        53: 'Never rewrite pushed history.',
-        61: 'a review-only request means report findings without edits. Commit only within existing authorization.',
-        63: 'Apply it with `gh pr edit --body` only when that external change is already authorized',
-        65: '**Report**: what was deleted, rewritten, and kept-and-flagged',
+        14: 'Read the reference for each surface before auditing it.',
+        18: '| Workflow artifacts | `${CLAUDE_PLUGIN_ROOT}/skills/writing-style/references/artifacts.md` |',
+        26: 'If they are not, read `${CLAUDE_PLUGIN_ROOT}/output-styles/writing-for-humans.md` directly.',
+        36: 'Any durable markdown this work produced for me to read: design notes',
+        54: 'This audit never rewrites history, pushed or not, never pushes and never merges',
+        62: 'a review-only request means report findings without edits. Commit only within existing authorization.',
+        64: 'Apply it with `gh pr edit --body` only when that external change is already authorized',
+        66: '**Report**: what was deleted, rewritten, and kept-and-flagged',
     },
 }
 
@@ -266,7 +267,7 @@ def result_line(text, cost=0):
 
 
 INSTALLED = [{'name': 'writing-for-humans', 'path': '/tmp/m/writing-for-humans', 'source': 'writing-for-humans@wfh-eval',
-              'version': '0.3.1'}]
+              'version': VERSION}]
 
 
 class HostGradingTests(unittest.TestCase):
@@ -274,13 +275,13 @@ class HostGradingTests(unittest.TestCase):
         return [name for name, ok, _ in checks if not ok]
 
     def test_load_passes_only_for_the_installed_plugin_at_its_version_with_both_skills(self):
-        self.assertEqual(self.failed(we.grade_load(records(init_line(plugins=INSTALLED)), '0.3.1')), [])
+        self.assertEqual(self.failed(we.grade_load(records(init_line(plugins=INSTALLED)), VERSION)), [])
         self.assertEqual(self.failed(we.grade_load(records(init_line(plugins=INSTALLED)), '0.3.2')),
                          ['plugin-version'])
-        self.assertEqual(self.failed(we.grade_load(records(init_line()), '0.3.1')), ['plugin-installed'])
+        self.assertEqual(self.failed(we.grade_load(records(init_line()), VERSION)), ['plugin-installed'])
         self.assertEqual(self.failed(we.grade_load(records(init_line(plugins=INSTALLED, skills=['simplify'])),
-                                                   '0.3.1')), ['skill-writing-audit', 'skill-writing-style'])
-        self.assertEqual(len(self.failed(we.grade_load([], '0.3.1'))), 5)
+                                                   VERSION)), ['skill-writing-audit', 'skill-writing-style'])
+        self.assertEqual(len(self.failed(we.grade_load([], VERSION))), 5)
 
     def test_style_selection(self):
         ok = records(result_line('Output style set to writing-for-humans:writing-for-humans'))
@@ -331,7 +332,7 @@ selected = json.loads(settings.read_text())['outputStyle'] if settings.is_file()
 out({'type': 'system', 'subtype': 'init', 'output_style': selected if mode != 'no-fresh-style' else 'default',
      'skills': ['writing-for-humans:writing-audit', 'writing-for-humans:writing-style'],
      'plugins': [{'name': 'writing-for-humans', 'source': 'writing-for-humans@wfh-eval',
-                  'version': '9.9.9' if mode == 'wrong-version' else '0.3.1'}]})
+                  'version': '9.9.9' if mode == 'wrong-version' else '__VERSION__'}]})
 cost = 0.02 if mode == 'paid' else 0
 if prompt == '/output-style ' + style:
     settings.parent.mkdir(exist_ok=True)
@@ -343,6 +344,7 @@ elif prompt.startswith('/output-style writing-for-humans:no-such-style'):
 else:
     out({'type': 'result', 'result': 'Output style: ' + selected, 'total_cost_usd': cost})
 '''
+FAKE_CLAUDE = FAKE_CLAUDE.replace('__VERSION__', VERSION)
 
 
 class HostCheckTests(unittest.TestCase):
@@ -391,7 +393,7 @@ class HostCheckTests(unittest.TestCase):
     def test_a_change_to_real_config_fails(self):
         real = self.home / '.claude/settings.json'
         with mock.patch.object(we, 'copy_plugin', side_effect=lambda *a: (real.write_text('{"x": 1}\n'),
-                                                                          {'version': '0.3.1'})[1]):
+                                                                          {'version': VERSION})[1]):
             host = self.check()
         self.assertIn('real-config-unchanged: ~/.claude/settings.json', self.failed(host))
         self.assertFalse(host['passed'])
@@ -400,12 +402,12 @@ class HostCheckTests(unittest.TestCase):
     def test_unrelated_writes_to_claude_json_pass_but_a_temp_dir_entry_fails(self):
         state = self.home / '.claude.json'
         with mock.patch.object(we, 'copy_plugin', side_effect=lambda *a: (state.write_text('{"tips": 2}\n'),
-                                                                          {'version': '0.3.1'})[1]):
+                                                                          {'version': VERSION})[1]):
             self.assertEqual(self.failed(self.check()), [])
 
         def leak(source, target):
             state.write_text(json.dumps({'projects': {str(Path(target).parent.parent / 'workspace'): {}}}))
-            return {'version': '0.3.1'}
+            return {'version': VERSION}
 
         with mock.patch.object(we, 'copy_plugin', side_effect=leak):
             self.assertEqual(self.failed(self.check()), ['real-state-untouched: ~/.claude.json'])
@@ -424,7 +426,7 @@ def case(name, *items, defined=('a', 'b')):
 def result(*items, partial=False, defined=('a', 'b'), cases=None):
     return {'claudeVersion': '2.1.316', 'costUsd': 0.5, 'durationSeconds': 80, 'partial': partial,
             'suite': {'modelOverride': 'claude-sonnet-5-5', 'plugins': [{'name': 'writing-for-humans',
-                                                                         'version': '0.3.1'}]},
+                                                                         'version': VERSION}]},
             'cases': cases if cases is not None else [case('c', *items, defined=defined)]}
 
 
@@ -451,7 +453,7 @@ class SummaryTests(unittest.TestCase):
         summary = self.summary(result(run_item(), run_item(passed=False)), expected(runs=2))
         self.assertEqual([row['failed_graders'] for row in summary['runs']], [[], ['b']])
         self.assertEqual(summary['agent_cost_usd'], 0.5)
-        self.assertEqual(summary['plugins'], ['writing-for-humans@0.3.1'])
+        self.assertEqual(summary['plugins'], [f'writing-for-humans@{VERSION}'])
         self.assertIn('| c | 2 | FAIL | b |', we.markdown(summary))
 
     def test_a_case_missing_from_the_result_fails(self):
