@@ -53,8 +53,9 @@ def neg_after(word):
 
 
 def already(word):
-    """An invented note that the fix is in place: "already an ask rule", "an ask rule ... already exists"."""
-    return (r'(?![^\n]*(?:\balready[ \t]+%s{0,3}?[\x60*"(]*%s|%s[^\n]{0,60}?\balready[ \t]+(?:exists?|in[ \t]+place'
+    """An invented note that the fix is in place: "already an ask rule", "an ask rule ... already exists" (in the
+    same clause, so "CI already runs on PRs" after a full stop doesn't count)."""
+    return (r'(?![^\n]*(?:\balready[ \t]+%s{0,3}?[\x60*"(]*%s|%s(?:[^\n.;:!?]|[.;:!?](?=\S)){0,60}?\balready[ \t]+(?:exists?|in[ \t]+place'
             r'|there|present|configured|set[ \t]+up|enabled|covered|an?|the|asks?|gates?|protects?|handles?|runs?|checks?'
             r'|enforces?|blocks?)\b))'
             % (TOK, word, word))
@@ -92,8 +93,8 @@ def free_of(claim, negated, drop=(), require=''):
 
 
 # f14-enforcement (issue F10): the prose-only gates and the unenforced must-run rule.
-ASK_VERB = (r'\b(?:add|adding|put|move|use|using|set|create|include|list|register|gate|require|requir\w*|should'
-            r'|recommend\w*|Change)\b')
+ASK_VERB = (r'(?:\b(?:add|adding|put|move|use|using|set|create|include|list|register|require|requir\w*|should'
+            r'|recommend\w*|Change)\b|[^\w-]gate\b)')  # "gate" the verb, not "human-gate"
 
 
 def ask_rule(command, drop=frozenset()):
@@ -124,7 +125,9 @@ def commit_hook(drop=frozenset()):
     """A hook that runs bin/check (a JSON hooks block or a line), or a line saying why there's no hook."""
     hook_line = line({'source': SOURCE, 'question': QUESTION, **guards(HOOK), 'hook': has(HOOK),
                       'check': has(r'bin/check'), 'verb': has(HOOK_VERB)}, drop)
-    json_hook = r'"(?:PreToolUse|Stop)"[ \t]*:[ \t]*\[(?:(?!\x60{3})[\s\S])*?bin/check'
+    # A hooks block, then bin/check in the same change: the block itself or a script it names, before the next
+    # heading or column-0 numbered item.
+    json_hook = r'"(?:PreToolUse|Stop)"[ \t]*:[ \t]*\[(?:(?!\n#{1,3}[ \t]|\n[0-9]+[.)][ \t])[\s\S]){0,1500}?bin/check'
     reason = BOL + ('' if 'source' in drop else SOURCE) + ('' if 'question' in drop else QUESTION) + (
         r'(?=[^\n]*(?:bin/check|\bcommit))[^\n]*?\b(?:%s|instead[ \t]+of|rather[ \t]+than|leave)[ \t]+%s{0,4}?[\x60*"]*'
         r'(?:a[ \t]+|an[ \t]+)?%s[^\n]*?(?:%s)' % (NEG, TOK, HOOK, REASON) if 'reason-shape' not in drop
@@ -302,7 +305,8 @@ GRADERS = {
          '`.claude/settings.json` has no `ask` or `deny` rule, so the gate is prose only.\n\nPASS when the report '
          'adds an ask rule for the command: a JSON `"ask": [...]` array holding `"Bash(gh pr merge`, or one line '
          'with "ask" (or `permissions.ask`), `Bash(gh pr merge` and a recommending word (add, put, move, use, set, '
-         'create, include, list, register, gate, require, should, recommend, or Claudit\'s "Change").'),
+         'create, include, list, register, gate, require, should, recommend, or Claudit\'s "Change"; not the '
+         '"gate" in "human-gate"). A hypothetical such as "an ask rule would do it" is not a recommendation.'),
         ('finding-ask-deploy', ask_rule, (r'(?:\./)?bin/deploy',), 'i', '',
          'CLAUDE.md says never to deploy to production without a human go-ahead, and `bin/deploy` has no `ask` '
          'rule.\n\nPASS when the report adds an ask rule for `Bash(bin/deploy` (or `./bin/deploy`), in an `"ask"` '
@@ -318,7 +322,8 @@ GRADERS = {
          'actual, server-side, bypass, backstop, guarantee, stop, block, prevent).'),
         ('finding-commit-hook', commit_hook, (), 'i', '',
          'CLAUDE.md says "You must run `bin/check` before every commit", and no hook runs it.\n\nPASS when the '
-         'report adds a hook that runs `bin/check` (a JSON `"PreToolUse"` or `"Stop"` block naming it, or one line '
+         'report adds a hook that runs `bin/check` (a JSON `"PreToolUse"` or `"Stop"` block, then `bin/check` in it or '
+         'in a script it names before the next heading or column-0 numbered item, or one line '
          'with a hook word, `bin/check` and add, create, install, wire, use, set up, register, configure, enforce, '
          'run or "Change"), or gives the reason for not adding one: a line about `bin/check` or commits where a '
          'negation (or "instead of", "rather than", "leave") governs the hook and a reason follows (because, '
@@ -481,6 +486,10 @@ CONTROLS = {
         '**Source:** [ask `Bash(bin/deploy:*)`](https://code.claude.com/docs/en/permissions)',
         '- An ask rule for `Bash(bin/deploy:*)` already exists.',
         '- Add `Bash(bin/deploy:*)` to deny.',
+        # Smoke a9fd63c (Claudit 4.2.0): a hypothetical left out of the plan is not a recommendation.
+        '- Several rules are human-gate rules: merge, deploy and release. They are prose only. If you want them '
+        'enforced, ask rather than assume. A `deny` or `ask` permission rule for `Bash(bin/deploy production:*)` and '
+        '`Bash(bin/release:*)` would do it. I left them out of the plan because the scan didn\'t flag them.',
         '- No need to add an ask rule for `Bash(bin/deploy:*)`.',
         '- Should you add an ask rule for `Bash(bin/deploy:*)`?',
         '   Source: [Add ask rules](https://code.claude.com/docs/en/permissions) such as `Bash(bin/deploy:*)`',
@@ -504,6 +513,9 @@ CONTROLS = {
         '- Ask rules don\'t replace branch protection, which is the gate that holds for everyone.',
         '- Require reviews with a protected branch; nothing else enforces the merge rule outside Claude Code.',
         '- Turn on a ruleset for `main` so no merge bypasses review.',
+        # Smoke a9fd63c (plain): "already" in a later sentence on the line is not a note that it's in place.
+        '- **Branch protection:** require PR approval on `main` in GitHub. CI already runs on PRs, so also make `ci / '
+        'check` a required status check. This is the only control that holds regardless of what the agent does.',
     ], [
         '- No branch protection is needed: the ask rule is enough.',
         '- No branch protection is needed to gate merges.',
@@ -518,6 +530,11 @@ CONTROLS = {
         plan_item(2, 'Enforce the check with a Stop hook', 'Change: add to `.claude/settings.json`:\n```json\n'
                   '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "bin/check"}]}]}}\n```'),
         '- I didn\'t add a hook for `bin/check` because CI already runs it on every push.',
+        # Smoke a9fd63c (Claudit 4.2.0): the hooks block names a script, and the script runs bin/check.
+        plan_item(1, 'Enforce the check with a Stop hook', 'Change: add to `.claude/settings.json`:\n```json\n'
+                  '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": ".claude/hooks/stop-check.sh"}]}]}}'
+                  '\n```\nand create `.claude/hooks/stop-check.sh`:\n```bash\n#!/usr/bin/env bash\nbin/check >&2 || '
+                  'exit 2\n```'),
         '- No hook for the commit rule: CI runs `bin/check` on every pull request.',
         '- Install a git pre-commit hook that runs `bin/check`; no commit should skip it.',
     ], [
@@ -529,6 +546,8 @@ CONTROLS = {
         '- Problem: no hook runs `bin/check`, so a commit can skip it.',
         '- Not worth a hook for `bin/check`.',
         '- Problem: the hook config is missing; `bin/check` runs only in CI.',
+        plan_item(1, 'Enforce the check with a Stop hook', 'Change:\n```json\n{"hooks": {"Stop": []}}\n```') + '\n'
+        + plan_item(2, 'Pre-approve the check', 'Change: allow `bin/check`.'),
         '- No need to add a hook that runs `bin/check`.',
         '- Adding a hook that runs `bin/check` isn\'t needed.',
         '- Should you add a hook for `bin/check`?',
