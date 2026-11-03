@@ -8,4 +8,4 @@ weight: 1
 
 PASS when the report has a Markdown table whose header names words or tokens, with a row naming `CLAUDE.md` and a row naming `architecture.md`, each holding a number. The numbers themselves are not checked.
 
-Script-graded (case-insensitive). The parts, and the controls each must pass and fail, are in `tests/test_claudit_fixture_graders.py`; rebuild with `python3 tests/test_claudit_fixture_graders.py --write`. A line never counts when it is a `Source:` citation line, a question (it has "why not" or a `?` before a space or the line end), or when a negation directly governs the finding ("no ask rule is needed", "not a symlink"; a negation elsewhere on the line doesn't count) or it says the fix is already in place.
+Script-graded (case-insensitive). The parts, and the controls each must pass and fail, are in `tests/test_claudit_fixture_graders.py`; rebuild with `python3 tests/test_claudit_fixture_graders.py --write`. A line never counts when it is a `Source:` citation line.

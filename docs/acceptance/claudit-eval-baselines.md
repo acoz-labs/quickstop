@@ -158,7 +158,9 @@ to f19 because F10 to F13 were taken:
 - `doctor-combined`: `bin/claudit-eval run --arm doctor-combined`, headless and read-only (see the
   [suite README](../../evals/claudit/README.md#arms)). It runs outside `claude plugin eval`, so its llm graders go to
   the same judge prompt through `claude -p`, not through the eval host. Its throwaway folders are never trusted, so
-  Claude Code ignores the fixtures' allow rules; the arm only reads, so the graded text doesn't depend on them.
+  Claude Code ignores the fixtures' allow rules, and `/doctor` runs with Bash denied: it can't run `claude --version`
+  or read `~/.claude*`, and its reply says so. The results give each arm's permission-denial counts. Counted batches
+  run one case at a time, so the cost ceiling can't overshoot.
 - `f17-scope` puts the parent's `CLAUDE.md` and `AGENTS.md` in the workspace's parent folder. Under `claude plugin
   eval` (plain and Claudit) that folder is the run's own home, which the eval host also gives a stub `.git`. Under
   `doctor-combined` it is a plain folder. `/context` shows Claude Code loads the parent `CLAUDE.md` in both layouts.

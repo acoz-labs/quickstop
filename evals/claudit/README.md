@@ -40,12 +40,16 @@ the suite moves into the plugin.
 
 Cases f14 to f19 are issue #192's fixtures F10 to F15, renumbered because F10 to F13 were already taken. Every
 grader they add is a script grader, built from named parts in `tests/test_claudit_fixture_graders.py` (rebuild with
-`python3 tests/test_claudit_fixture_graders.py --write`). A finding line doesn't count when it is a `Source:` line, a
-question, directly negated ("no ask rule is needed") or a note that the fix is already in place. The `no-invented-*`
-graders skip a negated clause as a unit, so a negation elsewhere on the line never exempts a claim, and "why not" is
-never a negation. Each grader has passing and failing controls (negated lines, a negation elsewhere on the line,
-rhetorical questions, `Source:` lines, invented notes), run in Python and node, and a mutation check that drops each
-named part of the pattern and needs a control to flip. f17's scaffold writes the parent's files to the workspace's
+`python3 tests/test_claudit_fixture_graders.py --write`). A finding counts only when its parts sit in one clause of
+one sentence that no negation governs ("Don't add X", "No command needs one, including X", "rather than X"), in a
+sentence that isn't a question or hypothetical ("would do it", "you could … if you want", "If the repo had …"), on a
+line that isn't a `Source:` line or a change left out of the plan, and that doesn't say the fix is already in place.
+A fenced settings block counts only when its intro line passes the same checks. The `no-invented-*` graders skip a
+negated clause as a unit, so a negation elsewhere on the line never exempts a claim, and "why not" is never a
+negation. Each grader has passing and failing controls, run in Python and node: for every accepted form, a direct
+negation, an earlier negation, a hypothetical or optional framing, a declined-in-plan clause, a rhetorical question,
+a `Source:` line and an invented note. A mutation check drops each named part of each pattern and needs a control to
+flip. f17's scaffold writes the parent's files to the workspace's
 parent folder, which is the run's own home under `claude plugin eval`.
 
 Every case also has these `structure-*` regex graders: the report states the
@@ -114,7 +118,10 @@ names back, commits the fixture in each run's empty workspace.
   2.1.317 uses: the same system and user prompt, three votes, majority PASS, sent with `claude -p --tools ""` and
   `--system-prompt`. `result.json` has the `claude plugin eval` shape, so `summarize` pools and prints it the same way,
   and each run also records each call's cost, wall time and permission denials. The throwaway folder is never
-  trusted, so Claude Code ignores the fixture's allow rules; the arm only reads, so that changes nothing it grades.
+  trusted, so Claude Code ignores the fixture's allow rules, and in print mode every call that would need a prompt is
+  denied: `/doctor` runs with Bash denied, so it can't run `claude --version` or read `~/.claude*`, and it says so in
+  its reply. In the two smoke runs `/doctor` had 6 and 5 calls denied, and `/doctor prompt-audit .` 0 and 4. The
+  fixture files themselves stay readable. Report the denial counts with the results.
 
 ## Running
 
@@ -134,7 +141,9 @@ bin/claudit-eval run --arm doctor-combined --model claude-sonnet-5-5 --max-cost-
 
 For `doctor-combined`, `--max-cost-usd` stops new runs once the arm's spend reaches it (exit 2, partial), and
 `--max-budget-usd` caps each headless call; `--judge-budget-usd` (default 0.05) caps each judge vote and
-`--concurrency` runs cases at once. Every `claude` call the runner makes sets `DISABLE_AUTOUPDATER=1`.
+`--concurrency` runs cases at once. The ceiling is checked only before a run starts, so with `--concurrency N` a batch
+can overshoot it by up to N runs (each up to 2 × `--max-budget-usd` plus its judge votes); keep counted batches at
+the default of 1. Every `claude` call the runner makes sets `DISABLE_AUTOUPDATER=1`.
 
 The 4.0 gate runs the claudit arm twice, with and without `--web-fetch`.
 
