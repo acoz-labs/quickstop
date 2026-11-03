@@ -1,0 +1,1 @@
+Accounts, notifications and gateway are on the new logger with their tests passing; billing and search aren't done yet. Can you get me access to the search staging environment, or ask Priya Raman to? Without it I can't test the search migration, which holds up removing the old logger.

@@ -1,0 +1,1 @@
+I've finished looking into the export failure from the night of 30 October. It's related to a recent dependency change and how the job uses memory. There's a fix we could make, and a decision about timing to go with it. The details are in the evidence folder if you want to dig in.

@@ -36,8 +36,8 @@ TASK_TOOLS = ('Read', 'Glob', 'Grep', 'Skill')
 # DISABLE_AUTOUPDATER also stops the background marketplace refresh, which rewrites known_marketplaces.json.
 ISOLATION = ('--setting-sources', 'project,local', '--strict-mcp-config', '--no-session-persistence')
 ENV = {'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1', 'DISABLE_AUTOUPDATER': '1'}
-REAL_CONFIG = ('.claude/settings.json', '.claude/plugins/installed_plugins.json',
-               '.claude/plugins/known_marketplaces.json')
+# Real configuration a run must leave byte-identical: user settings and every plugin state file, found at run time.
+REAL_CONFIG = ('.claude/settings.json', '.claude/plugins/*.json')
 OPENING_SENTENCES = 3
 OPENING_WORDS = 80
 SHINGLE = 5
@@ -68,15 +68,17 @@ ABBREVIATIONS = ('e.g.', 'i.e.', 'etc.', 'vs.', 'approx.', 'cf.', 'no.', 'mr.', 
 BOUNDARY = re.compile(r'[.!?]["\')\]*_`]*\s+(?=["\'(\[*_`]*[A-Z0-9`])')
 LIST_MARKER = re.compile(r'^(?:[-*+]|\d+[.)])\s+')
 HEADING = re.compile(r'^#{1,6}\s+')
+# A line that is wholly bold or underscored, with no sentence ending, works as a heading: "**Why:**".
+LABEL = re.compile(r'^(\*\*|__)(?P<label>(?:(?!\1).)+?)\1:?$')
 
 
 def split_sentences(paragraph):
     sentences, start = [], 0
     for match in BOUNDARY.finditer(paragraph):
-        head = paragraph[start:match.start() + 1]
-        if head.lower().endswith(ABBREVIATIONS):
+        if paragraph[start:match.start() + 1].lower().endswith(ABBREVIATIONS):
             continue
-        sentences.append(head.strip())
+        # Keep closing quotes, brackets and markup with the sentence they close.
+        sentences.append(paragraph[start:match.end()].strip())
         start = match.end()
     tail = paragraph[start:].strip()
     return sentences + ([tail] if tail else [])
@@ -86,7 +88,8 @@ def units(text):
     """The output as ('heading' | 'sentence', text) units in order.
 
     Fenced code and table rows are structured data, not prose, and are left out. Each heading, list item
-    and paragraph starts a new unit; paragraphs and list items split into sentences."""
+    and paragraph starts a new unit; paragraphs and list items split into sentences. A wholly bold line
+    without a sentence ending ("**What changes**", "**Why:**") is a heading."""
     found, paragraph, fence = [], [], None
 
     def flush():
@@ -114,6 +117,11 @@ def units(text):
         if LIST_MARKER.match(stripped):
             flush()
             stripped = LIST_MARKER.sub('', stripped)
+        label = LABEL.match(stripped)
+        if label and not label['label'].rstrip().endswith(('.', '?', '!')):
+            flush()
+            found.append(('heading', label['label'].strip()))
+            continue
         paragraph.append(stripped)
     flush()
     return found
@@ -184,8 +192,8 @@ IDENTIFIER = re.compile(
         |[A-Za-z_][\w.]*\(\)                       # call()
         |[A-Za-z0-9]*_[\w.]*                       # snake_case
         |[a-z][a-z0-9]*[A-Z]\w*                    # camelCase
-        |[\w.-]*/[\w./-]+                          # a path
-        |[\w-]+\.(?:py|js|ts|tsx|rb|go|rs|java|md|ya?ml|json|toml|sh|txt|log|diff|sql|css|html)\b  # a file
+        |(?=[\w./-]*[A-Za-z])[\w.-]*/[\w./-]+        # a path (not 50/50)
+        |(?![A-Z][a-z]+\.)[\w-]+\.(?:py|js|ts|tsx|rb|go|rs|java|md|ya?ml|json|toml|sh|txt|log|diff|sql|css|html)\b  # a file
         )''', re.X)
 
 
@@ -224,8 +232,10 @@ def load_cases(suite=SUITE):
         directory = path.parent
         case = json.loads(path.read_text())
         key = json.loads((directory / 'key.json').read_text())
-        if set(key) != set(ITEMS) or not all(isinstance(key[i], str) and key[i].strip() for i in ITEMS):
-            raise Failure(f'{directory.name}: key.json needs non-empty claim, ask and stakes')
+        if set(key) != set(ITEMS) or not all(isinstance(key[i], dict) and isinstance(key[i].get('point'), str)
+                                              and key[i]['point'].strip() and set(key[i]) <= {'point', 'detail'}
+                                              for i in ITEMS):
+            raise Failure(f'{directory.name}: key.json needs claim, ask and stakes, each with a non-empty point')
         if not (directory / 'fixture').is_dir():
             raise Failure(f'{directory.name}: missing fixture/')
         cases[directory.name] = dict(case, name=directory.name, dir=directory, key=key,
@@ -466,10 +476,16 @@ def tree_digest(root):
     return digest.hexdigest()
 
 
-def real_config_digests():
-    home = Path.home()
-    return {name: hashlib.sha256((home / name).read_bytes()).hexdigest() if (home / name).is_file() else None
-            for name in REAL_CONFIG}
+def real_config_digests(home=None):
+    home = Path(home or Path.home())
+    paths = sorted({path for pattern in REAL_CONFIG for path in home.glob(pattern) if path.is_file()})
+    return {str(path.relative_to(home)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+
+
+def config_changes(before, after):
+    """Guarded files that changed, appeared or disappeared between two digests."""
+    return [f'~/{name} changed during the run' for name in sorted(set(before) | set(after))
+            if before.get(name) != after.get(name)]
 
 
 def candidate(plugin_source):
@@ -606,12 +622,13 @@ def run(args):
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             list(pool.map(one, jobs))
     finally:
-        changes = [f'~/{name} changed during the run' for name, value in real_config_digests().items()
-                   if value != before[name]]
+        after = real_config_digests()
+        changes = config_changes(before, after)
         if tree_digest(plugin_dir) != digest:
             changes.append('retained plugin bytes changed during the run')
-        (out / 'guard.json').write_text(json.dumps({'before': before, 'after': real_config_digests(),
-                                                    'problems': changes}, indent=2) + '\n')
+        (out / 'guard.json').write_text(json.dumps({'patterns': list(REAL_CONFIG), 'files': sorted(before),
+                                                    'before': before, 'after': after, 'problems': changes},
+                                                   indent=2) + '\n')
         if args.ledger:
             total = append_ledger(args.ledger, f'run {out.name}: arms {",".join(arms)}, {len(cases)} cases, '
                                   f'{args.runs} runs', budget.spent)
@@ -628,8 +645,34 @@ def load_records(out):
     return records
 
 
-def suite_problems(records, expected, guard, proofs):
+def suite_drift(expected, cases):
+    """Ways the recorded suite differs from the suite on disk, so an edited suite can't read as complete."""
     problems = []
+    if not expected.get('filtered'):
+        if set(expected['arms']) != set(ARMS):
+            problems.append(f"recorded arms {sorted(expected['arms'])} differ from the suite's {sorted(ARMS)}")
+        problems += [f'case {name} is in the suite but not in the result' for name in cases if name not in expected['cases']]
+    for name, graders in expected['cases'].items():
+        if name not in cases:
+            problems.append(f'recorded case {name} is not in the suite')
+        elif graders != case_graders(cases[name]):
+            problems.append(f'recorded graders for {name} differ from the suite')
+    problems += [f'recorded arm {arm} runs {style!r}, the suite runs {ARMS.get(arm)!r}'
+                 for arm, style in expected['arms'].items() if ARMS.get(arm) != style]
+    return problems
+
+
+def tool_calls(transcript):
+    """Tool names the session called, from its stream-json transcript."""
+    names = []
+    for record in parse_stream(Path(transcript).read_text() if Path(transcript).is_file() else ''):
+        content = (record.get('message') or {}).get('content') if record.get('type') == 'assistant' else None
+        names += [block.get('name') for block in content or [] if isinstance(block, dict) and block.get('type') == 'tool_use']
+    return names
+
+
+def suite_problems(records, expected, guard, proofs, cases=None):
+    problems = suite_drift(expected, cases) if cases is not None else []
     if expected.get('filtered'):
         problems.append('subset run (--case or --arm): never a baseline')
     seen = {}
@@ -683,6 +726,8 @@ def arm_metrics(records, cases):
             'mean_task_cost_usd': round(statistics.mean([r['cost_usd'] for r in valid]), 4) if valid else None,
             'mean_task_seconds': round(statistics.mean([r['duration_seconds'] for r in valid]), 1) if valid else None,
             'judge_cost_usd': round(sum(r.get('judge_cost_usd', 0) for r in valid), 4),
+            'skill_calls': sum(r.get('tools', []).count('Skill') for r in valid),
+            'tool_calls': sum(len(r.get('tools', [])) for r in valid),
             'output_styles': sorted({str(r.get('output_style')) for r in valid}),
             'models': sorted({str(r.get('model')) for r in valid}),
             'claude_versions': sorted({str(r.get('claude_version')) for r in valid})}
@@ -700,9 +745,12 @@ def summarize(out, write=True):
         raise Failure(f'{out} has no suite.json')
     records = load_records(out)
     for record in records:
-        record['judge_cost_usd'] = recorded_judge_cost(out / 'runs' / record['arm'] / record['case'] / f'run-{record["run"]}')
+        directory = out / 'runs' / record['arm'] / record['case'] / f'run-{record["run"]}'
+        record['judge_cost_usd'] = recorded_judge_cost(directory)
+        record['tools'] = tool_calls(directory / 'transcript.jsonl')
     cases = load_cases()
-    problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'))
+    problems = suite_problems(records, expected, read_json(out / 'guard.json'), read_json(out / 'preflight.json'),
+                              cases)
     summary = {'complete': not problems, 'baseline': not problems and expected['runs'] == 3,
                'problems': problems, 'settings': read_json(out / 'settings.json', {}),
                'arms': {arm: arm_metrics([r for r in records if r['arm'] == arm], cases) for arm in expected['arms']},
@@ -738,14 +786,14 @@ def markdown(summary):
              f"total cost ${summary['total_cost_usd']:.4f}",
              *[f'Problem: {problem}' for problem in summary['problems']], '',
              '| Arm | Style | Valid runs | Opening hits | Whole hits | Pedantry passes | Repeats (runs) '
-             '| Identifier subjects | Case 4 question | Median words | Task $/run | Task s/run | Judge $ |',
-             '|---|---|---|---|---|---|---|---|---|---|---|---|---|']
+             '| Identifier subjects | Case 4 question | Median words | Skill calls (all tools) | Task $/run | Task s/run | Judge $ |',
+             '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|']
     for arm, m in summary['arms'].items():
         lines.append(f"| {arm} | {', '.join(m['output_styles']) or '-'} | {m['valid_runs']} "
                      f"| {m['opening_hits']}/{m['opening_items']} | {m['whole_hits']}/{m['whole_items']} "
                      f"| {m['pedantry_passes']}/{m['valid_runs']} | {m['repeated_content']} ({m['runs_with_repeats']}) "
                      f"| {m['identifier_subjects']} | {m['ask_question_passes']}/{m['ask_question_runs']} "
-                     f"| {m['median_words']} | {m['mean_task_cost_usd']} | {m['mean_task_seconds']} | {m['judge_cost_usd']} |")
+                     f"| {m['median_words']} | {m['skill_calls']} ({m['tool_calls']}) | {m['mean_task_cost_usd']} | {m['mean_task_seconds']} | {m['judge_cost_usd']} |")
     return '\n'.join(lines)
 
 
@@ -776,9 +824,23 @@ def grade(args):
 
 # Calibration: hand-written good and bad samples per case.
 
+SAMPLES = ('good', 'bad', 'borderline-pass', 'borderline-fail')
+
+
 def calibration_expectations(sample, case, grades):
-    """[(grader, ok, detail)] for one sample: good must pass everything, bad must fail everything."""
-    good = sample == 'good'
+    """[(grader, ok, detail)] for one sample.
+
+    good and borderline-pass must pass every grader. bad must fail every one. borderline-fail tests only the
+    cold-read boundary: every item whose key point isn't "none" must fail, on the opening and the whole."""
+    if sample == 'borderline-fail':
+        checks = []
+        for part in ('opening', 'whole'):
+            if f'cold-read-{part}' in grades:
+                items = grades[f'cold-read-{part}']['items']
+                wanted = [item for item in ITEMS if case['key'][item]['point'] != 'none']
+                checks.append((f'cold-read-{part}', not any(items[item] for item in wanted), f"{items}"))
+        return checks
+    good = sample in ('good', 'borderline-pass')
     checks = [('repeated-content', (grades['repeated-content']['count'] == 0) == good,
                f"{grades['repeated-content']['count']} repeated"),
               ('identifier-subject', (grades['identifier-subject']['count'] == 0) == good,
@@ -807,7 +869,7 @@ def calibrate(args):
     try:
         for name in names:
             case = cases[name]
-            for sample in ('good', 'bad'):
+            for sample in SAMPLES:
                 text = (case['dir'] / 'calibration' / f'{sample}.md').read_text()
                 grades = script_grades(text, case)
                 if args.judges:

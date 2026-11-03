@@ -1,5 +1,14 @@
 {
-  "claim": "Three clients still called the v1 API in the past week, and one of them, Northwind Freight, sends about 40% of all v1 traffic, so deleting v1 this release breaks live integrations.",
-  "ask": "Decide whether to delete the v1 endpoints in this release anyway, or keep them for one more release (about six weeks) while Northwind and the other two clients migrate.",
-  "stakes": "Deleting now breaks Northwind Freight's shipment sync and the two smaller clients' integrations; keeping v1 leaves the static-token auth path flagged in the security finding open for another release, past its 30 November remediation date."
+  "claim": {
+    "point": "Three clients still call the v1 API, so deleting it in this release would break live integrations.",
+    "detail": "Northwind Freight sends about 40% of v1 traffic and says its migration is planned for Q1; Pellucid Health and Orchard & Vale send the rest."
+  },
+  "ask": {
+    "point": "Decide whether to delete the v1 endpoints in this release as planned, or keep them longer while the clients migrate.",
+    "detail": "The next release is about six weeks later, in early January."
+  },
+  "stakes": {
+    "point": "Deleting now breaks those clients' integrations; keeping v1 leaves the static-token security finding open past its 30 November remediation date.",
+    "detail": "Keeping it needs a documented risk acceptance from the API owner with a new date; Northwind's shipment sync is the largest integration at risk."
+  }
 }

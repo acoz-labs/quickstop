@@ -1,0 +1,1 @@
+The export ran out of memory because the library upgrade on 30 October made its batches much bigger by default. Can I deploy the one-line fix that sets the old batch size back, even though we're in the change freeze? Until it's deployed, the export fails every night and Harbor Analytics misses that day's data.

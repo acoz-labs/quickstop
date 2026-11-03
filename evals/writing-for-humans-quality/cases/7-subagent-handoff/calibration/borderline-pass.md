@@ -1,0 +1,1 @@
+pdfquill is the only one of the three that can sign PDFs and is MIT licensed, so it's the one that fits. Are you OK with the risk that it hasn't had a release in 14 months? If it breaks we might have to fix it ourselves, since nothing else meets both requirements.
