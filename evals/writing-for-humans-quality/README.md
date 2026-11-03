@@ -97,7 +97,9 @@ Each heading, list item and paragraph starts a new unit, and paragraphs split in
 sentences at `.`, `?` or `!` followed by a capital, digit or code span (common
 abbreviations such as "e.g." don't split). Headings are not sentences, and neither is
 a line that is wholly bold with no sentence ending (`**What changes**`, `**Why:**`),
-which works as a heading. A bold sentence such as `**Ship it.**` stays a sentence.
+which works as a heading. So does a run-in label: a wholly bold first sentence with
+more text after it in the same paragraph (`**Verdict.** The job…`). A bold sentence on
+its own, such as `**Ship it.**`, stays a sentence.
 
 Model judges (`judges/*.md`; Sonnet, `--system-prompt` replacing Claude Code's, no
 tools, JSON schema output):
