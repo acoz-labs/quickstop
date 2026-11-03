@@ -41,6 +41,15 @@ class Sentences(unittest.TestCase):
                                          ('sentence', 'One.'), ('sentence', 'Two.'), ('heading', 'Why:'),
                                          ('sentence', 'Three.'), ('heading', 'Traffic'), ('heading', 'Notes')])
 
+    def test_run_in_bold_labels_are_headings(self):
+        self.assertEqual(q.units('**Verdict.** The job dropped a wait. It skipped merchants.'),
+                         [('heading', 'Verdict.'), ('sentence', 'The job dropped a wait.'),
+                          ('sentence', 'It skipped merchants.')])
+        self.assertEqual(q.units('- **Raise the timeout.** Security rejected it.'),
+                         [('heading', 'Raise the timeout.'), ('sentence', 'Security rejected it.')])
+        self.assertEqual(q.sentences('**Ship it** today. Then tag.'), ['**Ship it** today.', 'Then tag.'])
+        self.assertEqual(q.opening('**Verdict.** One. Two. Three. Four.'), 'Verdict.\nOne.\nTwo.\nThree.')
+
     def test_wholly_bold_sentences_stay_sentences(self):
         self.assertEqual(q.units('**Delete now or wait?**\n\n**Ship it.**'),
                          [('sentence', '**Delete now or wait?**'), ('sentence', '**Ship it.**')])
@@ -51,8 +60,8 @@ class Sentences(unittest.TestCase):
         self.assertTrue(q.ask_question('**Context**\n\nOne. Two.\n\n**Decision:**\n\nDelete now or wait?'))
 
     def test_split_keeps_closing_markup(self):
-        self.assertEqual(q.sentences('**Use pdfquill (MIT).** It signs. "Quoted." Done.'),
-                         ['**Use pdfquill (MIT).**', 'It signs.', '"Quoted."', 'Done.'])
+        self.assertEqual(q.sentences('It signs. **Use pdfquill (MIT).** "Quoted." Done.'),
+                         ['It signs.', '**Use pdfquill (MIT).**', '"Quoted."', 'Done.'])
 
     def test_blockquotes_and_bold_labels_are_prose(self):
         self.assertEqual(q.sentences('> Quoted line. Second.\n\n**Billing** is half done.'),

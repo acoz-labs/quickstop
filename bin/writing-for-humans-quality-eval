@@ -90,12 +90,19 @@ def units(text):
 
     Fenced code and table rows are structured data, not prose, and are left out. Each heading, list item
     and paragraph starts a new unit; paragraphs and list items split into sentences. A wholly bold line
-    without a sentence ending ("**What changes**", "**Why:**") is a heading."""
+    without a sentence ending ("**What changes**", "**Why:**") is a heading, and so is a wholly bold first
+    sentence with more text after it in the same paragraph ("**Verdict.** The job...")."""
     found, paragraph, fence = [], [], None
 
     def flush():
         if paragraph:
-            found.extend(('sentence', s) for s in split_sentences(' '.join(paragraph)))
+            parts = split_sentences(' '.join(paragraph))
+            # A run-in label ("**Verdict.** The job...") heads the text after it, so it is a heading too.
+            label = LABEL.match(parts[0]) if len(parts) > 1 else None
+            if label:
+                found.append(('heading', label['label'].strip()))
+                parts = parts[1:]
+            found.extend(('sentence', s) for s in parts)
             paragraph.clear()
 
     for line in text.splitlines():
