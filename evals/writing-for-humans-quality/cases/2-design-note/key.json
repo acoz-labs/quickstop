@@ -1,0 +1,5 @@
+{
+  "claim": "The team decided to keep the sync job queue in SQLite (in WAL mode) on the single sync host rather than move it to the shared Postgres cluster, because it is simpler to operate and easily handles today's load of about 40 jobs a minute.",
+  "ask": "none",
+  "stakes": "The queue only works on one host, so if sync ever needs more than one worker host (expected if load passes roughly 500 jobs a minute), the team must revisit this and move the queue to Postgres."
+}

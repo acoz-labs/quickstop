@@ -1,0 +1,5 @@
+{
+  "claim": "The change makes the webhook sender retry failed deliveries (timeouts, 429s and 5xx responses) up to 5 attempts with exponential backoff, about 30 seconds in total, instead of dropping the event after the first failure; 4xx errors other than 429 are still not retried.",
+  "ask": "Reviewers should confirm whether webhook receivers deduplicate repeated deliveries (by event id) before this merges.",
+  "stakes": "If receivers don't deduplicate, a retry after a slow delivery that actually succeeded delivers the same event twice and repeats its side effects, such as a second payment-received email."
+}

@@ -1,0 +1,5 @@
+{
+  "claim": "Three clients still called the v1 API in the past week, and one of them, Northwind Freight, sends about 40% of all v1 traffic, so deleting v1 this release breaks live integrations.",
+  "ask": "Decide whether to delete the v1 endpoints in this release anyway, or keep them for one more release (about six weeks) while Northwind and the other two clients migrate.",
+  "stakes": "Deleting now breaks Northwind Freight's shipment sync and the two smaller clients' integrations; keeping v1 leaves the static-token auth path flagged in the security finding open for another release, past its 30 November remediation date."
+}

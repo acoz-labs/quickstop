@@ -1,0 +1,1 @@
+The transcript of yesterday's discussion about the job queue for the Ferrylog sync service is in `discussion.txt`. Write a short decision record for the team wiki. People who weren't in the meeting will read it.
