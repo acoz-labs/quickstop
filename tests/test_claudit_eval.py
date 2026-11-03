@@ -697,6 +697,162 @@ class HeadlessTests(GradeTests):
         self.assertEqual(list(tmp.iterdir()), [])
 
 
+FAKE_COMBINED = """#!{python}
+import json, os, sys
+if sys.argv[1:] == ['--version']:
+    print('2.1.317 (Claude Code)')
+    sys.exit(0)
+judge = '--system-prompt' in sys.argv
+stdin = sys.stdin.read() if judge else ''
+with open(os.environ['FAKE_ARGS'], 'a') as handle:
+    handle.write(json.dumps({{'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': stdin,
+                             'autoupdater': os.environ.get('DISABLE_AUTOUPDATER'),
+                             'parent': sorted(os.listdir('..'))}}) + '\\n')
+if judge:
+    print(json.dumps({{'result': os.environ.get('FAKE_JUDGE_REPLY', 'PASS'), 'total_cost_usd': 0.001}}))
+elif sys.argv[2] == '/doctor':
+    print(json.dumps({{'result': 'Doctor: `CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.1,
+                      'permission_denials': [{{'tool_name': 'Bash'}}]}}))
+else:
+    print(json.dumps({{'result': 'Audit: the folder above this repo has its own `CLAUDE.md`.', 'total_cost_usd': 0.05,
+                      'permission_denials': []}}))
+"""
+
+
+class CombinedArmTests(Temp):
+    """The doctor-combined arm (#192): both headless reviews per scaffolded case, graded as one report."""
+
+    def fake(self, **env):
+        fake = self.base / 'fake-bin'
+        fake.mkdir(exist_ok=True)
+        (fake / 'claude').write_text(FAKE_COMBINED.format(python=sys.executable))
+        (fake / 'claude').chmod(0o755)
+        tmp = self.base / 'tmp'
+        tmp.mkdir(exist_ok=True)
+        self.calls = self.base / 'calls.jsonl'
+        return dict(os.environ, PATH=f'{fake}{os.pathsep}{os.environ.get("PATH", "")}', TMPDIR=str(tmp),
+                    FAKE_ARGS=str(self.calls), PYTHONDONTWRITEBYTECODE='1', **env)
+
+    def run_arm(self, *extra, env=None):
+        out = self.base / 'out'
+        proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'doctor-combined', '--model',
+                               'claude-sonnet-5-5', '--max-budget-usd', '0.4', '--output-dir', str(out), *extra],
+                              capture_output=True, text=True, env=env or self.fake(), stdin=subprocess.DEVNULL)
+        return proc, out
+
+    def records(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()]
+
+    def test_runs_both_reviews_read_only_and_grades_them_as_one_report(self):
+        proc, out = self.run_arm('--max-cost-usd', '5', '--case', 'f1[7]-scope')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        calls = [r for r in self.records() if r['argv'] != ['--version']]
+        doctor = [r for r in calls if '--system-prompt' not in r['argv']]
+        self.assertEqual([r['argv'] for r in doctor], [
+            ['-p', prompt, *ce.DOCTOR_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.4']
+            for prompt in ('/doctor', '/doctor prompt-audit .')])
+        self.assertEqual({r['cwd'] for r in doctor}, {doctor[0]['cwd']})
+        self.assertTrue(doctor[0]['cwd'].endswith('/home/cwd'))
+        # f17-scope's scaffold put the parent's instruction files in the run's own home, beside the workspace.
+        self.assertEqual(doctor[0]['parent'], ['AGENTS.md', 'CLAUDE.md', 'cwd'])
+        self.assertEqual({r['autoupdater'] for r in self.records()}, {'1'})
+        result = json.loads((out / 'result.json').read_text())
+        run = result['cases'][0]['arms']['with'][0]
+        graders = {g['name']: g['passed'] for g in run['graders']}
+        self.assertTrue(graders['finding-symlink-real-path'])
+        self.assertTrue(graders['finding-parent-noted'])
+        self.assertTrue(graders['no-invented-agents-md-missing'])
+        self.assertFalse(graders['structure-intent'])
+        self.assertEqual((run['costUsd'], run['judgeCostUsd']), (0.15, 0))
+        self.assertEqual([(p['prompt'], p['costUsd'], p['permissionDenials']) for p in run['parts']],
+                         [('/doctor', 0.1, 1), ('/doctor prompt-audit .', 0.05, 0)])
+        report = (out / 'reports/f17-scope-run1.md').read_text()
+        self.assertTrue(report.startswith('# /doctor\n\nDoctor: '))
+        self.assertIn('\n# /doctor prompt-audit .\n\nAudit: ', report)
+        summary = json.loads((out / 'summary.json').read_text())
+        self.assertEqual((summary['arm'], summary['plugins'], summary['web_fetch']), ('doctor-combined', [], False))
+        self.assertEqual(summary['totals']['parts']['/doctor prompt-audit .']['cost_usd'], 0.05)
+        self.assertIn('`/doctor`: agent $0.1000', proc.stdout)
+        self.assertEqual(list((self.base / 'tmp').iterdir()), [])
+        for path in out.rglob('*.json'):
+            self.assertNotIn(str(self.base / 'tmp'), path.read_text(), path)
+
+    def test_llm_graders_use_the_eval_hosts_judge_prompt_and_votes(self):
+        proc, out = self.run_arm('--max-cost-usd', '5', '--case', 'f5-bare', '--judge-model', 'claude-haiku-5-5')
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        judge = [r for r in self.records() if '--system-prompt' in r['argv']]
+        llm = [p for p in sorted((ROOT / 'evals/claudit/cases/f5-bare/graders').glob('*.md'))
+               if 'type: llm' in p.read_text()]
+        self.assertEqual(len(judge), 3 * len(llm))
+        criteria = ce.read_grader(llm[0])['criteria']
+        report = (out / 'reports/f5-bare-run1.md').read_text()
+        self.assertEqual(judge[0]['stdin'], ce.JUDGE_PROMPT.format(criteria=criteria, output=report))
+        self.assertTrue(judge[0]['stdin'].endswith('\n\n\nRespond with exactly one word: PASS or FAIL.'))
+        self.assertEqual(judge[0]['argv'], ['-p', *ce.JUDGE_FLAGS, '--model', 'claude-haiku-5-5', '--max-budget-usd',
+                                            '0.05'])
+        self.assertNotEqual(judge[0]['cwd'], [r for r in self.records() if r['argv'][:2] == ['-p', '/doctor']][0]['cwd'])
+        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
+        for grader in run['graders']:
+            if grader['type'] == 'llm':
+                self.assertEqual(grader['judgeVotes'], [True] * 3)
+        self.assertEqual(run['judgeCostUsd'], round(0.001 * len(judge), 6))
+
+    def test_a_vote_that_says_both_pass_and_fail_fails(self):
+        proc, out = self.run_arm('--max-cost-usd', '5', '--case', 'f5-bare',
+                                 env=self.fake(FAKE_JUDGE_REPLY='PASS? No: FAIL'))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
+        self.assertEqual({tuple(g['judgeVotes']) for g in run['graders'] if g['type'] == 'llm'}, {(False,) * 3})
+        self.assertEqual(json.loads((out / 'summary.json').read_text())['totals']['findings_hit'], 0)
+
+    def test_the_cost_ceiling_stops_new_runs(self):
+        proc, out = self.run_arm('--max-cost-usd', '0.1', '--case', 'f9-clean', '--runs', '3')
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        result = json.loads((out / 'result.json').read_text())
+        self.assertTrue(result['partial'])
+        self.assertEqual(len(result['cases'][0]['arms']['with']), 1)
+        self.assertIn('PARTIAL', proc.stderr)
+
+    def test_refuses_without_a_per_call_cap_or_with_one_on_other_arms(self):
+        proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'doctor-combined', '--model', 'm',
+                               '--max-cost-usd', '1', '--dry-run'], capture_output=True, text=True, env=self.fake())
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('--max-budget-usd (per headless call) is required', proc.stderr)
+        proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'plain', '--model', 'm', '--max-cost-usd',
+                               '1', '--max-budget-usd', '1', '--dry-run'], capture_output=True, text=True, env=self.fake())
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('applies only to the doctor-combined arm', proc.stderr)
+        self.assertFalse(self.calls.exists())
+
+    def test_refuses_an_instruction_file_above_the_workspace(self):
+        env = self.fake()
+        (self.base / 'AGENTS.md').write_text('# above\n')
+        proc, _ = self.run_arm('--max-cost-usd', '1', '--case', 'f9-clean', env=env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn('is above the workspace and would load', proc.stderr)
+        self.assertEqual(list((self.base / 'tmp').iterdir()), [])
+
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_headless_keeps_both_reports_of_a_real_repository(self):
+        repo = GradeTests.repo(self)
+        sha = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+        env = dict(self.fake(), GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        out = self.base / 'out'
+        proc = subprocess.run([sys.executable, str(RUNNER), 'headless', '--arm', 'doctor-combined', '--repo', str(repo),
+                               '--sha', sha, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.6', '--runs', '1',
+                               '--output-dir', str(out)], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        meta = json.loads((out / 'run1/meta.json').read_text())
+        self.assertEqual((meta['head'], meta['cost_usd'], meta['arm']), (sha, 0.15, 'doctor-combined'))
+        self.assertEqual([shlex.split(p['command'])[2] for p in meta['parts']], ['/doctor', '/doctor prompt-audit .'])
+        self.assertTrue((out / 'run1/report.md').read_text().startswith('# /doctor'))
+        self.assertTrue((out / 'run1/doctor.json').is_file() and (out / 'run1/prompt-audit.json').is_file())
+        self.assertEqual(json.loads((out / 'summary.json').read_text())['total_cost_usd'], 0.15)
+        self.assertTrue(all(r['cwd'].endswith('/repo') for r in self.records() if r['argv'] != ['--version']))
+        self.assertEqual(list((self.base / 'tmp').iterdir()), [])
+
+
 class SuiteStructureTests(unittest.TestCase):
     def test_cases_follow_the_suite_contract(self):
         cases = sorted(path for path in (ROOT / 'evals/claudit/cases').glob('*') if path.is_dir())

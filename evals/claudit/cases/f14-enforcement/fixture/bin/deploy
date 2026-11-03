@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Deploy the current commit: bin/deploy staging|production
+set -euo pipefail
+case "${1:-}" in
+  staging|production) ;;
+  *) echo "usage: bin/deploy staging|production" >&2; exit 64 ;;
+esac
+echo "deploying $(git rev-parse --short HEAD) to $1"

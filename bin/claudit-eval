@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Run the Claudit `claude plugin eval` suite on one arm, summarize a result, or run and grade headless audits."""
+"""Run the Claudit `claude plugin eval` suite on one arm, summarize a result, or run and grade headless audits.
+
+The doctor-combined arm (#192) runs headless outside `claude plugin eval`: `/doctor` and `/doctor prompt-audit .`
+in each scaffolded fixture, graded as one report by the same graders and the same judge prompt."""
 import sys
 
 if sys.version_info < (3, 11):
     sys.exit('claudit-eval requires Python 3.11+; put the pinned interpreter first in PATH')
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import fnmatch
 import importlib.machinery
@@ -20,6 +24,8 @@ import statistics
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITE = ROOT / 'evals/claudit'
@@ -30,7 +36,7 @@ WEB_FETCH_RULE = 'WebFetch(domain:code.claude.com)'
 CANONICAL_PROMPT = PROMPT_KEY + "Review this project's Claude Code setup and tell me what to improve."
 STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
                  'description': 'Empty plugin for the no-plugin eval arms.'}
-ARMS = ('plain', 'doctor', 'claudit')
+ARMS = ('plain', 'doctor', 'claudit', 'doctor-combined')
 DEFAULT_JUDGE = 'claude-haiku-5-5'
 STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent',
              'structure-plan-length')
@@ -40,6 +46,20 @@ HELPER = 'skills/claudit/scripts/claudit.py'
 # The accepted headless method (#156, #168): normal login, candidate bytes, no user settings or MCP servers.
 HEADLESS_FLAGS = ('--setting-sources', 'project,local', '--strict-mcp-config', '--no-session-persistence',
                   '--permission-mode', 'default', '--output-format', 'json', '--allowedTools', 'Read', 'Grep', 'Glob')
+# The doctor-combined arm (#192): both built-in reviews, headless and read-only, graded as one report.
+DOCTOR_PROMPTS = ('/doctor', '/doctor prompt-audit .')
+DOCTOR_FLAGS = ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit',
+                '--strict-mcp-config', '--no-session-persistence', '--output-format', 'json')
+CALL_TIMEOUT = 1500  # seconds, as each case's timeout_seconds
+# The judge `claude plugin eval` 2.1.317 uses for an llm grader: this system prompt, this user prompt (the focus is the
+# final message, `last_message`), three votes, PASS by majority; a vote passes when it says PASS and not FAIL.
+JUDGE_SYSTEM = 'You are a strict, terse evaluation judge for coding-agent traces.'
+JUDGE_PROMPT = ('You are grading the output of a coding agent against a criterion.\n\nCriterion:\n{criteria}\n\n\n'
+                'Agent output (last_message):\n{output}\n\n\nRespond with exactly one word: PASS or FAIL.')
+JUDGE_VOTES = 3
+JUDGE_FLAGS = ('--system-prompt', JUDGE_SYSTEM, '--tools', '', '--setting-sources', 'project', '--strict-mcp-config',
+               '--no-session-persistence', '--disable-slash-commands', '--output-format', 'json')
+INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md')
 
 # Script graders built from a scan (Claudit 4.1): the report must carry the scan's plan, grades and footer.
 TOP = r'(?:^|\n)#{2,3}[ \t]+(?:The )?Top(?: [0-9]+)? changes[^\n]*'
@@ -246,6 +266,10 @@ def eval_command(plugin, args, out):
 def run(args):
     if args.arm != 'claudit' and args.plugin:
         raise Failure('--plugin applies only to the claudit arm')
+    if args.arm == 'doctor-combined':
+        return run_combined(args)
+    if args.max_budget_usd is not None:
+        raise Failure('--max-budget-usd applies only to the doctor-combined arm (claude plugin eval has no per-run cap)')
     suite = SUITE.resolve()
     out = Path(args.output_dir).resolve() if args.output_dir else default_output(args.arm)
     scratch = Path(tempfile.mkdtemp(prefix='claudit-eval-')).resolve()
@@ -276,7 +300,7 @@ def run(args):
         # The exact command lines, for the retained gate record.
         (out / 'command.txt').write_text(f'runner: {invocation}\ncwd: {Path.cwd()}\neval: {shlex.join(command)}\n'
                                          f'eval cwd: {scratch}\n')
-        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL, env=dict(os.environ, PATH=path)).returncode
+        code = subprocess.run(command, cwd=scratch, stdin=subprocess.DEVNULL, env=dict(claude_env(), PATH=path)).returncode
         result = out / 'result.json'
         if result.is_file():
             data = load_result(result)
@@ -351,6 +375,11 @@ def case_summary(case):
         row['structure_passed'] += len(structure & passed)
         row['false_defects'] += false_defects(failed)
         row['false_defect_runs'] += bool(failed)
+        # doctor-combined: each headless call's cost and wall time.
+        for part in item.get('parts') or []:
+            total = row.setdefault('parts', {}).setdefault(str(part.get('prompt')), {'cost_usd': 0.0, 'wall_seconds': 0.0})
+            total['cost_usd'] = round(total['cost_usd'] + number(part.get('costUsd')), 6)
+            total['wall_seconds'] = round(total['wall_seconds'] + number(part.get('durationSeconds')), 1)
     return finish(row)
 
 
@@ -385,6 +414,11 @@ def summarize(result, arm=None, model=None, judge_model=None, web_fetch=None):
         ident[key] = ident[key] or given
     rows = [case_summary(case) for case in result.get('cases', []) or []]
     totals = {'case': 'TOTAL'}
+    for row in rows:
+        for prompt, part in row.get('parts', {}).items():
+            total = totals.setdefault('parts', {}).setdefault(prompt, {'cost_usd': 0.0, 'wall_seconds': 0.0})
+            total['cost_usd'] = round(total['cost_usd'] + part['cost_usd'], 6)
+            total['wall_seconds'] = round(total['wall_seconds'] + part['wall_seconds'], 1)
     for key in ('runs', 'findings_hit', 'findings_total', 'structure_passed', 'structure_total', 'false_defects',
                 'false_defect_runs', 'agent_cost_usd', 'judge_cost_usd', 'wall_seconds', 'errors',
                 'skipped_paid_graders'):
@@ -456,6 +490,8 @@ def markdown(summary):
                      f"| {cost(row['judge_cost_usd'])} ({cost(row['judge_cost_usd_mean'])}) "
                      f"| {row['wall_seconds']:.1f} ({row['wall_seconds_mean']:.1f}) | {row['errors']} "
                      f"| {row['skipped_paid_graders']} |")
+    for prompt, part in summary['totals'].get('parts', {}).items():
+        lines.append(f"\n`{prompt}`: agent ${cost(part['cost_usd'])}, {part['wall_seconds']:.1f} s in total")
     return '\n'.join(lines)
 
 
@@ -565,23 +601,279 @@ def keep_reports(result, out, keep_temp):
     return missing
 
 
+def claude_env():
+    # A background marketplace refresh would rewrite the operator's ~/.claude/plugins/*.json mid-run (#187).
+    return dict(os.environ, DISABLE_AUTOUPDATER='1')
+
+
+def refuse_instructions_above(path, what):
+    """An instruction file above `path` would load into a headless run: remove `path` and refuse."""
+    for parent in Path(path).parents:
+        found = [name for name in INSTRUCTION_FILES if (parent / name).is_file()]
+        if found:
+            shutil.rmtree(path, ignore_errors=True)
+            raise Failure(f'{parent / found[0]} is above {what} and would load; set TMPDIR elsewhere')
+
+
+def claude_call(prompt, cwd, flags, model, budget, stdin_prompt=False):
+    """One `claude -p` call: (command, parsed JSON or {}, stdout, stderr, exit status, wall seconds)."""
+    command = ['claude', '-p', *([] if stdin_prompt else [prompt]), *flags, '--model', model,
+               '--max-budget-usd', str(budget)]
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True, env=claude_env(), timeout=CALL_TIMEOUT,
+                              input=prompt if stdin_prompt else None,
+                              stdin=None if stdin_prompt else subprocess.DEVNULL)
+        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr, code = exc.stdout or '', (exc.stderr or '') + f'\ntimed out after {CALL_TIMEOUT} s', -1
+        stdout, stderr = (x.decode(errors='replace') if isinstance(x, bytes) else x for x in (stdout, stderr))
+    wall = time.monotonic() - started
+    try:
+        raw = json.loads(stdout)
+    except ValueError:
+        raw = {}
+    return command, raw if isinstance(raw, dict) else {}, stdout, stderr, code, wall
+
+
+def doctor_combined(workspace, model, budget, record):
+    """`/doctor` then `/doctor prompt-audit .` in a workspace, read-only: (report, parts). `record(stem, stdout,
+    stderr)` keeps each call's raw output."""
+    texts, parts = [], []
+    for prompt in DOCTOR_PROMPTS:
+        command, raw, stdout, stderr, code, wall = claude_call(prompt, workspace, DOCTOR_FLAGS, model, budget)
+        record('prompt-audit' if 'prompt-audit' in prompt else 'doctor', stdout, stderr)
+        text = raw.get('result') if isinstance(raw.get('result'), str) else ''
+        denials = raw.get('permission_denials')
+        parts.append({'prompt': prompt, 'command': shlex.join(command), 'exit': code,
+                      'costUsd': number(raw.get('total_cost_usd')), 'durationSeconds': round(wall, 1),
+                      'isError': bool(raw.get('is_error')) or code != 0 or not text.strip(),
+                      'permissionDenials': len(denials) if isinstance(denials, list) else 0})
+        texts.append(f'# {prompt}\n\n{text.strip()}\n')
+    return '\n'.join(texts), parts
+
+
+def read_grader(path):
+    """A grader file's frontmatter fields and its body (the criterion an llm grader sends the judge)."""
+    text = Path(path).read_text()
+    if not text.startswith('---\n') or '\n---\n' not in text[3:]:
+        raise Failure(f'{path}: no frontmatter')
+    head, body = text[4:].split('\n---\n', 1)
+    fields = {}
+    for line in head.splitlines():
+        key, _, value = line.partition(': ')
+        if len(value) > 1 and value[0] == value[-1] == "'":
+            value = value[1:-1].replace("''", "'")
+        fields[key.strip()] = value
+    fields['criteria'] = body.strip()
+    fields['name'] = Path(path).stem
+    return fields
+
+
+def judge_output(text):
+    """The judge sees at most 100,000 characters: the first 80,000 and the last 20,000, as the eval host elides."""
+    head, tail = 80000, 20000
+    if len(text) <= head + tail:
+        return text
+    return text[:head] + f'\n[…{len(text) - head - tail} chars elided…]\n' + text[-tail:]
+
+
+def grade_with_graders(text, graders, judge, workdir):
+    """Grade a report with a case's graders: regex graders in Python's re (the suite's patterns behave the same in
+    JavaScript, which tests check), llm graders with the eval host's judge prompt. Returns (results, judge cost)."""
+    results, cost = [], 0.0
+    for grader in graders:
+        if grader.get('type') == 'regex':
+            found = re.search(grader['pattern'], text, re.I if 'i' in grader.get('flags', '') else 0) is not None
+            passed = found != (grader.get('match') == 'not_contains')
+            results.append({'name': grader['name'], 'type': 'regex', 'passed': passed, 'scored': True})
+        elif grader.get('type') == 'llm':
+            prompt = JUDGE_PROMPT.format(criteria=grader['criteria'], output=judge_output(text))
+            votes = []
+            for _ in range(JUDGE_VOTES):
+                _, raw, _, _, code, _ = claude_call(prompt, workdir, JUDGE_FLAGS, judge['model'], judge['budget'],
+                                                    stdin_prompt=True)
+                cost += number(raw.get('total_cost_usd'))
+                reply = raw.get('result') if isinstance(raw.get('result'), str) and code == 0 else ''
+                votes.append(bool(re.search(r'\bPASS\b', reply, re.I)) and not re.search(r'\bFAIL\b', reply, re.I))
+            results.append({'name': grader['name'], 'type': 'llm', 'passed': sum(votes) > len(votes) / 2,
+                            'scored': True, 'judgeVotes': votes,
+                            'explanation': 'judge votes: ' + ' '.join('PASS' if v else 'FAIL' for v in votes)})
+        else:
+            results.append({'name': grader['name'], 'type': grader.get('type'), 'passed': False, 'scored': False})
+    return results, round(cost, 6)
+
+
+def combined_case_run(case, number, args, out, judge):
+    """One doctor-combined run of one case in a fresh scaffolded workspace: the run record for result.json."""
+    graders = [read_grader(path) for path in sorted((case / 'graders').glob('*.md'))]
+    scratch = Path(tempfile.mkdtemp(prefix='claudit-combined-')).resolve()
+    try:
+        # The eval host's layout: the workspace's parent is the run's home, where f17-scope writes its parent files.
+        workspace = scratch / 'home' / 'cwd'
+        workspace.mkdir(parents=True)
+        refuse_instructions_above(scratch, 'the workspace')
+        scaffold = subprocess.run(['bash', str(case / 'scaffold.sh')], cwd=workspace, capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL,
+                                  env=dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull))
+        if scaffold.returncode:
+            return {'error': f'scaffold failed: {scaffold.stderr.strip()}', 'costUsd': 0, 'judgeCostUsd': 0,
+                    'durationSeconds': 0, 'graders': [], 'parts': []}
+        calls = out / 'calls'
+        calls.mkdir(exist_ok=True)
+
+        def record(stem, stdout, stderr):
+            (calls / f'{case.name}-run{number}-{stem}.json').write_text(stdout)
+            (calls / f'{case.name}-run{number}-{stem}.stderr.txt').write_text(stderr)
+
+        report, parts = doctor_combined(workspace, args.model, args.max_budget_usd, record)
+        judge_dir = scratch / 'judge'
+        judge_dir.mkdir()
+        results, judge_cost = grade_with_graders(report, graders, judge, judge_dir)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    reports = out / 'reports'
+    reports.mkdir(exist_ok=True)
+    (reports / f'{case.name}-run{number}.md').write_text(report)
+    failed = [part['prompt'] for part in parts if part['isError']]
+    return {'costUsd': round(sum(part['costUsd'] for part in parts), 6), 'judgeCostUsd': judge_cost,
+            'durationSeconds': round(sum(part['durationSeconds'] for part in parts), 1),
+            'error': f'no usable reply from {", ".join(failed)}' if failed else None,
+            'graders': results, 'parts': [{k: v for k, v in part.items() if k != 'command'} for part in parts]}
+
+
+def run_combined(args):
+    """The doctor-combined arm over the suite: a result.json in the shape `claude plugin eval` writes."""
+    cases = sorted(path.parent for path in SUITE.glob('cases/*/case.yaml'))
+    if args.case:
+        cases = [case for case in cases if fnmatch.fnmatchcase(case.name, args.case)]
+    if not cases:
+        raise Failure(f'no case matches {args.case!r}')
+    if args.max_budget_usd is None:
+        raise Failure('--max-budget-usd (per headless call) is required for the doctor-combined arm')
+    out = Path(args.output_dir).resolve() if args.output_dir else default_output(args.arm)
+    jobs = [(case, n) for case in cases for n in range(1, args.runs + 1)]
+    judge = {'model': args.judge_model, 'budget': args.judge_budget_usd}
+    first = DOCTOR_PROMPTS[0]
+    print(f'Cases: {", ".join(case.name for case in cases)} x {args.runs} run(s)')
+    print('Command: ' + shlex.join(['claude', '-p', first, *DOCTOR_FLAGS, '--model', args.model, '--max-budget-usd',
+                                    str(args.max_budget_usd)]))
+    if args.dry_run:
+        return 0
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'command.txt').write_text(
+        f'runner: {shlex.join([sys.argv[0], *sys.argv[1:]])}\ncwd: {Path.cwd()}\n' + ''.join(
+            'headless: ' + shlex.join(['claude', '-p', prompt, *DOCTOR_FLAGS, '--model', args.model, '--max-budget-usd',
+                                       str(args.max_budget_usd)]) + '\n' for prompt in DOCTOR_PROMPTS)
+        + 'judge: ' + shlex.join(['claude', '-p', *JUDGE_FLAGS, '--model', args.judge_model, '--max-budget-usd',
+                                  str(args.judge_budget_usd)]) + ' < prompt\n'
+        + 'headless cwd: <tmp>/claudit-combined-XXXX/home/cwd (a fresh scaffold per run)\n')
+    version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
+    lock, spent, partial, runs = threading.Lock(), [0.0], [False], {}
+    started = time.monotonic()
+
+    def work(job):
+        with lock:
+            if spent[0] >= args.max_cost_usd:
+                partial[0] = True
+                return job, None
+        item = combined_case_run(*job, args, out, judge)
+        with lock:
+            spent[0] += item['costUsd'] + item['judgeCostUsd']
+            print(f"{job[0].name} run{job[1]}: ${item['costUsd'] + item['judgeCostUsd']:.4f} "
+                  f"({item['durationSeconds']:.0f} s), cumulative ${spent[0]:.4f}"
+                  + (f", ERROR {item['error']}" if item['error'] else ''), flush=True)
+        return job, item
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+        for job, item in pool.map(work, jobs):
+            if item is not None:
+                runs.setdefault(job[0].name, []).append(item)
+    result = {'claudeVersion': version.split(' ')[0] if version else None, 'model': args.model,
+              'judgeModel': args.judge_model, 'arm': args.arm, 'webFetch': False,
+              'suite': {'modelOverride': args.model, 'judgeModel': args.judge_model, 'plugins': []},
+              'costUsd': round(spent[0], 6), 'durationSeconds': round(time.monotonic() - started, 1),
+              'partial': partial[0],
+              'cases': [{'name': case.name,
+                         'graders': [{'name': g['name'], 'type': g.get('type')} for g in
+                                     (read_grader(path) for path in sorted((case / 'graders').glob('*.md')))],
+                         'arms': {'with': runs.get(case.name, [])}} for case in cases]}
+    (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+    summary = summarize(result, args.arm, args.model, args.judge_model, False)
+    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+    print(markdown(summary))
+    print(f'Summary: {out / "summary.json"}')
+    if partial[0]:
+        print('Cost ceiling reached (--max-cost-usd): runs were skipped and the results are PARTIAL.', file=sys.stderr)
+        return 2
+    return 0
+
+
+def headless_combined(args, out):
+    """Fresh-clone doctor-combined reports of one repository at one commit; kept, not script-graded."""
+    version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
+    runs = []
+    for number in range(1, args.runs + 1):
+        work = Path(tempfile.mkdtemp(prefix='claudit-headless-')).resolve()
+        refuse_instructions_above(work, 'the clone')
+        run_dir = out / f'run{number}'
+        run_dir.mkdir(exist_ok=True)
+        try:
+            clone = work / 'repo'
+            subprocess.run(['git', 'clone', '--quiet', args.repo, str(clone)], check=True)
+            subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '--detach', args.sha], check=True)
+            head = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                                  check=True).stdout.strip()
+            started = dt.datetime.now(dt.timezone.utc)
+
+            def record(stem, stdout, stderr):
+                (run_dir / f'{stem}.json').write_text(stdout)
+                (run_dir / f'{stem}.stderr.txt').write_text(stderr)
+
+            report, parts = doctor_combined(clone, args.model, args.max_budget_usd, record)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        (run_dir / 'report.md').write_text(report)
+        meta = {'arm': 'doctor-combined', 'cwd': 'fresh clone of the repository', 'repo': args.repo, 'sha': args.sha,
+                'head': head, 'claude': version, 'model': args.model, 'started': started.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'parts': parts, 'cost_usd': round(sum(part['costUsd'] for part in parts), 6),
+                'wall_seconds': round(sum(part['durationSeconds'] for part in parts), 1),
+                'passed': not any(part['isError'] for part in parts)}
+        (run_dir / 'meta.json').write_text(json.dumps(meta, indent=2) + '\n')
+        runs.append(meta)
+        print(f"run{number}: ${meta['cost_usd']}, {meta['wall_seconds']:.0f} s, "
+              f"{'ok' if meta['passed'] else 'ERROR'} {[(p['prompt'], p['exit'], p['costUsd']) for p in parts]}")
+    summary = {'repo': args.repo, 'sha': args.sha, 'arm': 'doctor-combined', 'runs': len(runs),
+               'passed': sum(r['passed'] for r in runs),
+               'median_cost_usd': statistics.median(r['cost_usd'] for r in runs),
+               'median_wall_seconds': statistics.median(r['wall_seconds'] for r in runs),
+               'total_cost_usd': round(sum(r['cost_usd'] for r in runs), 6)}
+    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+    print(json.dumps(summary))
+    return 0 if summary['passed'] == len(runs) else 1
+
+
 def headless(args):
     """Fresh-clone read-only audits of one repository at one commit, each recorded and script-graded."""
+    if args.arm == 'doctor-combined':
+        if args.plugin:
+            raise Failure('--plugin applies only to the claudit arm')
+        out = Path(args.output_dir).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        return headless_combined(args, out)
+    if not args.plugin:
+        raise Failure('--plugin is required for the claudit arm')
     plugin = Path(args.plugin).resolve()
     if not (plugin / '.claude-plugin/plugin.json').is_file():
         raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {plugin}')
     helper = load_helper(plugin)
     out = Path(args.output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    version = subprocess.run(['claude', '--version'], capture_output=True, text=True).stdout.strip()
+    version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
     runs = []
     for number in range(1, args.runs + 1):
         work = Path(tempfile.mkdtemp(prefix='claudit-headless-')).resolve()
-        for parent in work.parents:  # an instruction file above the clone would load into the audit
-            found = [n for n in ('CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md') if (parent / n).is_file()]
-            if found:
-                shutil.rmtree(work)
-                raise Failure(f'{parent / found[0]} is above the clone and would load; set TMPDIR elsewhere')
+        refuse_instructions_above(work, 'the clone')  # it would load into the audit
         try:
             clone = work / 'repo'
             subprocess.run(['git', 'clone', '--quiet', args.repo, str(clone)], check=True)
@@ -591,7 +883,8 @@ def headless(args):
             command = ['claude', '-p', args.invoke, '--plugin-dir', str(plugin), *HEADLESS_FLAGS,
                        '--model', args.model, '--max-budget-usd', str(args.max_budget_usd)]
             started = dt.datetime.now(dt.timezone.utc)
-            proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                  env=claude_env())
             wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
             scan = subprocess.run([sys.executable, str(plugin / HELPER), 'scan', '--root', str(clone)],
                                   capture_output=True, text=True)
@@ -644,7 +937,10 @@ def main():
     p.add_argument('--max-cost-usd', type=positive_cost, required=True)
     p.add_argument('--judge-model', default=DEFAULT_JUDGE)
     p.add_argument('--runs', type=positive_int, default=1)
-    p.add_argument('--case', help='case name glob passed to claude plugin eval')
+    p.add_argument('--case', help='case name glob passed to claude plugin eval (exact names are safest)')
+    p.add_argument('--max-budget-usd', type=positive_cost, help='doctor-combined: cap per headless call')
+    p.add_argument('--judge-budget-usd', type=positive_cost, default=0.05, help='doctor-combined: cap per judge vote')
+    p.add_argument('--concurrency', type=positive_int, default=1, help='doctor-combined: case runs at once')
     p.add_argument('--plugin', help='plugin under test (claudit arm only; default plugins/claudit)')
     p.add_argument('--invoke', default='/claudit:claudit --read-only', help='claudit arm prompt')
     p.add_argument('--web-fetch', action='store_true',
@@ -661,9 +957,10 @@ def main():
     p = sub.add_parser('headless', help='fresh-clone read-only audits of a repository at a commit, graded by script')
     p.add_argument('--repo', required=True, help='clone URL or path')
     p.add_argument('--sha', required=True)
-    p.add_argument('--plugin', required=True, help='the candidate plugin bytes (claude --plugin-dir)')
+    p.add_argument('--arm', choices=('claudit', 'doctor-combined'), default='claudit')
+    p.add_argument('--plugin', help='the candidate plugin bytes (claude --plugin-dir; claudit arm)')
     p.add_argument('--model', required=True)
-    p.add_argument('--max-budget-usd', type=positive_cost, required=True, help='per run')
+    p.add_argument('--max-budget-usd', type=positive_cost, required=True, help='per headless call')
     p.add_argument('--runs', type=positive_int, default=3)
     p.add_argument('--invoke', default='/claudit:claudit --read-only')
     p.add_argument('--output-dir', required=True)

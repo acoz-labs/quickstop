@@ -1,0 +1,14 @@
+# labelmaker
+
+Python 3.11 command-line tool that prints shipping labels as plain-text files.
+
+## Layout
+
+- `src/labelmaker/cli.py` parses the command line.
+- `src/labelmaker/carriers/` holds one module per carrier.
+- Carrier rates load from `config/rates.toml`.
+- Labels render through `reportlab`; keep its version pinned in `pyproject.toml`.
+
+## Commands
+
+- `python3 -m unittest discover -s tests` runs the tests (set `PYTHONPATH=src`).

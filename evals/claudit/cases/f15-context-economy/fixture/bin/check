@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Lint and test orchard. Exits non-zero on the first failure.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+bin/lint
+PYTHONPATH=src python3 -m unittest discover -s tests -q
