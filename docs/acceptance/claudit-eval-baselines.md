@@ -133,3 +133,40 @@ every case adds `structure-plan-length`, and `f6-agents-md` adds an `AGENTS.md`-
 fixture with no planted findings. F1 to F5 still plant 42 findings over three runs;
 structure graders are five per case. The 4.0.1 gate results are posted on #168,
 not recorded here.
+
+## doctor-combined arm and fixtures f14 to f19 (#192)
+
+Issue #192 adds an arm that runs Claude Code's two built-in reviews, `/doctor` and `/doctor prompt-audit .`, and
+grades their replies as one report, plus six fixtures. The issue calls them F10 to F15; the suite numbers them f14
+to f19 because F10 to F13 were taken:
+
+| Issue | Case |
+|---|---|
+| F10 enforcement | `f14-enforcement` |
+| F11 context economy | `f15-context-economy` |
+| F12 stale facts | `f16-stale-facts` |
+| F13 scope | `f17-scope` |
+| F14 check commands | `f18-check-commands` |
+| F15 declarative list | `f19-declarative-list` |
+
+### Conditions
+
+- Model `claude-sonnet-5-5` and judge `claude-haiku-5-5` on every arm, as above.
+- Plain prompt: `bin/claudit-eval run --arm plain --web-fetch`, as in #156.
+- Claudit 4.2.0: plugin tree `3972b36948dfecb2a9e3e8610290a318b6422a33`, extracted from tag `claudit-v4.2.0`,
+  `--web-fetch`, invoked as `/claudit:claudit --read-only`.
+- `doctor-combined`: `bin/claudit-eval run --arm doctor-combined`, headless and read-only (see the
+  [suite README](../../evals/claudit/README.md#arms)). It runs outside `claude plugin eval`, so its llm graders go to
+  the same judge prompt through `claude -p`, not through the eval host. Its throwaway folders are never trusted, so
+  Claude Code ignores the fixtures' allow rules; the arm only reads, so the graded text doesn't depend on them.
+- `f17-scope` puts the parent's `CLAUDE.md` and `AGENTS.md` in the workspace's parent folder. Under `claude plugin
+  eval` (plain and Claudit) that folder is the run's own home, which the eval host also gives a stub `.git`. Under
+  `doctor-combined` it is a plain folder. `/context` shows Claude Code loads the parent `CLAUDE.md` in both layouts.
+  Even so, the arms see different surroundings, so compare their f17 rows with care.
+- Hit rates are the mean over runs per case, with the number of runs (n) stated for every arm and case. Rows reused
+  from earlier issues name their source, Claude Code version and run count.
+
+### Results
+
+Pending the counted runs (issue #192). The smoke run on head `a9fd63c` (1 run per arm on f14 and f17, $1.37) only
+checked the method and the graders. Its numbers aren't counted.
