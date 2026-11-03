@@ -77,6 +77,8 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - `evals/`: model-run eval suites outside plugin bytes; `bin/claudit-eval` runs Claudit's.
   `bin/writing-for-humans-eval` runs the Writing for Humans kit's release check, which checks
   for regressions (install, style selection, the user-only audit contract), not writing quality.
+  `bin/writing-for-humans-quality-eval` runs the quality eval: the same writing tasks under the
+  default, Concise and Writing for Humans styles, graded for cold-read clarity, pedantry and repetition.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
 
