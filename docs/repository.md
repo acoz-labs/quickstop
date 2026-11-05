@@ -2,9 +2,10 @@
 
 Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
 [Shipshape](../workflows/shipshape/README.md) is its first workflow. Claudit and the
-Writing for Humans kit target Claude Code; their advertised versions and publication
+Writing for Humans kit are Claude Code plugins at `plugins/<name>/`; Quickstop supports
+no other agent tool. Their advertised versions and publication
 state are recorded in the [generated catalog](catalog.md). `catalog.json`
-declares supported targets; native package manifests own versions. Generated
+declares each plugin's `claude-code` target; native package manifests own versions. Generated
 indexes and package layouts follow [the marketplace contract](marketplace.md).
 Plugin creation and review use the shared SDLC and development guide.
 
@@ -58,12 +59,11 @@ an unavailable base is an error, never a reason to skip validation. All distribu
 files, including README changes, count as bytes. Python bytecode caches (`__pycache__/`,
 `*.pyc`) are local state and never count, in `--base` or in
 `bin/marketplace-release verify-package --path`; `bin/ci` does not write them. Generated listings derive
-versions from the native manifests; separate target packages can release independently. Regenerate indexes with
+versions from the native manifests; plugins release independently. Regenerate indexes with
 `bin/check-marketplace --write` after changing catalog or manifest metadata.
 
-For a Claude target, use the host's `claude plugin validate .` and
-`claude plugin validate ./plugins/claudit` when available. Use the appropriate
-native discovery/validation for other declared harnesses. These supplement local
+Use the host's `claude plugin validate .` and `claude plugin validate
+./plugins/<name>` when available. These supplement local
 checks and do not prove runtime behavior. Acceptance scenarios belong
 in [delivery](delivery.md). Inspect current host documentation for unfamiliar
 components instead of treating the lightweight local validator as a complete
@@ -104,6 +104,14 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - Set `DISABLE_AUTOUPDATER=1` on every headless `claude` call: background
   marketplace refresh rewrites `~/.claude/plugins/known_marketplaces.json`
   mid-run.
+- A plugin release takes two PRs: the plugin PR (package and version bump),
+  then, after acceptance and the release tag, the pointer PR (`releases.json`,
+  regenerated indexes). `catalog.json` description changes, including the
+  marketplace description, go in the pointer PR, never the plugin PR: promote
+  regenerates the indexes from the head's catalog.
+- The implementer's pre-push hook refuses tag pushes, archive tags included;
+  the reviewer creates and pushes them, and the implementer checks the peeled
+  commit and tree.
 - `bin/marketplace-release promote` runs only as the maintainer account. The
   contributor writes the pointer files with promote's logic, and the
   reviewer confirms by running promote on the head ("Already points at this
@@ -188,12 +196,11 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 
 ## Layout and tracking
 
-- `catalog.json`: ordered plugin catalog and explicit supported targets.
-- `plugins/`: self-contained packages; Claudit retains `plugins/claudit/`.
+- `catalog.json`: ordered plugin catalog, one `claude-code` target each.
+- `plugins/<name>/`: one self-contained Claude Code package per plugin.
 - `workflows/`: ordinary Markdown guides with a browsable entry index; no native installable packages.
-- `.claude-plugin/` and `.agents/plugins/`: generated native marketplace indexes.
-- `docs/catalog.md`: generated support/version table.
-- `docs/pi-packages.md`: generated individual Pi install commands.
+- `.claude-plugin/marketplace.json`: generated native marketplace index.
+- `docs/catalog.md`: generated version table.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.
 - `evals/`: model-run eval suites outside plugin bytes; `bin/claudit-eval` runs Claudit's.
   `bin/writing-for-humans-eval` runs the Writing for Humans kit's release check, which checks
