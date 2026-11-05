@@ -1,34 +1,28 @@
 # Managed repository standard
 
-SDLC template version: `2026.11.05.2`.
+SDLC template version: `2026.11.05.3`.
 
-The template owns the files enumerated in `.sdlc/managed.json`. Their hashes
-identify the installed content. `bin/sdlc check` verifies them.
-The `SDLC_VERSION` marker is managed too, so propagation cannot leave the
-repository's visible version behind its installed commands and manifest.
-When taking ownership of a previously unmanaged marker, automatic updates accept
-only an absent file or the exact prior manifest version plus newline. Inspect and
-reconcile other content explicitly before applying; local edits are not discarded.
-Application configuration lives in `.sdlc/config.json`, outside the managed-file set.
-Product instructions, code, tests and deployment commands remain repo-specific.
+The template owns the files in `.sdlc/managed.json`; `bin/sdlc check` verifies
+their hashes. That includes the `SDLC_VERSION` marker. `apply` takes over an
+unmanaged marker only if it is missing or holds the prior manifest version;
+reconcile anything else by hand. Repo config (`.sdlc/config.json`), product
+instructions, code, tests and deploy commands stay repo-owned. Accounts,
+credentials, machine paths and personal setup are never template content.
 
-The template also ships repo-owned starters from `.sdlc/starters/`: `CLAUDE.md`
-(imports `AGENTS.md` and `docs/repository.md`), `docs/repository.md` (Commands
-with healthy output, Conventions, Known mistakes), `REVIEW.md` (passes,
-severity, the cap on lows, what not to report) and `.claude/settings.json`
-(exact allow rules for `bin/ci` and `bin/sdlc check` only). `apply` adds a
-starter only where nothing exists at its path and never overwrites one. They
-are not in the manifest, so `bin/sdlc check` ignores them and each repository
-edits its own. After a cascade the template's `bin/check-starters --root PATH
---ref origin/main` confirms each target's copies still hold the required parts.
+## Starters
 
-Use `bin/sdlc apply --source PATH --target PATH` to update an already managed
-checkout. Initial adoption requires `--adopt`. Edited managed files cause a
-conflict; review and reconcile them rather than overwriting them silently.
-A template maintainer updates source files, runs `bin/sdlc stamp`, tests, and
-publishes a reviewed version. `bin/sdlc inventory --org ORG` discovers all active
-repositories. Cascade every target and reread the live inventory at completion.
-For a complete operation use:
+`.sdlc/starters/` holds repo-owned starters for `CLAUDE.md`,
+`docs/repository.md`, `REVIEW.md` and `.claude/settings.json`. `apply` adds one
+only where nothing exists and never overwrites. They are outside the manifest,
+so each repo edits its own. After a cascade, `bin/check-starters --root PATH
+--ref origin/main` checks each target keeps their required parts.
+
+## Updating and cascading
+
+`bin/sdlc apply --source PATH --target PATH` updates a checkout (`--adopt` the
+first time); edited managed files conflict for reconciliation. Maintainers edit
+sources, run `bin/sdlc stamp` and tests, and publish a reviewed version.
+`bin/sdlc inventory --org ORG` lists active repos.
 
 ```sh
 bin/sdlc cascade --source /path/to/reviewed-template --workspace /path/to/cascade --org ORGANIZATION --adopt
@@ -36,41 +30,25 @@ bin/sdlc cascade --source /path/to/reviewed-template --workspace /path/to/cascad
 bin/sdlc cascade --source /path/to/reviewed-template --workspace /path/to/cascade --org ORGANIZATION --verify
 ```
 
-The source must be a clean reviewed commit. The receipt tracks every active
-repository, source identity, prepared branch or verified published head and
-unresolved errors. Preparation is not completion. Verification rereads published
-files/modes/config and organization inventory; any failure or newly active repo
-keeps the operation incomplete. Reuse the workspace to resume the same source.
-No pilot, waves or optional lagging adoption. No unrelated production deployment.
+The source must be a clean reviewed commit. The receipt records the source
+identity and every active repo's prepared branch or published head and errors.
+Preparation is not completion: `--verify` rereads published files, modes, config
+and the inventory; a failure or newly active repo leaves it incomplete. Reuse
+the workspace to resume. New repos adopt at creation.
 
-Configuration declares `delivery_profile`, `verification_mode` and `validation`.
-The default mode is `local`: independent maintainer receipts satisfy the merge
-gate, regardless of runner availability. Those receipts must show live proof
-against the candidate. A compile, a rubber-stamp review approval, or a green
-workflow run by itself is not the verdict. `required_checks` describes the optional
-Actions profile and is enforced only when `verification_mode` is `actions`.
-Service/artifact repos declare concrete `acceptance_criteria` and `release_criteria`
-with procedures in `docs/delivery.md`. Automated artifact checks may additionally
-use `acceptance` commands. Scripted promotion declares real `promotion`,
-`release_verification` and `rollback` commands; native/provider runbooks use the
-maintainer-attested `sdlc-release record` path. Acceptance and release commands
-receive `RELEASE_SHA` and immutable `RELEASE_ARTIFACT`. Hooks must verify the
-artifact itself, not just an unrelated healthy service. Missing deployment
-capability remains an explicit gap; commands must never be placeholder successes.
-Service/artifact profiles keep their real candidate acceptance/release machinery;
-non-deployable explicitly means no release target. Missing deployment capability
-must be documented as a gap, never disguised as non-deployable to pass a check.
-New repositories adopt the standard at creation and join every future cascade.
+## Configuration
 
-Personal account names and credentials are never managed template content.
-For an artifact whose source predates configuration adoption, the explicit
-`retained_candidates` transition is documented in
-`docs/operations/local-verification.md`. It binds a reviewed policy revision
-separately from original product bytes; it is not a general policy override.
-See `docs/operations/sdlc.md` for delegated authority, role separation,
-agent verification and the three workflows. Separate GitHub accounts isolate
-who authors a change and who publishes a receipt. The merge and acceptance
-verdicts are that independent verification evidence. CI and workflow checks
-are evidence, not substitutes for review, and not a merge verdict by themselves.
-Stacked-PR hosts such as Graphite, and unattended overnight merges, are not
-organization defaults.
+Config declares `delivery_profile`, `verification_mode` and `validation`. In the
+default `local` mode, independent maintainer receipts with live proof satisfy
+the merge gate. `required_checks` applies only in `actions` mode.
+
+Service and artifact repos declare `acceptance_criteria` and `release_criteria`,
+described in `docs/delivery.md`, and may add `acceptance` commands. Scripted
+promotion declares `promotion`, `release_verification` and `rollback`; manual
+runbooks use `sdlc-release record`. Hooks must verify the artifact they receive,
+not just a healthy service. Non-deployable means no release target. A missing
+deploy capability is a documented gap, never a placeholder or a relabelling.
+
+Artifacts built before configuration use `retained_candidates`
+(`docs/operations/local-verification.md`), which pins a reviewed policy
+separately from the product bytes; it is no general override.

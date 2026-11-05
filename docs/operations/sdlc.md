@@ -1,286 +1,170 @@
 # Software delivery
 
-Standard version: `2026.11.05.2`.
+Standard version: `2026.11.05.3`.
 
-GitHub Issues, the Project board, and in-repository documents are the
-coordination layer. Agent chat and local notes do not replace an issue, a
-Status move, or durable documentation.
+Issues, the Project board and in-repo docs coordinate work; chat and local notes
+do not replace them.
 
 ## Authority and roles
 
-The product owner supplies desired outcomes and constraints. Once work is
-assigned, agents acting as maintainer or contributor own delivery inside that
-scope:
+The product owner sets outcomes and constraints. Once work is assigned,
+maintainer and contributor agents own its delivery: implementation, independent
+review, acceptance, merge, release verification and receipts, and Project Status
+moves backed by evidence. An explicit stopping point, such as planning-only,
+still holds.
 
-- implementation;
-- independent review of the current head;
-- acceptance against the issue criteria and exact candidate;
-- merge;
-- release verification and receipts;
-- Project board Status moves, with the evidence that justifies the new state.
+Agents settle design, review findings, failed-then-fixed acceptance, flakes,
+review-bot noise and happy-path releases against the spec. Never weaken criteria
+or fabricate evidence. Escalate to the owner only for:
 
-An explicit stopping point such as planning-only still applies. Do not require
-product-owner approval for normal design choices, review findings, acceptance
-that failed and was then fixed, flake triage, automated review-bot noise
-(including Bugbot), or a happy-path release inside the assigned delivery task.
-Resolve those internally against the specification. Never weaken criteria or
-fabricate evidence to proceed.
-
-Escalate to the product owner only when agents cannot reasonably sign off:
-
-- an ambiguous product preference that no experiment or existing constraint settles;
-- missing access, secrets, or a capability the agents cannot obtain;
+- a product preference no experiment or constraint settles;
+- access, secrets or a capability agents cannot get;
 - money or billing;
-- irreversible or high-blast operations: a shared-history force-push, a
-  production data migration, broadening an allowlist or other security boundary,
-  or deleting another person's work;
-- a genuine deadlock after remedies have been tried.
+- irreversible or high-blast operations: force-pushing shared history, migrating
+  production data, broadening an allowlist or security boundary, deleting
+  someone else's work;
+- a deadlock that remedies did not break.
 
-Report the blocker, the evidence, the attempts, the choices, and a
-recommendation. Continue unaffected work. Owner approval is not the ordinary
-path through design, review, acceptance, or release.
+Report the blocker, evidence, attempts, options and a recommendation; continue
+unaffected work.
 
-Maintainers author issues, Project updates, plans, READMEs and durable docs;
-contributors author code, tests, scripts and executable configuration. Code PRs
-are authored by the contributor and reviewed by a different authorized
-maintainer against the current head. Documentation commits may accompany code
-in the same PR with honest attribution. Separate GitHub accounts remain useful
-isolation for authorship and for who publishes a receipt. The quality gate is
-independent verification evidence. A rubber-stamp `APPROVE`, and a green CI
-run by itself, are not that gate. Account names, credentials, machine paths
-and personal execution instructions are not part of this shared standard.
-Another person can comply with their own tools and accounts.
+Maintainers write issues, plans and durable docs. Contributors write code,
+tests, scripts and executable config, and author code PRs; docs may ride along
+with honest attribution. A different authorized maintainer reviews. Separate
+GitHub accounts keep authorship and receipts apart.
 
-## Documentation and planning
+## Documentation
 
-Write, run applicable link/format/build checks, and publish. No mandatory issue,
-planning PR, acceptance or release ceremony. A documentation PR is optional unless
-repository protection requires it. Routine prose corrections can be published
-by a maintainer directly. Proposed behavior must be labeled as proposed.
-
-Classify by effects: executable examples used by automation, workflow files,
-agent authority, policy and configuration changes are not ordinary prose. Use
-code review for executable changes and standards maintenance for shared policy.
-Mixed code/documentation changes follow the code workflow.
+Write, run the applicable link, format and build checks, publish. No issue,
+plan, acceptance or release is needed, nor a PR unless branch protection
+requires one. Label proposed behaviour as proposed. Automation-run examples,
+workflows, agent authority, policy and config are not prose: they take code
+review, as do mixed code and docs. Shared policy changes in the template.
 
 ## Plans
 
-A plan is required before code when any of these hold:
+Plan before code for a new feature or user-visible behaviour; a security,
+authentication or permission change; a release, storage or data-format change;
+a paid eval or gate; or more than about three non-test source files. Docs-only
+changes, single-file fixes, dependency bumps and approved posts need none. The
+issue records `plan: required` or `plan: not required`.
 
-- a new feature or user-visible behaviour;
-- a security, authentication or permission change;
-- a release, storage or data-format change;
-- a paid eval or gate;
-- more than about three non-test source files change.
-
-A plan is not required for documentation-only changes, single-file fixes,
-dependency bumps or publishing an approved post. The maintainer who prepares
-the issue records `plan: required` or `plan: not required` in the issue.
-
-A plan is `docs/changes/<issue>-<slug>/plan.md`, started from
-`docs/changes/_template/plan.md`; `docs/changes/README.md` explains the folder.
-The author commits `plan.md` alone as the first commit on the PR branch. An
-independent maintainer reviews that commit before code is written. This plan
-review is counted separately from code review rounds. When the work departs
-from the plan, the author updates `plan.md` in the same commit. Code review
-checks the diff against `plan.md`. On ship, the PR updates the durable docs
-(architecture, operations, decisions) from what shipped. The folder stays in
-the repository afterwards.
+The plan, `docs/changes/<issue>-<slug>/plan.md` (copy
+`docs/changes/_template/plan.md`), is the PR branch's first commit, alone. An
+independent maintainer reviews it before code; that is not a code review round.
+Update it in the same commit as any departing change; code review checks the
+diff against it. The folder stays after ship.
 
 ## Product code
 
-1. Maintainer prepares a bounded issue: outcome, acceptance criteria, constraints,
-   validation and release expectations, and any explicit stopping point.
-   It records whether a plan is required (see Plans above).
-2. Contributor implements from an isolated branch and tests meaningful behavior.
-   When a plan is required, its reviewed `plan.md` commit comes first on the same
-   branch; no separate planning PR is needed.
-3. Contributor opens a PR linking the issue and, when ready, requests the
-   designated independent maintainer through GitHub's native PR review request.
-   Describe behavior, validation,
-   documentation impact and rollout/rollback when relevant. Link the change
-   folder when there is one. Reconcile against the issue and the plan; explain
-   material deviations. Promote durable knowledge into permanent docs.
-4. Maintainer reviews the current code and specification independently,
-   checking the diff against `plan.md` when there is one. A
-   credential switch alone is not a review. Record findings and resolutions.
-   Contributors address findings in the same PR and re-request review after
-   revisions. Changes after approval require review of the new head. Required repository
-   commands pass in a clean checkout. The maintainer independently runs them and
-   publishes current-head evidence. CI success alone is not the review verdict.
-   An available Actions runner is not required.
-5. Maintainer merges and continues through candidate acceptance and release.
-   Rejected acceptance returns to implementation, followed by retest and review.
-   A repaired acceptance does not return to the product owner. Do not ask the
-   owner to approve normal transitions.
+1. The maintainer writes a bounded issue: outcome, acceptance criteria,
+   constraints, validation, release, any stopping point, plan or not.
+2. The contributor builds in an isolated worktree and tests meaningful
+   behaviour.
+3. The contributor's PR links the issue, covers behaviour, validation, docs,
+   rollout, rollback and departures from the issue or plan, updates durable
+   docs, and requests native GitHub review.
+4. The maintainer reviews the current head against the spec, runs the required
+   commands, and publishes findings and evidence on the PR. Fixes and responses
+   land in the same PR with a new request; every new head needs new review.
+5. The maintainer merges, accepts and releases. Failed acceptance returns to
+   implementation, retest and review, not to the owner.
 
-A finished coding turn starts the handoff; it does not establish acceptance.
-Keep review findings, responses and current-head evidence on the PR. For assigned
-agent work, the coordinator is responsible for noticing the handoff and continuing
-review without another owner prompt. A GitHub review request records assignment;
-it does not itself start an agent. Execution hosts may use their own bounded
-monitor or notification mechanism, without a mandatory UI or always-on backlog
-processor. Interrupted work must be inspected before retrying, and retries must
-not create duplicate implementers or lose the owning task.
+A finished coding turn starts the handoff, not acceptance. The coordinator
+notices handoffs unprompted; a review request starts no agent. Inspect
+interrupted work before retrying, and never start a second implementer or lose
+the owning task.
 
-Meaningful rendered changes require functional, accessibility and visual evidence
-appropriate to their impact. Review the actual experience, not screenshots alone.
-Use docs/operations/ui-acceptance.md for evidence details where present.
+Rendered changes need functional, accessibility and visual evidence from the
+real experience, scaled to impact (`docs/operations/ui-acceptance.md` where
+present).
 
 ## Agent verification
 
-The author of a change does not verify it for merge or acceptance. A different
-authorized maintainer proves the current head, and at release the exact
-candidate, against the real artifact the user or operator receives. Compiling,
-a coverage percentage, a green CI check, or an `APPROVE` review state is not
-that proof and is not a merge verdict.
+The author never verifies their own change. Another authorized maintainer proves
+the current head, and at release the exact candidate, against the real artifact,
+in a fresh worktree or container. A compile, coverage, green CI, `APPROVE` or
+account switch is not proof. Scale proof to blast radius:
 
-Scale the proof to blast radius. A comment or documentation typo needs a read
-of the changed text and the applicable format check. A behavior change needs
-the repository's meaningful tests plus the scenario the issue names. A release,
-migration, permission change, or user-visible flow needs a live exercise of the
-retained artifact or deployed candidate, including the failure and recovery
-paths the change can actually hit. Record what ran, what was observed, and what
-was not covered.
+- doc or comment typo: read the change, run the format check;
+- behaviour change: meaningful tests plus the issue's scenario;
+- release, migration, permission change or user-visible flow: exercise the
+  retained artifact or deployed candidate live, including reachable failure and
+  recovery paths.
 
-Where Cursor pstack skills are already installed, the verifier may use the
-prove-it-works, swarm, and poteto-mode playbooks to structure that proof.
-Those skills are optional local aids. This standard does not require installing
-them, and their absence is not a failed check. The obligation is the
-independent proof, not the tool that produced it.
-
-Separate GitHub identities keep authorship and receipt publication apart. They
-do not replace a fresh worktree or container, and switching accounts is not
-verification. Stacked-PR hosts such as Graphite, and unattended overnight
-merges, are not defaults. Merge stays on the reviewed current head together
-with its verification receipt. See `docs/operations/local-verification.md` for
-the receipt commands.
+Record what ran, what you saw and what was not covered. Installed Cursor pstack
+skills may structure the proof but are optional. Stacked-PR hosts and
+unattended overnight merges are not defaults. Merge the reviewed head with its
+receipt (`docs/operations/local-verification.md`).
 
 ## Acceptance and release
 
-The maintainer performs acceptance separately from contributor tests, against the
-issue's criteria and exact candidate, under the agent verification rules above.
-Retain commit, immutable artifact identity,
-scenarios, results, reviewer and openable evidence. The code author cannot be the
-sole product acceptor. A maintainer or agent may dispatch acceptance and release
-workflows; workflow_dispatch does not imply mandatory human attendance.
+The maintainer accepts the exact candidate against the issue criteria,
+separately from contributor tests, keeping the commit, artifact identity,
+scenarios, results, reviewer and openable evidence. The code author cannot be
+the sole acceptor.
 
-Service: build once from a fixed merged commit, validate the retained artifact
-locally or in a temporary production-like environment, accept, promote that same
-artifact, verify production and record the release. Persistent staging is optional.
-A moving main branch, coverage percentage or contributor test report alone is not
-acceptance. Exercise migrations, configuration, permissions and integrations in an
-isolated environment when the change requires it. Never use production data for
-destructive acceptance. Retain backup/recovery plans for irreversible migrations. Artifact: validate and nominate the
-artifact without fictional staging, accept and publish/verify. Non-deployable:
-a reviewed merge plus its independent verification receipt completes delivery
-when no release target exists. CI success alone does not.
-Keep release-bearing issues open until their delivery profile is complete.
-Use a top-level `Refs #N` for those PRs; `Closes #N` only when merge completes work.
+- Service: build once from a fixed merged commit, validate that artifact locally
+  or in a temporary production-like environment, accept, promote it, verify
+  production, record the release. Staging is optional.
+- Artifact: validate and nominate without fictional staging, accept, publish,
+  verify.
+- Non-deployable: a reviewed merge plus its receipt completes delivery.
 
-Preserve exact-candidate nomination, issue/implementation-set binding, acceptance
-statuses, rollback, resumable deployment receipts and post-release verification.
-A retry must inspect existing deployment evidence before repeating a deployment.
-Do not reuse an old acceptance verdict for changed bytes. Missing acceptance
-capabilities are explicit implementation work, never invented success.
-Production and publication within an assigned delivery task need no new owner
-sign-off. Live unrelated data migrations remain outside that task's scope.
+Exercise migrations, config, permissions and integrations in isolation when
+relevant, never destructively on production data. Release-bearing PRs say `Refs
+#N` and the issue stays open until delivered; `Closes #N` only when merge
+finishes the work.
+
+Changed bytes need new acceptance. A missing acceptance capability is work to
+do, never invented success. Releases inside an assigned delivery task need no
+new owner sign-off; unrelated data migrations are outside it.
 
 ## Workspace cleanup
 
-Use isolated worktrees for development and independent review. Cleanup is part
-of task closeout for contributors and maintainers, including temporary review
-and verification workspaces. Once the corresponding PR is merged or closed and
-the workspace is no longer needed, remove its worktrees and task-created
-temporary resources. For work without a PR, use completion of the assigned task
-as the cleanup trigger. Respect explicit stopping points and ongoing handoffs.
+When a PR is merged or closed (or the task ends), remove the task's unneeded
+worktrees, review and verification ones included, and temporary resources.
+First check PR status, local, untracked and ignored files, unpushed commits, and
+use by processes or sessions; a clean `git status` is not enough. Keep
+unfinished work, evidence, artifacts and recovery material. Never force past
+changes, locks or use. Touch only what the task created.
 
-Before removal, verify live PR status, local changes, untracked and ignored files,
-unpublished commits, and ongoing use by processes or other sessions. A clean Git
-status alone does not establish that ignored data or release artifacts are safe
-to delete. Preserve unfinished work, required release and acceptance evidence,
-retained artifacts, and recovery material before removing a workspace. Do not
-force removal to bypass unresolved changes, locks, or ongoing use. Scope cleanup
-to resources created for the task; leave unrelated user files and shared services
-alone.
-
-Remove worktrees through Git and prune stale registrations only after verifying
-that their directories are gone and any unique commits are preserved. Delete
-local task branches only after verifying that their commits are merged or safely
-retained and no other task needs them. Closing a PR does not prove its commits
-were merged. Remote branch deletion is a separate repository-policy decision.
-
-Report cleanup at handoff or closeout. For every retained workspace or temporary
-resource, record why it remains, the responsible role, and the event that permits
-cleanup. Keep private machine paths in local task records; public issues and PRs
-contain only non-sensitive workspace identifiers and retention reasons. A merged
-PR may still need a retained acceptance or release workspace until that work ends.
+Remove worktrees with Git; prune only once directories are gone and commits
+kept. Delete a local branch only when its commits are merged or kept and no
+other task needs it; a closed
+PR proves no merge. Report cleanup at closeout, and for anything kept, why, the
+owning role and what frees it, with no machine paths in public.
 
 ## Project state
 
 `Inbox -> Ready -> In Progress -> Review -> Release -> Done`
 
-The acting maintainer sets Status when the evidence for that state exists.
-Moving Status does not wait on product-owner confirmation. Blocked identifies
-a real unresolved dependency. Parked is deliberately deferred.
-Discovery and design are preparation activities, not compulsory separate states.
-Ready requires an executable issue, not a planning PR. Release includes candidate
-validation, acceptance and promotion. Failed review/acceptance returns to In
-Progress. Preserve the next action and evidence while migrating older states.
+The acting maintainer moves Status when the evidence exists. Blocked is a real
+dependency; Parked is deliberate deferral. Discovery and design are not states.
+Ready needs an executable issue. Failed review or acceptance returns to In
+Progress. Migrating old states keeps the next action and evidence.
 
 ## Standards maintenance
 
-Record the adjustment once, update and validate the template, then cascade to
-ALL active organization repositories and verify conformity. There are no pilots,
-rollout waves or optional adoption backlog. The operation is incomplete while
-any active target remains unresolved. Archive status is rechecked at completion.
-The template publishes organization defaults as well as managed repository files.
-
-Maintainers author policy/docs; contributors author executable changes in PRs;
-maintainers review. The shared decision is sufficient rationale; do not create
-recursive discovery, solution-design or product acceptance ceremonies for the
-maintenance operation. Repository-specific checks still run. Updating delivery
-machinery does not itself authorize an unrelated application deployment.
-
-Maintain one version with repository-specific configuration for stack, commands
-and delivery profile. Preserve product content. Conflicts are resolved in this
-same task, not silently overwritten or deferred. Generated distributions must
-be changed through their authoritative source and publication process.
+Record the change once, update and validate the template, cascade to every
+active org repository and verify conformity. No pilots or waves: it is
+incomplete while any active target is unresolved; recheck archive status at the
+end. Repo checks still run. Preserve product content and resolve conflicts in
+the same task. Change generated distributions at their source. Maintenance never
+authorizes an unrelated deployment.
 
 ## Enforcement
 
-Run `bin/sdlc check` for managed-file conformity and `bin/sdlc review` before a
-code merge. Review verification uses live GitHub identity, exact head, reviewer
-permission and an independent authenticated receipt for all configured commands.
-The receipt includes environment, command outcomes and openable sanitized logs.
-A changed configuration, stale run, failed latest run or altered log fails the gate.
-See `docs/operations/local-verification.md` for portable commands and release flow. Documentation-only changes do not
-need code approval. Maintainers still validate documentation and correct scope.
-Local execution is the default. Optional Actions run only on explicitly enabled
-trusted self-hosted runners; never fall back silently to paid hosted compute.
-GitHub authenticates the receipt publisher, not the machine execution. Separate
-GitHub accounts isolate authorship and receipt publication. That split is not
-host isolation and is not the quality gate: a rubber-stamp `APPROVE`, or a
-green CI run alone, is not a merge verdict. Use a fresh worktree or container
-for independent verification and do not expose operator credentials to
-untrusted test code.
-Use branch protection where supported; post-push audits detect rather than
-prevent unauthorized pushes. Record actual enforcement limitations honestly.
-Personal execution environments must verify Git authorship and authenticated
-identity immediately before writes, with isolated credentials for concurrent
-roles and no fallback to an unintended account.
+Run `bin/sdlc check` for conformity and `bin/sdlc review` before a code merge.
+Review checks live identity, exact head, reviewer permission and an independent
+receipt for every configured command, with environment, outcomes and sanitized
+logs. Changed config, a stale or failed latest run, or an edited log fails. Use
+branch protection where supported; audits only detect. Record enforcement gaps.
 
 ## Historical work
 
-Historical approvals, exceptions and releases remain evidence. This standard
-supersedes prior mandatory owner gates and routine engineering self-review for
-new work. Version `2026.10.02.1` keeps that delegation, names the only owner
-escalations, and requires independent proof of the real artifact. Version
-`2026.11.05.1` replaces optional, retired plans with reviewed plans kept in
-`docs/changes/`; plans already in `docs/plans/` stay in place. Version
-`2026.11.05.2` adds repo-owned `CLAUDE.md`, `REVIEW.md`, `.claude/settings.json`
-and `docs/repository.md` starters, added only where missing. Existing PRs
-retain real authorship and receive an eligible independent review; never
-rewrite attribution. Preserve open issue/PR links and acceptance
-records while transitioning. A historical exception is not authority for a new
-candidate.
+Past approvals, exceptions and releases stay evidence but authorize no new
+candidate. This standard supersedes earlier owner gates and self-review for new
+work. Plans already in
+`docs/plans/` stay. Existing PRs keep real authorship and get independent
+review.
