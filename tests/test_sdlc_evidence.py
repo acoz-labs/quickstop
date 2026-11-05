@@ -1,8 +1,10 @@
+import contextlib
 import copy
 import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -222,6 +224,89 @@ class ReceiptTests(unittest.TestCase):
             with self.assertRaises(e.Failure):
                 e.publish(Path("missing"), 1, "Reviewer", False, "review")
             api.assert_not_called()
+
+
+class PublishRoundTripTests(unittest.TestCase):
+    """Publish to a fake GitHub that rewrites controls as GitHub does, then verify."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.config = {"validation": ["bin/ci"]}
+        self.comments = []
+
+    @staticmethod
+    def caret(body):
+        # Observed on GitHub: C0 except BS, TAB, LF, VT, FF, CR, and all C1, become ^X.
+        return re.sub(r"[\x00-\x07\x0e-\x1f\x80-\x9f]",
+                      lambda m: "^" + chr((ord(m[0]) & 0x1f) + 0x40), body)
+
+    def api(self, endpoint, payload=None):
+        if endpoint == "user":
+            return {"login": "Reviewer"}
+        if endpoint.endswith("/permission"):
+            return {"permission": "maintain"}
+        if endpoint == "repos/o/r/pulls/1":
+            return {"state": "open", "draft": False, "head": {"sha": "a" * 40}}
+        if endpoint == "repos/o/r/issues/1/comments" and payload is not None:
+            id = 100 + len(self.comments)
+            self.comments.append({"id": id, "user": {"login": "Reviewer"},
+                                  "body": self.caret(payload["body"]),
+                                  "html_url": f"https://github.com/o/r/pull/1#issuecomment-{id}"})
+            return self.comments[-1]
+        if endpoint.startswith("repos/o/r/issues/comments/"):
+            return next(c for c in self.comments if str(c["id"]) == endpoint.rsplit("/", 1)[1])
+        raise AssertionError(endpoint)
+
+    def publish_and_verify(self, log):
+        (self.folder / "command-1.log").write_bytes(log)
+        receipt = {"schema": 1, "id": "run-id", "repo": "o/r", "phase": "validation", "sha": "a" * 40,
+                   "config_sha256": e.sha256(e.encoded(self.config)), "success": True,
+                   "clean_before": True, "clean_after": True,
+                   "commands": [{"command": "bin/ci", "exit_code": 0, "log": "command-1.log",
+                                 "sha256": e.sha256(log)}]}
+        (self.folder / "receipt.json").write_text(json.dumps(receipt))
+        with patch.object(e, "api", side_effect=self.api), \
+             patch.object(e, "pages", side_effect=lambda endpoint: list(self.comments)), \
+             contextlib.redirect_stdout(None):
+            e.publish(self.folder / "receipt.json", 1, "Reviewer", True, "Logs reviewed")
+            url = e.trusted_receipt("o/r", 1, "a" * 40, self.config, "validation", ["Builder"])
+        published = e.parse_comment(self.comments[-1])
+        self.assertEqual(url, self.comments[-1]["html_url"])
+        self.assertEqual(published["commands"][0]["sha256"], e.sha256(log), "run hash stays the original bytes")
+        return published["logs"][0]["sha256"], "".join(c["body"].split("\n\n", 1)[1] for c in self.comments[:-1])
+
+    def test_coloured_log_publishes_without_escapes_and_verifies(self):
+        log = (b"\x1b[1;32mOK\x1b[0m tests\n\x1b]8;;https://example.org\x07link\x1b]8;;\x07\n"
+               b"\x1b[2K\x1b(Bplain\x1b\n")
+        published_hash, text = self.publish_and_verify(log)
+        self.assertEqual(text, "OK tests\nlink\nplain\n")
+        self.assertEqual(published_hash, e.sha256(text.encode()))
+
+    def test_other_controls_github_rewrites_are_removed(self):
+        log = ("\x1b[32mOK\x1b[m\x0f tests\n"  # tmux/screen colour reset ends in SI
+               "done\x07\n"
+               "\x9b31mC1 colour\x9b0m \x85\x00\n").encode()
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "OK tests\ndone\nC1 colour \n")
+
+    def test_unterminated_osc_keeps_later_lines(self):
+        log = b"start\x1b]0;title\nreal log line 1\nreal log line 2\x07end\n"
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "start0;title\nreal log line 1\nreal log line 2end\n")
+
+    def test_log_without_escapes_hashes_as_before(self):
+        log = "passed ✓ [1/2] ^[ literal\b\t\x0b\x0c\x7f\r\n".encode() + b"bad byte \x9b\xff\n"
+        published_hash, text = self.publish_and_verify(log)
+        self.assertEqual(published_hash, e.sha256(log.decode("utf-8", errors="replace").encode()))
+        self.assertEqual(text, log.decode("utf-8", errors="replace"))
+
+    def test_long_coloured_log_splits_after_stripping(self):
+        log = b"\x1b[31mx\x1b[0m" * 12000
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "x" * 12000)
+        self.assertEqual(len(self.comments), 3)
 
 
 class ScenarioReportTests(unittest.TestCase):

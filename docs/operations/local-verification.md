@@ -31,7 +31,8 @@ tests.
 
 Keep evidence private, outside the checkout. The publishing agent inspects and
 redacts logs: public comments carry no host config, credentials, customer data
-or account paths. Original and sanitized hashes detect edits. GitHub
+or account paths. Publishing strips terminal escape codes, such as colours,
+and the other control characters GitHub would rewrite. Original and published hashes detect edits. GitHub
 authenticates the publisher, not the execution.
 
 A later failed receipt revokes success; new code needs new verification. Publish
