@@ -23,7 +23,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SUITE = ROOT / 'evals/writing-for-humans'
 CASES = SUITE / 'cases'
-PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+PLUGIN = ROOT / 'plugins/writing-for-humans'
 VERSION = json.loads((PLUGIN / '.claude-plugin/plugin.json').read_text())['version']
 RUNNER = ROOT / 'bin/writing-for-humans-eval'
 

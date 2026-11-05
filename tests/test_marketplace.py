@@ -251,6 +251,18 @@ class MarketplaceTests(unittest.TestCase):
         self.assertEqual(module.validate(self.root), 1)
 
 
+class RepositoryTests(unittest.TestCase):
+    def test_retired_tool_outputs_and_layouts_are_gone(self):
+        root = Path(__file__).resolve().parents[1]
+        for retired in ('.agents', 'docs/pi-packages.md', 'plugins/codex', 'plugins/claude-code',
+                        'docs/acceptance/shipshape.md', 'tests/test_shipshape.py'):
+            self.assertFalse((root / retired).exists(), retired)
+        catalog = json.loads((root / 'catalog.json').read_text())
+        self.assertEqual({h for p in catalog['plugins'] for h in p['targets']}, {'claude-code'})
+        self.assertEqual({p['name']: p['targets']['claude-code']['path'] for p in catalog['plugins']},
+                         {p['name']: 'plugins/' + p['name'] for p in catalog['plugins']})
+
+
 class PinnedPythonTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

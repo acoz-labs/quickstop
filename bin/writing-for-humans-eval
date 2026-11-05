@@ -19,7 +19,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITE = ROOT / 'evals/writing-for-humans'
-PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+PLUGIN = ROOT / 'plugins/writing-for-humans'
 NAME = 'writing-for-humans'
 STYLE = f'{NAME}:{NAME}'
 SKILLS = (f'{NAME}:writing-audit', f'{NAME}:writing-style')
@@ -455,13 +455,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('host', help='run only the free install and style-selection checks')
-    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--plugin', help='plugin under test (default plugins/writing-for-humans)')
     p = sub.add_parser('run', help='host checks, then the eval suite in a scratch plugin copy')
     p.add_argument('--model', required=True)
     p.add_argument('--max-cost-usd', type=positive_cost, required=True)
     p.add_argument('--runs', type=positive_int, default=1)
     p.add_argument('--case', help='case name glob passed to claude plugin eval')
-    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--plugin', help='plugin under test (default plugins/writing-for-humans)')
     p.add_argument('--output-dir', help='default evals/writing-for-humans/results/<UTC timestamp>')
     p.add_argument('--keep-scratch', action='store_true')
     p.add_argument('--keep-temp', action='store_true', help="keep each run's temp dir and trace")

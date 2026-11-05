@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SUITE_PATH = 'evals/writing-for-humans-quality'
 RUNNER_PATH = 'bin/writing-for-humans-quality-eval'
 SUITE = ROOT / SUITE_PATH
-PLUGIN = ROOT / 'plugins/claude-code/writing-for-humans'
+PLUGIN = ROOT / 'plugins/writing-for-humans'
 PLUGIN_NAME = 'writing-for-humans'
 # Arm name -> the `outputStyle` setting it runs with. Only the writing-for-humans arm loads the plugin:
 # loading it everywhere would let the default and Concise arms call its writing-style skill.
@@ -1007,7 +1007,7 @@ def main():
 
     p = sub.add_parser('preflight', help='prove each arm activates its style; no model call')
     p.add_argument('--arm', action='append', choices=list(ARMS))
-    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--plugin', help='plugin under test (default plugins/writing-for-humans)')
     p = sub.add_parser('calibrate', help='grade the hand-written samples; script graders cost nothing')
     p.add_argument('--case', action='append')
     p.add_argument('--judges', action='store_true', help='also run the model judges (paid)')
@@ -1025,7 +1025,7 @@ def main():
     p.add_argument('--jobs', type=positive_int, default=3)
     p.add_argument('--no-judges', action='store_true')
     p.add_argument('--calibration', help='output dir of a passing `calibrate --judges` on this tree (counted runs)')
-    p.add_argument('--plugin', help='plugin under test (default plugins/claude-code/writing-for-humans)')
+    p.add_argument('--plugin', help='plugin under test (default plugins/writing-for-humans)')
     p.add_argument('--output-dir', help='default evals/writing-for-humans-quality/results/<UTC timestamp>')
     p = sub.add_parser('grade', help='regrade a result dir: script graders, and judges with --judges (paid)')
     p.add_argument('result_dir')
