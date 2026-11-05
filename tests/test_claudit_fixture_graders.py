@@ -256,12 +256,12 @@ def quoted(open_, close):
     that a continuation follows ("…<name>`." is copied into …), and an opening mark with no close on the line."""
     body = r'[^%s\n]*' % close
     return [r'%s(?:%s[^%s\n.!?*_\x60)])?[*_\x60)]*%s' % (open_, body, close, close),
-            r'%s%s[.!?][*_\x60)]*%s(?=[,;:)]|[ \t]+%s)' % (open_, body, close, QUOTE_GOES_ON),
+            r'%s%s[.!?][*_\x60)]*%s(?=[,;:)]|[ \t]+(?:\(|%s))' % (open_, body, close, QUOTE_GOES_ON),
             r'%s(?!%s%s)' % (open_, body, close)]
 
 
-# After a quote that ends in a stop, the sentence goes on only with a verb or link word of the claim ("… ." is
-# copied", "… ." appears in"); anything else starts a new sentence.
+# After a quote that ends in a stop, the sentence goes on only with a parenthesis or a verb or link word of the claim
+# ("… ." is copied", "… ." appears in", "… ." (copied into …)); anything else starts a new sentence.
 QUOTE_GOES_ON = (r'(?:is|are|was|were|appears?|occurs?|recurs?|sits?|lives?|shows?|turns?|reads?|exists?|repeats?|'
                  r'and|in|into|across|from|also|word|verbatim|copied|duplicated|repeated|restated)\b')
 # f15 only (4.3.1): a character inside one sentence, where a quoted rule's own full stops don't end the sentence.
@@ -1450,7 +1450,9 @@ QUOTE_SPLIT = ([
     'in CLAUDE.md, docs/contributing.md and migrator.md.',
     '- %s, copied into %s, belongs in one place.' % (RULE_Q, COPIES),
     '- "Agents could edit migrations/ by hand if they wanted?" is copied word for word into %s.' % COPIES,
+    '- The rule %s (copied word for word into %s) should live in one place.' % (RULE_Q, COPIES),  # review round 1
 ], [
+    '- The rule %s (not copied word for word into %s) is fine.' % (RULE_Q, COPIES),
     '- The rule %s is not copied word for word into %s.' % (RULE_Q, COPIES),
     '- Is %s copied word for word into %s?' % (RULE_Q, COPIES),
     '- `CLAUDE.md` says %s Copies elsewhere, in `docs/contributing.md` and `migrator.md`, hold other rules.' % RULE_Q,
