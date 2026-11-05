@@ -279,17 +279,46 @@ class History(Project):
                    'A 2026-07-28 server answers them with `-32601`.\n'
                    'Since 2026-07-28 servers were required to answer.\n'
                    'Use the version that was released on 2026-03-02.\nHooks are disabled in CI.\n'
-                   '\nSee [migrating](migration.md) and [what is new](whats-new.md) and [upgrade](v2.md).\n')
+                   )
         self.write('bin/ci', '#!/bin/sh\n')
-        for rel, title in (('docs/migration.md', 'Migration'), ('docs/whats-new.md', 'News'),
-                           ('docs/v2.md', 'Upgrading to v2')):
-            self.write(rel, '# %s\n\n`Server.run_sse` has been removed; use `run_http`.\n' % title)
-        self.write('docs/other.md', '# Other\n\n`Server.run_sse` has been removed; use `run_http`.\n')
-        self.write('CLAUDE.md', '# x\n\n@docs/guide.md\n\nSee docs/migration.md, docs/whats-new.md, docs/v2.md and '
-                   'docs/other.md.\n')
+        self.write('CLAUDE.md', '# x\n\n@docs/guide.md\n')
+        self.assertEqual(self.scan()['stale_candidates'], [])
+
+    REMOVED = '`Server.run_sse` has been removed; use `run_http`.\n'
+
+    def test_only_docs_pages_that_are_history_pages_are_skipped(self):
+        # Review round 2: a guide by file name or by its first heading is skipped; a topic word is not a guide.
+        pages = {'docs/migration-guide.md': '# Notes', 'docs/whats-new.md': '# News', 'docs/upgrading.md': '# Notes',
+                 'docs/deprecations.md': '# Notes', 'docs/breaking-changes.md': '# Notes', 'CHANGELOG.md': '# x',
+                 'docs/migration.md': '# Migration Guide: v1 to v2', 'docs/v2.md': '# Upgrading to v2',
+                 'docs/new.md': "# What's new in v2",
+                 # Not history pages: these keep detection.
+                 'docs/migrations.md': '# Writing database migrations', 'docs/releases.md': '# Release procedure',
+                 'docs/upgrade.md': '# Upgrade dependencies', 'docs/policy.md': '# Deprecation policy',
+                 'docs/later.md': '# Notes\n\n# Migration guide'}
+        for rel, title in pages.items():
+            self.write(rel, '%s\n\n%s' % (title, self.REMOVED))
+        self.write('CLAUDE.md', '# x\n\nSee %s.\n' % ', '.join(sorted(pages)))
         result = self.scan()
-        self.assertEqual(len(result['context']['likely_read']), 4)  # every guide is read, and only other.md tells history
-        self.assertEqual([(c['path'], c['line']) for c in result['stale_candidates']], [('docs/other.md', 3)])
+        self.assertEqual(len(result['context']['likely_read']), len(pages))
+        self.assertEqual(sorted(c['path'] for c in result['stale_candidates']),
+                         ['docs/later.md', 'docs/migrations.md', 'docs/policy.md', 'docs/releases.md',
+                          'docs/upgrade.md'])
+
+    def test_instruction_files_skills_subagents_and_imports_are_never_skipped(self):
+        retired = 'Repository push hooks have been retired; clean-checkout evidence is the verification gate.\n'
+        self.write('CLAUDE.md', '# Acme upgrade service\n\n%s\n@docs/migration-guide.md\n' % retired)
+        self.write('docs/migration-guide.md', '# Migration guide: v1 to v2\n\n' + self.REMOVED)  # an @-import
+        self.write('AGENTS.md', '# db-migrate\n\n%s\n# Deprecation policy\n' % retired)
+        self.write('.claude/skills/upgrade-deps/SKILL.md', '---\nname: upgrade-deps\ndescription: Upgrade.\n---\n'
+                   '# Migration guide\n\n' + self.REMOVED)
+        self.write('.claude/agents/news.md', "---\nname: news\ndescription: News.\n---\n# What's new\n\n"
+                   + self.REMOVED)
+        self.write('.claude/commands/upgrading.md', '# Upgrading to v2\n\n' + self.REMOVED)
+        found = sorted(c['path'] for c in self.scan()['stale_candidates'])
+        self.assertEqual(found, ['.claude/agents/news.md', '.claude/commands/upgrading.md',
+                                 '.claude/skills/upgrade-deps/SKILL.md', 'AGENTS.md', 'CLAUDE.md',
+                                 'docs/migration-guide.md'])
 
     def test_history_still_found_beside_relative_clauses(self):
         self.write('CLAUDE.md', '# x\n\nPush hooks, which we used for years, have been retired.\n'

@@ -143,8 +143,10 @@ and the diffs. The rules:
   under Also worth knowing as possibly stale, with its line. It changes no grade. A
   past verb in a relative clause or a condition ("the last release that passed", "if
   the build failed") and a date used as a name ("a 2026-07-28 server") are not history.
-  Decision records, changelogs, release notes, migration and upgrade guides and
-  what's-new pages are skipped. A retirement told this way is never
+  Decision records are skipped, and so are docs pages that are history pages by name
+  or first heading (changelogs, release notes, migration and upgrade guides, what's-new,
+  deprecations and breaking-changes pages); instruction files, imports, skills,
+  subagents and commands never are. A retirement told this way is never
   read as a decline: only a decision record (`decisions.md`, `docs/adr/`) declines a
   feature.
 - **Human gates.** A sentence in the loaded instructions where a person must approve
