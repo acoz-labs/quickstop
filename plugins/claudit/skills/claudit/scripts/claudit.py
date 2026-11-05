@@ -288,13 +288,27 @@ SPECULATIVE = re.compile(r'\b(?:may|might|could|would|should|will|must|can)\b', 
 RELATIVE = re.compile(r'\b(?:(?:that|which|who|whom)\s+(?:\S+\s+)?|(?:whose|where)\s+(?:\S+\s+){0,3})$', re.I)
 CONDITION = re.compile(r'\b(?:if|unless|whether|once|when|whenever)\b[^.;]*$', re.I)  # "If the build failed, …"
 # Where a project records decisions and history on purpose: a decision record (decisions.md, docs/adr/...) owns a
-# decline, and changelogs, release notes, migration and upgrade guides and what's-new pages tell history as
-# their contract ("`X` has been removed; use `Y`").
+# decline, and a history page tells history as its contract ("`X` has been removed; use `Y`"). A docs page (never an
+# instruction file, import, skill, subagent or command) is a history page by its file name (a changelog, release
+# notes or a guide name such as migration-guide, upgrading, whats-new, deprecations, breaking-changes) or by its
+# first heading naming such a guide ("Migration guide: v1 to v2", "Upgrading to v2", "What's new in v2"). A topic
+# word alone ("Writing database migrations", "Release procedure", "Acme upgrade service") makes no history page.
 DECISION_RECORD = re.compile(r'decision|(?:^|/)adrs?(?:/|[-_.])', re.I)
-HISTORY_FILE = re.compile(r'(?:^|/)(?:change-?log|changes|history|news|release[-_ ]?notes|releases|migrat\w*|'
-                          r'upgrad\w*|what[\'’]?s[-_ ]?new|deprecat\w*|breaking[-_ ]changes)[^/]*$', re.I)
-HISTORY_TITLE = re.compile(r'^#\s+.*\b(?:change-?log|release notes|migrat\w*|upgrad\w*|what[\'’]?s new|'
-                           r'deprecat\w*|breaking changes)\b', re.I | re.M)
+HISTORY_FILE = re.compile(r'(?:^|/)(?:change-?log|changes|history|news|release[-_ ]?notes|migration[-_]guide|'
+                          r'migrating[-_]to\b[^/]*|upgrading(?:[-_][^/]*)?|whats?[-_]new|deprecations|'
+                          r'breaking[-_]changes)(?:\.[\w]+)?$', re.I)
+HISTORY_TITLE = re.compile(r'^(?:.*\b(?:migration|upgrade|upgrading)\s+guide\b|(?:migrating|upgrading)\s+(?:from|to)\b|'
+                           r'what[\'’]?s\s+new\b|change\s*-?log\b|release\s+notes\b|deprecations\b|'
+                           r'breaking\s+changes\b)', re.I)
+
+
+def first_heading(text):
+    """The text of a Markdown file's first heading (outside code fences), or ''."""
+    for _, line in prose(text):
+        match = re.match(r'\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$', line)
+        if match:
+            return match.group(1)
+    return ''
 
 
 def history_form(sentence):
@@ -1246,14 +1260,15 @@ class Scan:
             entry['not_a_decline'] = '%s: no decision record says so, so it is not listed as declined; Claudit ' \
                 'still does not recommend it while this line stands' % label
 
-    def stale_history(self, paths):
+    def stale_history(self, paths, docs):
         """History narrative (dated runs, "have been retired", past versions) in the given instruction files, skills,
-        subagents and docs: stale candidates for the report, never graded. Decision records and changelogs tell
-        history on purpose and are skipped."""
+        subagents and docs: stale candidates for the report, never graded. Decision records, and the history pages
+        among `docs` (docs pages only), tell history on purpose and are skipped."""
         for path in paths:
             text = self.text(path) or ''
-            if DECISION_RECORD.search(path) or HISTORY_FILE.search(path) or HISTORY_TITLE.search(text[:2000]) \
-                    or self.data(path) or os.path.isabs(path) or path.startswith('..'):
+            history_page = path in docs and (HISTORY_FILE.search(path) or HISTORY_TITLE.match(first_heading(text)))
+            if DECISION_RECORD.search(path) or history_page or self.data(path) or os.path.isabs(path) \
+                    or path.startswith('..'):
                 continue
             for sentence, line_at in sentences(text):
                 form = history_form(sentence)
@@ -1968,9 +1983,10 @@ class Scan:
         generated = self.generated()
         duplicates = self.check_duplicates(instructions, skill_docs, agent_docs, generated)
         context = self.context(instructions, skill_docs, agent_docs)
-        self.stale_history(dict.fromkeys(
-            [i['path'] for i in instructions if i['kind'] in ('project', 'nested', 'import')] +
-            [x['path'] for x in skill_docs + agent_docs] + commands + [r['path'] for r in context['likely_read']]))
+        own = [i['path'] for i in instructions if i['kind'] in ('project', 'nested', 'import')] + \
+            [x['path'] for x in skill_docs + agent_docs] + commands
+        docs = [r['path'] for r in context['likely_read'] if r['path'] not in own]
+        self.stale_history(dict.fromkeys(own + docs), set(docs))  # the history-page skip is for docs pages only
         self.check_visible_skills(skill_docs, agent_docs, team)
         scope = self.scope(instructions)
         project_instr = [i for i in instructions if i['kind'] in ('project', 'nested', 'import')]
