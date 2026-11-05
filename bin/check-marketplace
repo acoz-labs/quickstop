@@ -7,16 +7,13 @@ import os
 from pathlib import Path
 import platform
 import re
-import shlex
 import shutil
 import subprocess
 import sys
 
-FORMATS = {'claude-code': {'claude-plugin': '.claude-plugin/plugin.json'},
-           'codex': {'codex-plugin': '.codex-plugin/plugin.json',
-                     'agent-plugin': 'plugin.json'},
-           'pi': {'pi-package': 'package.json'}}
-OUTPUTS = ('.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json', 'docs/catalog.md', 'docs/pi-packages.md')
+# Quickstop targets Claude Code only. Another agent tool is added only once its plugins can be tested in that tool.
+FORMATS = {'claude-code': {'claude-plugin': '.claude-plugin/plugin.json'}}
+OUTPUTS = ('.claude-plugin/marketplace.json', 'docs/catalog.md')
 
 
 class Invalid(ValueError):
@@ -91,12 +88,8 @@ def git(root, *args, stdin=None):
     return result.stdout
 
 
-def validate_resources(package, manifest, claude=False):
-    allowed = {'skills': (str, list) if claude else (str,),
-               'agents': (str, list) if claude else (),
-               'hooks': (str, list, dict) if claude else (str,),
-               'mcpServers': (str, list, dict) if claude else (str, dict),
-               'apps': (str,)}
+def validate_resources(package, manifest):
+    allowed = {'skills': (str, list), 'agents': (str, list), 'hooks': (str, list, dict), 'mcpServers': (str, list, dict)}
     for key, types in allowed.items():
         if key not in manifest:
             continue
@@ -111,20 +104,12 @@ def validate_resources(package, manifest, claude=False):
             require(all(isinstance(server, dict) for server in value.values()), 'inline MCP servers must be objects')
         elif key == 'hooks':
             require(isinstance(value.get('hooks'), dict), 'inline hooks need a hooks object')
-    interface = manifest.get('interface', {})
-    require(isinstance(interface, dict), 'interface must be an object')
-    for key in ('composerIcon', 'logo', 'logoDark'):
-        if key in interface:
-            component_path(package, interface[key])
-    if 'screenshots' in interface:
-        require(isinstance(interface['screenshots'], list), 'screenshots must be a list')
-        for value in interface['screenshots']:
-            component_path(package, value)
 
 
 def package_manifest(root, plugin, harness, target):
     fields(target, ('format', 'path', 'acceptance'), 'target')
-    require(harness in FORMATS and target['format'] in FORMATS[harness], f'unsupported harness/format: {harness}/{target["format"]}')
+    require(harness in FORMATS, f"{plugin['name']}: unsupported target {harness!r}; Quickstop supports only claude-code")
+    require(target['format'] in FORMATS[harness], f"{plugin['name']}: unsupported {harness} format {target['format']!r}")
     require(isinstance(target['path'], str) and target['path'].startswith('plugins/'), 'packages must live under plugins/')
     package = safe_path(root, target['path'])
     require(package.is_dir(), f'missing package: {target["path"]}')
@@ -139,50 +124,17 @@ def package_manifest(root, plugin, harness, target):
     require((package / 'README.md').is_file(), 'package needs README.md')
     if manifest.get('license'):
         require((package / 'LICENSE').is_file(), 'declared license needs LICENSE')
-    if target['format'] == 'agent-plugin':
-        require(manifest.get('$schema') == 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json', 'portable package needs Agent Plugins 1.0 schema')
-    if target['format'] == 'pi-package':
-        resources = manifest.get('pi')
-        require(isinstance(resources, dict), 'Pi package needs an explicit pi resource manifest')
-        supported = ('extensions', 'skills', 'prompts', 'themes')
-        require(any(resources.get(key) for key in supported), 'Pi package must declare resources')
-        for key in supported:
-            if key not in resources:
-                continue
-            require(isinstance(resources[key], list), f'Pi {key} must be a list')
-            for value in resources[key]:
-                require(isinstance(value, str) and not any(c in value for c in '*?[]!{}'), 'Quickstop Pi resources require explicit paths, not globs')
-                component_path(package, value)
     # Validate declared file resources without claiming the complete host schema.
-    validate_resources(package, manifest, claude=target['format'] == 'claude-plugin')
-    extension = manifest.get('extensions', {}).get('com.openai', {})
-    require(isinstance(extension, dict), 'OpenAI extension must be an object')
-    validate_resources(package, extension)
-    overlay = package / '.codex-plugin/plugin.json'
-    if target['format'] == 'agent-plugin' and overlay.is_file():
-        compatibility = read_json(overlay)
-        for key in ('name', 'version'):
-            if key in compatibility:
-                require(compatibility[key] == manifest[key], f'portable/compatibility {key} mismatch')
-        validate_resources(package, compatibility)
+    validate_resources(package, manifest)
     skill_roots = {package / 'skills'}
     declared_skills = manifest.get('skills', [])
     if isinstance(declared_skills, str):
         declared_skills = [declared_skills]
     for value in declared_skills:
         skill_roots.add(component_path(package, value))
-    if target['format'] == 'pi-package':
-        for value in manifest['pi'].get('skills', []):
-            skill_roots.add(component_path(package, value))
     documents = list((package / 'agents').rglob('*.md'))
     for directory in skill_roots:
-        if harness == 'pi':
-            if directory.is_file():
-                documents.append(directory)
-            elif directory.is_dir():
-                documents.extend(directory.rglob('SKILL.md'))
-                documents.extend(directory.glob('*.md'))
-        elif directory.is_dir():
+        if directory.is_dir():
             for skill in directory.iterdir():
                 if skill.is_dir():
                     require((skill / 'SKILL.md').is_file(), f'{skill.name}: missing SKILL.md')
@@ -221,67 +173,41 @@ def load_catalog(root):
     # Every native manifest in the distribution tree must belong to a declared target.
     expected = {target['path'] + '/' + FORMATS[harness][target['format']]
                 for (_, harness), (target, _) in packages.items()}
-    for target, _ in packages.values():
-        if target['format'] == 'agent-plugin':
-            expected.add(target['path'] + '/.codex-plugin/plugin.json')
     for path in (root / 'plugins').rglob('*'):
         require(not path.is_symlink(), 'symlink in distribution tree')
         if path.is_file():
             rel = path.relative_to(root).as_posix()
             require(any(rel.startswith(p + '/') for p in roots), f'unregistered distribution file: {rel}')
-            if (path.name == 'plugin.json' and (path.parent.name in ('.claude-plugin', '.codex-plugin') or '$schema' in read_json(path))) or (path.name == 'package.json' and 'pi' in read_json(path)):
+            if path.name == 'plugin.json' and path.parent.name == '.claude-plugin':
                 require(rel in expected, f'undeclared native manifest: {rel}')
     return catalog, packages
 
 
 def projections(catalog, packages, releases=None):
-    claude, codex = [], []
-    pi_lines = ['# Pi packages', '', 'Generated from `catalog.json` and `releases.json`; do not edit by hand.', '',
-                'Only accepted Pi targets receive installation commands below.',
-                'Pi links local packages, so keep each verified version checkout available.',
-                'Commands change settings only when you run them; no package is auto-installed.', '']
+    claude = []
     rows = ['# Plugin catalog', '', 'Generated from `catalog.json`, `releases.json` and native manifests. Do not edit by hand.', '',
-            'Support is explicit per plugin; an omitted harness is not supported. Versions are per package.', '',
-            '| Plugin | Purpose | Claude Code | Codex | Pi |', '| --- | --- | --- | --- | --- |']
+            'Every plugin targets Claude Code. Versions are per package.', '',
+            '| Plugin | Purpose | Claude Code |', '| --- | --- | --- |']
     for plugin in catalog['plugins']:
         name = plugin['name']
-        cells = []
-        for harness in FORMATS:
-            pair = packages.get((name, harness))
-            if not pair:
-                cells.append('—')
-                continue
-            target, manifest = pair
-            released = releases.get((name, harness)) if releases is not None else None
-            if releases is not None and released is None:
-                cells.append('Not released')
-                continue
+        target, manifest = packages[name, 'claude-code']
+        released = releases.get((name, 'claude-code')) if releases is not None else None
+        if releases is not None and released is None:
+            cell = 'Not released'
+        else:
             if released:
                 target, manifest = released['target'], released['manifest']
-            cells.append(f'[{manifest["version"]}](../{target["acceptance"]})')
-            if harness == 'claude-code':
-                entry = {'name': name, 'version': manifest['version'], 'description': plugin['description'], 'source': './' + target['path']}
-                if manifest.get('keywords'):
-                    entry['keywords'] = manifest['keywords']
-                if released:
-                    entry['source'] = {'source': 'git-subdir', 'url': REPOSITORY_URL, 'path': target['path'], 'sha': released['commit']}
-                claude.append(entry)
-            elif harness == 'codex':
-                codex.append({'name': name, 'source': ({'source': 'git-subdir', 'url': REPOSITORY_URL, 'path': './' + target['path'], 'sha': released['commit']} if released else {'source': 'local', 'path': './' + target['path']}),
-                              'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_INSTALL'}, 'category': plugin['category']})
-            else:
-                if released:
-                    pi_lines.extend([f'## {name} {manifest["version"]}', '', f'Accepted commit: `{released["commit"]}`', f'Package SHA-256: `{released["sha256"]}`', '', f'Acceptance: [procedure](../{target["acceptance"]})', '', 'Use a dedicated checkout for this version; keep it available while installed.', 'The verification command refuses a changed package. Do not pull or edit this checkout.', '', '```sh', f'git clone --no-checkout {REPOSITORY_URL} {name}-{released["commit"][:12]}', f'cd {name}-{released["commit"][:12]}', f'git checkout --detach {released["commit"]}', f'python3 bin/marketplace-release verify-package --path {shlex.quote(target["path"])} --sha256 {released["sha256"]}', f'pi install {shlex.quote("./" + target["path"])}', '```', '', 'For an update, remove the old local source using `pi remove` and install the new', 'accepted version from its separate verified checkout. To recover, reinstall the', 'previous verified checkout. Existing local installs do not move automatically.', ''])
-                    continue
-                pi_lines.extend([f'## {name} {manifest["version"]}', '',
-                                 f'Acceptance: [procedure](../{target["acceptance"]})', '',
-                                 '```sh', f'pi install {shlex.quote("./" + target["path"])}', '```', ''])
-        rows.append('| ' + ' | '.join([name, plugin['description'].replace('|', '\\|'), *cells]) + ' |')
-    if not any(harness == 'pi' for _, harness in packages):
-        pi_lines.append('No plugins currently declare Pi support. Claudit is Claude Code-only.')
+            cell = f'[{manifest["version"]}](../{target["acceptance"]})'
+            entry = {'name': name, 'version': manifest['version'], 'description': plugin['description'], 'source': './' + target['path']}
+            if manifest.get('keywords'):
+                entry['keywords'] = manifest['keywords']
+            if released:
+                entry['source'] = {'source': 'git-subdir', 'url': REPOSITORY_URL, 'path': target['path'], 'sha': released['commit']}
+            claude.append(entry)
+        rows.append('| ' + ' | '.join([name, plugin['description'].replace('|', '\\|'), cell]) + ' |')
     json_text = lambda value: json.dumps(value, indent=2, ensure_ascii=False) + '\n'
     return dict(zip(OUTPUTS, [json_text({'name': catalog['name'], 'owner': {'name': 'acoz-labs', 'url': 'https://github.com/acoz-labs'}, 'description': catalog['description'], 'plugins': claude}),
-                              json_text({'name': catalog['name'], 'interface': {'displayName': catalog['display_name']}, 'plugins': codex}), '\n'.join(rows) + '\n', '\n'.join(pi_lines) + '\n']))
+                              '\n'.join(rows) + '\n']))
 
 
 REPOSITORY_URL = 'https://github.com/acoz-labs/quickstop.git'
