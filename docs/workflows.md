@@ -79,14 +79,10 @@ to advance a revision. Rendering uses a reviewed snapshot, not a runtime GitHub
 request. If a guide update changes or removes the starter prompt, do not leave
 the advertised receipt presenting superseded instructions as current.
 
-## Keeping Shipshape current
+## Shipshape (retired)
 
-Shipshape draws on the practices used to maintain Quickstop. Its portable guidance
-lives in `workflows/shipshape/`; Quickstop's actual operating contract remains
-[software delivery](operations/sdlc.md). Neither replaces the other: the former is
-an adaptable public guide, the latter governs this repository.
-
-When delivery practices change, review whether the rationale, adoption guidance
-and examples need to change too. Update the public guide deliberately when those
-lessons generalize. Do not copy organization-specific scripts, accounts or approval
-requirements into it, and do not automatically rewrite anyone's adopted workflow.
+Shipshape was retired on 2026-11-05 and superseded by
+[software delivery](operations/sdlc.md). Its guide stays in `workflows/shipshape/`
+for reference only, because published posts link there, and is no longer updated
+when delivery practices change. See its
+[retirement note](../workflows/shipshape/README.md).

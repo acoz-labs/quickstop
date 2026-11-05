@@ -6,4 +6,4 @@ The package remains at [f4900063106e04f36e0360eb152c61941ef32f9b](https://github
 
 The same issue removed Quickstop's Codex and Pi adapters (the Codex and Pi indexes, the Pi package list and their validators), since no plugin for either tool could be tested. The tagged commit still has them. The last `main` commit with them is [9fbd2ece931c18efec62ff4d8ed02813d4932a89](https://github.com/acoz-labs/quickstop/tree/9fbd2ece931c18efec62ff4d8ed02813d4932a89), which removed the Shipshape package; the next commit, `a02398d6193cf29ba0888485e564f7fdb666eb4b`, removed the adapters.
 
-The Shipshape workflow guide in `workflows/shipshape/` is unaffected: it is process documentation, not the package.
+The Shipshape workflow guide in `workflows/shipshape/` was not part of the package and stayed in place. It was retired later the same day and is kept for reference only; see its [retirement note](../../workflows/shipshape/README.md).

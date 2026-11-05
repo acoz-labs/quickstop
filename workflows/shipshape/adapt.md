@@ -1,3 +1,5 @@
+> **Retired:** this guide is kept for reference only; see the [retirement note](README.md).
+
 # Adapt Shipshape to your project
 
 [Back to Shipshape](README.md)

@@ -42,9 +42,10 @@ claude --plugin-dir /path/to/quickstop/plugins/claudit
 ## Workflows
 
 **[Shipshape](workflows/shipshape/README.md)** — From first idea to ready to ship.
-A practical software delivery workflow you and your agents can make your own.
+Retired on 2026-11-05 and kept for reference only; see its
+[retirement note](workflows/shipshape/README.md).
 
-Read it yourself or give its adoption instructions to your agent. Workflows help
+Read a workflow yourself or give its adoption instructions to your agent. Workflows help
 you shape your existing project agreements, tools and habits. They do not install
 plugins, run background processes, or require another layer of instructions in a
 project that already works well. Adopting a workflow is a deliberate change;
