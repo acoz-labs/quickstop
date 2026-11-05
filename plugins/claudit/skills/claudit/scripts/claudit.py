@@ -19,7 +19,7 @@ import sys
 import tempfile
 import urllib.parse
 
-VERSION = '4.3.0'
+VERSION = '4.3.1'
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(HERE, '..', 'catalog.json')
 CAP = 40
@@ -260,6 +260,38 @@ DESCRIBED = re.compile(r"\b(?:is|was|were|has been|had|used to|no longer|removed
 # Anywhere after a command (or in its table row): it is history or a warning.
 HISTORY = re.compile(r"\b(?:no longer|deprecated|obsolete|removed|is gone|used to|don['\u2019]t run|never run|do not run)\b",
                      re.I)
+# History narrative (#193 4.3.1): a sentence telling what happened rather than what holds now. Each form needs a
+# tensed past (or a date with one), so a present rule ("Hooks are disabled in CI") is never history.
+RETIRED = r'(?:retired|removed|dropped|replaced|deprecated|superseded|phased out|abandoned|disabled|discontinued)'
+PAST = (r'(?:passed|failed|ran|worked|succeeded|broke|moved|changed|switched|added|introduced|became|was|were|'
+        r'had|used|showed|found)')
+HISTORY_FORMS = (
+    ('retirement', re.compile(r'\b(?:have|has|had)\s+been\s+%s\b|\b(?:was|were)\s+%s\b' % (RETIRED, RETIRED), re.I)),
+    ('past run', re.compile(r'\b(?:initial|first|earlier|previous|original|last|old)\s+(?:[\w-]+\s+){0,2}?'
+                            r'(?:runs?|releases?|migrations?|attempts?|pass|checks?|builds?|versions?)\b[^.;]{0,80}?'
+                            r'\b%s\b' % PAST, re.I)),
+    ('dated', re.compile(r'(?=.*\b%s\b)(?:\b20\d\d-\d\d-\d\d\b|\b(?:January|February|March|April|May|June|July|'
+                         r'August|September|October|November|December)\s+(?:\d{1,2},\s+)?20\d\d\b|'
+                         r'\b(?:in|since|until|as of)\s+20\d\d\b)' % PAST, re.I)),
+    ('past version', re.compile(r'\b(?:in|until|before|prior to)\s+(?:version\s+|v)\d+(?:\.\d+)+\b[^.;]{0,60}?'
+                                r'\b%s\b' % PAST, re.I)),
+)
+SPECULATIVE = re.compile(r'\b(?:may|might|could|would|should|will|must|can)\b', re.I)  # "may have failed"
+# Where a project records decisions and history on purpose: a decision record (decisions.md, docs/adr/...) owns a
+# decline, and a changelog or release notes may tell history.
+DECISION_RECORD = re.compile(r'decision|(?:^|/)adrs?(?:/|[-_.])', re.I)
+HISTORY_FILE = re.compile(r'(?:^|/)(?:change-?log|changes|history|news|release[-_ ]?notes)[^/]*$', re.I)
+
+
+def history_form(sentence):
+    """(name, offset) of the first history form a sentence holds, or None."""
+    for name, form in HISTORY_FORMS:
+        match = form.search(sentence)
+        if match and not SPECULATIVE.search(match.group()):
+            return name, match.start()
+    return None
+
+
 CHAIN = re.compile(r'\s*(?:,\s*(?:and\s+|or\s+|then\s+)?|\s(?:and|or|then)\s+|\s*\(or\s+)\s*', re.I)
 
 
@@ -629,6 +661,18 @@ GIT_HOOK_DECLINE = re.compile(r'\b(?:git|pre-commit|pre-push|commit-msg|husky|le
 STOPWORDS = frozenset('the a an and or of to in on for with by is are be it its this that as at from not no never your '
                       'you we our into than then so if when one any all each every can do does'.split())
 DUP_MIN_WORDS = 8  # a sentence shorter than this is too generic to call a copy
+# A script's string literals and comments, read left to right so a string never spans two: the long ones are the
+# text duplication is judged on, cited by the file's own line.
+SCRIPT_TEXT = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|#\s*(.*)$')
+SCRIPT_TEXT_MIN = 40  # characters
+# A file is generated output only when a line near its top says so ("Generated from ...", "This file is generated
+# by ...", "... DO NOT EDIT") or `.gitattributes` marks it `linguist-generated`. The script that writes it is
+# its generator, never generated itself.
+GENERATED_HEAD = re.compile(r'^[\s#/*<!>-]*(?:(?:this|the) (?:file|page|document|list|table) (?:is|was) )?(?:auto-?)?'
+                            r'generated (?:from|by|with|using)\b|(?-i:\bDO NOT EDIT\b)', re.I)
+# A paraphrase shares at least this many content words, and 40% of the shorter sentence's (common words such as
+# "change", "only", "setting" and "install" alone are no paraphrase).
+PARAPHRASE_MIN_STEMS = 5
 LISTING_CAP = 1536  # characters of description plus when_to_use in the skill listing (skills#frontmatter-reference)
 AGENT_WARNING = 15000  # tokens of custom subagent descriptions before the startup warning (sub-agents)
 
@@ -727,7 +771,7 @@ class Scan:
         self.root, self.git, self.catalog, self.user = root, git, catalog, user
         self.data_dir = data_dir
         self.claude_version = claude_version
-        self.findings, self.limits, self.truncated, self.exact = [], [], {}, {}
+        self.findings, self.limits, self.truncated, self.exact, self.history = [], [], {}, {}, []
         self.no_matcher = set(catalog.get('no_matcher_events') or [])
         self.files, self.dirs = self.walk()
         self.fileset = set(self.files)
@@ -1176,6 +1220,29 @@ class Scan:
                                               for line in [via[2] if via else ''] + [l for _, l in prose(text)])})
         return docs
 
+    def history_line(self, path, line, sentence, why, label=None):
+        """Record a stale candidate once per line; `label` names the feature it reads like a decline of."""
+        entry = next((c for c in self.history if c['path'] == path and c['line'] == line), None)
+        if entry is None:
+            entry = {'path': path, 'line': line, 'quote': sentence[:400], 'why': why}
+            self.history.append(entry)
+        if label:  # it reads like a decline, but only a decision record makes one
+            entry['not_a_decline'] = '%s: no decision record says so, so it is not listed as declined; Claudit ' \
+                'still does not recommend it while this line stands' % label
+
+    def stale_history(self, paths):
+        """History narrative (dated runs, "have been retired", past versions) in the given instruction files, skills,
+        subagents and docs: stale candidates for the report, never graded. Decision records and changelogs tell
+        history on purpose and are skipped."""
+        for path in paths:
+            if DECISION_RECORD.search(path) or HISTORY_FILE.search(path) or self.data(path) or os.path.isabs(path) \
+                    or path.startswith('..'):
+                continue
+            for sentence, line_at in sentences(self.text(path) or ''):
+                form = history_form(sentence)
+                if form and not UNSURE.search(sentence):
+                    self.history_line(path, line_at(form[1]), sentence, form[0])
+
     def declines(self, instructions):
         """Features the project documents a deliberate choice against, each with the sentence, file and line.
 
@@ -1202,15 +1269,22 @@ class Scan:
                     continue
                 body = sentence.rstrip('.!')
                 for feature, label, noun, forms in DECLINE_FORMS:
+                    # The first decline of each feature counts; a decision record's replaces a history line's.
                     match = next((m for m in (form.search(body) for form in forms) if m), None) \
-                        if feature not in found else None
-                    if match:
+                        if feature not in found or found[feature].get('history') else None
+                    form = None if not match or DECISION_RECORD.search(path) else history_form(sentence)
+                    if match and form and feature in found:
+                        self.history_line(path, line_at(form[1]), sentence, form[0], label)
+                    elif match:
                         parts = decline_reason(body, match)
                         found[feature] = {'feature': feature, 'label': label, 'path': path,
                                           'line': line_at(noun.search(sentence).start()), 'quote': sentence[:400],
                                           'reason': ' \u2026 '.join(text for _, text in parts)[:400] or NO_REASON,
                                           'reason_line': line_at(parts[0][0]) if parts else None,
                                           'stale': stale_reason(feature, parts)}
+                        if form:  # history narrative outside a decision record: a stale candidate, never a decline
+                            found[feature]['history'] = True
+                            self.history_line(path, line_at(form[1]), sentence, form[0], label)
         return [found[feature] for feature, _, _ in DECLINABLE if feature in found]
 
     def reconsider(self, stale, checks, documented, corpus, typed_at):
@@ -1535,6 +1609,27 @@ class Scan:
                      problem='`%s` is read only by the `%s` subagent, but Claude can invoke it, so its description '
                      'loads in every session.' % (skill['name'], agent['name']))
 
+    def generated(self):
+        """{path: 'path:line' evidence} for files that say they are generated output (in their first ten lines) or
+        that `.gitattributes` marks `linguist-generated`. A script is never called generated here."""
+        marked = {}
+        for number, line in enumerate((self.text('.gitattributes') or '').splitlines(), 1):
+            parts = line.split()
+            if len(parts) > 1 and re.fullmatch(r'linguist-generated(?:=true)?', parts[-1]) and '*' not in parts[0]:
+                marked[parts[0].lstrip('/')] = '.gitattributes:%d' % number
+        scripts = [f for f in self.files if f.count('/') == 1 and f.split('/')[0] in ('bin', 'scripts', 'script')]
+        out = {}
+        for path in self.files:
+            evidence = marked.get(path)
+            if not evidence and not self.data(path) and path not in scripts and \
+                    os.path.splitext(path)[1] in ('', '.md', '.txt', '.json', '.yml', '.yaml', '.toml'):
+                head = (self.text(path) or '').splitlines()[:10]
+                at = next((n for n, line in enumerate(head, 1) if GENERATED_HEAD.search(line)), None)
+                evidence = '%s:%d' % (path, at) if at else None
+            if evidence:
+                out[path] = evidence
+        return out
+
     def duplicate_sources(self, instructions, skills, agents):
         """(path, line, sentence, normalized, stems) for each long sentence of the files duplication is judged on."""
         paths = [i['path'] for i in instructions if i['kind'] in ('project', 'import', 'nested')] + \
@@ -1550,9 +1645,14 @@ class Scan:
             text = self.text(path)
             if text is None:
                 continue
-            if not path.endswith('.md'):  # a script's long string literals and comments, one per line
-                text = '\n'.join(next(g for g in m if g) for m in re.findall(
-                    r'"([^"\n]{40,})"|\'([^\'\n]{40,})\'|#\s*(.{40,})$', text, re.M))
+            if not path.endswith('.md'):  # a script's long string literals and comments, each on its own line
+                for number, line in enumerate(text.splitlines(), 1):
+                    for literal in (next((g for g in m if g), '') for m in SCRIPT_TEXT.findall(line)):
+                        if len(literal) < SCRIPT_TEXT_MIN:
+                            continue
+                        sources.extend((path, number, sentence, normalized(sentence), stems(sentence))
+                                       for sentence, _ in sentences(literal) if words(sentence) >= DUP_MIN_WORDS)
+                continue
             offset = 0
             if text.startswith('---') and '\n---' in text[3:]:
                 end = text.find('\n---', 3) + 4
@@ -1562,7 +1662,7 @@ class Scan:
                     sources.append((path, line_at(0) + offset, sentence, normalized(sentence), stems(sentence)))
         return sources
 
-    def check_duplicates(self, instructions, skills, agents):
+    def check_duplicates(self, instructions, skills, agents, generated):
         """Rules copied word for word (and paraphrase candidates) across instruction files, skills, subagents, docs
         and script strings. A finding needs copies in at least three files: two uses don't earn an abstraction."""
         sources = self.duplicate_sources(instructions, skills, agents)
@@ -1582,10 +1682,16 @@ class Scan:
                 if other == norm or path in [p for p, _ in files + paraphrases]:
                     continue
                 shared = mine & theirs
-                if len(shared) >= 4 and len(shared) >= 0.4 * min(len(mine), len(theirs)):
+                if len(shared) >= PARAPHRASE_MIN_STEMS and len(shared) >= 0.4 * min(len(mine), len(theirs)):
                     paraphrases.append((path, line))
-            out.append({'text': places[0][2][:300], 'copies': ['%s:%d' % f for f in files],
-                        'paraphrases': ['%s:%d' % f for f in paraphrases]})
+            entry = {'text': places[0][2][:300], 'copies': ['%s:%d' % f for f in files],
+                     'paraphrases': ['%s:%d' % f for f in paraphrases]}
+            made = [p for p, _ in files if p in generated]
+            if made and all(p in made or any(m in (self.text(p) or '') for m in made) for p, _ in files):
+                continue  # generated output and the script that names it as an output: one source, not a copy
+            if made:
+                entry['generated'] = made
+            out.append(entry)
         out.sort(key=lambda d: (-len(d['copies']), d['copies']))
         counted = [d for d in out if len(d['copies']) >= 3]
         if counted:
@@ -1842,8 +1948,12 @@ class Scan:
             if not plugins_on:
                 self.missing_names(rel, text, known)
         gates = self.check_gates(team, settings)
-        duplicates = self.check_duplicates(instructions, skill_docs, agent_docs)
+        generated = self.generated()
+        duplicates = self.check_duplicates(instructions, skill_docs, agent_docs, generated)
         context = self.context(instructions, skill_docs, agent_docs)
+        self.stale_history(dict.fromkeys(
+            [i['path'] for i in instructions if i['kind'] in ('project', 'nested', 'import')] +
+            [x['path'] for x in skill_docs + agent_docs] + commands + [r['path'] for r in context['likely_read']]))
         self.check_visible_skills(skill_docs, agent_docs, team)
         scope = self.scope(instructions)
         project_instr = [i for i in instructions if i['kind'] in ('project', 'nested', 'import')]
@@ -2064,7 +2174,10 @@ class Scan:
             entry['reconsider'] = self.reconsider(entry.pop('stale'), checks, documented, corpus, typed_at)
         gone = {fid for entry in declined for fid in entry['finding_ids']}
         self.findings = [f for f in self.findings if f['id'] not in gone]
-        if not any(entry['feature'] == 'stop-hook' for entry in declined):  # a documented decision against hooks
+        # A retirement told as history still keeps its feature out of the plan, but only a decision record lists it.
+        told = [entry for entry in declined if entry.pop('history', None)]
+        declined = [entry for entry in declined if entry not in told]
+        if not any(entry['feature'] == 'stop-hook' for entry in declined + told):  # a stated decision against hooks
             self.check_git_hooks([i['path'] for i in team] + [f for f in self.files if f in (
                 'README.md', 'CONTRIBUTING.md', 'Makefile', 'package.json', 'justfile') or (
                 f.startswith('docs/') and f.endswith('.md') and not self.data(f)) or (
@@ -2114,10 +2227,12 @@ class Scan:
         }
         if blind:
             status.update(allowlist=unjudged, secrets=unjudged, enforced=unjudged)
-        for entry in declined:
+        for entry in declined + told:
             item = {'allowlist': 'allowlist', 'stop-hook': 'enforced'}.get(entry['feature'])
             if item and entry['finding_ids']:
-                status[item] = ('declined', 'declined in %s:%d' % (entry['path'], entry['line']), [])
+                status[item] = ('declined', '%s in %s:%d' % ('declined' if entry in declined else
+                                                             'not recommended: history line', entry['path'],
+                                                             entry['line']), [])
         baseline = []
         for item in self.catalog.get('baseline', []):
             state, evidence, fids = status.get(item['id'], ('n/a', 'not evaluated', []))
@@ -2208,6 +2323,8 @@ class Scan:
                'signals': signals, 'profiles': profiles, 'findings': capped(self.findings, 'findings', t),
                'plan': plan, 'grades': grades_of(plan, setup), 'optional': optional, 'declined': declined,
                'context': context, 'scope': scope, 'duplicates': duplicates, 'gates': gates, 'handoffs': handoffs,
+               'generated': [{'path': p, 'evidence': e} for p, e in sorted(generated.items())][:CAP],
+               'stale_candidates': sorted(self.history, key=lambda c: (c['path'], c['line']))[:CAP],
                'footer': audited(self.root, self.git), 'footer_lines': footer_lines,
                'baseline': baseline, 'dismissed': dismissed, 'limits': self.limits}
         if t:
@@ -2584,7 +2701,7 @@ def deep(root, model, budget):
     if record:
         try:
             with open(record, 'a', encoding='utf-8') as handle:
-                handle.write(json.dumps({k: v for k, v in audit.items() if k != 'report'}) + '\n')
+                handle.write(json.dumps(redact(dict(audit, report=report))) + '\n')  # its raw text is evidence
         except OSError:
             pass
     return redact(out)

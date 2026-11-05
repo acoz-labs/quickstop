@@ -55,10 +55,20 @@ graders follow the scan, rebuilt with `python3 tests/test_claudit_case_graders.p
   trusted project too; in these untrusted scaffolds that changes nothing. Step 1 of the
   skill passes `--model sonnet --max-budget-usd 0.5`; the runner sets
   `CLAUDIT_DEEP_MODEL` to the arm's `--model`, which pins the nested model to it. The
-  helper appends the nested call's status, model, budget, cost, time and denials to
-  `CLAUDIT_DEEP_RECORD`, and the run's cost adds them to the outer call's. `command.txt`
-  states the nested model and budget. `headless` records the same for a real
-  repository.
+  helper appends the nested call's status, model, budget, cost, time, denials and raw
+  report text to `CLAUDIT_DEEP_RECORD`, and the run's cost adds them to the outer
+  call's. The runner keeps that text as `calls/<case>-run<N>-nested-audit.md` (and
+  `nested-audit.md` in each `headless` run folder), so a dropped audit finding can be
+  read later. `command.txt` states the nested model and budget. `headless` records the
+  same for a real repository at any clone URL and commit.
+- Every llm-judge vote keeps its reply (`judgeReplies` beside `judgeVotes`), in the
+  headless arms and in `judge`. `judge --results <folder> --max-cost-usd <cap>`
+  grades any arm's saved `reports/<case>-run<N>.md` with this runner's judge (the
+  eval host's prompt and three votes) and writes `judge/` beside them, with each
+  verdict next to the folder's recorded one. Run it on the default arm's folder too, so
+  both modes' llm graders are judged the same way (#193 4.3.1: f2 failed 9 of 9
+  votes under this judge in `--deep` and passed 9 of 9 under the host's judge in
+  default mode).
 - `gate --rule principles-skill|doc-skills|history-lines <reports or folders>`
   grades saved reports at $0. `principles-skill` (rule 6) fails a report that
   proposes a skill or slash command for the principles anywhere, Optional notes and
@@ -71,6 +81,11 @@ graders follow the scan, rebuilt with `python3 tests/test_claudit_case_graders.p
   `docs/repository.md`, each of quickstop's two stale history lines (by line number or
   its words) and calls it history or stale; a decline doesn't count. Their positive, negative and attacker
   controls are in `tests/test_claudit_gate_graders.py`.
+- `headless` also checks each report against the scan (4.3.1): `stale_candidates_listed`
+  (each history line the scan lists is cited by `path:line` and called stale or history,
+  outside Declined) and `generated_labels` (no sentence calls a file generated unless the
+  scan lists it, or the file follows "generated … by/from" as its generator or source;
+  a sentence naming no file speaks of the files the one before it names).
 
 Before a paid run, every fixture hook must run on the host toolchain: scaffold each
 case and run its Stop hook with the run's environment. f19's Stop hook runs

@@ -547,7 +547,74 @@ def grade_report(text, scan, helper):
         if cited:
             checks['declined_defects_cited'] = all(re.search(defect_cited_pattern(n, item), text, re.I)
                                                    for n, item in cited)
+    if scan.get('stale_candidates'):
+        checks['stale_candidates_listed'] = all(stale_listed(text, c) for c in scan['stale_candidates'])
+    checks['generated_labels'] = not mislabelled_generated(text, scan)
     return checks
+
+
+# 4.3.1 script checks. A stale candidate is listed when one line, outside a Declined section, cites its `path:line`
+# and calls it stale or history (unnegated). A file is mislabelled generated when a sentence says "generated" and
+# names a backticked path the scan's `generated` list doesn't hold, unless the path comes after "generated ... by",
+# "from", "with" or "using" (the generator or its source) with no later "generated", or a negation governs
+# "generated" ("isn't generated"). Fail closed: any other co-occurrence counts.
+STALE_CUE = re.compile(r'\b(?:stale|histor\w*|outdated|out of date)\b', re.I)
+STALE_NEGATED = re.compile(r"\b(?:not|never|no|isn['’]t|aren['’]t|wasn['’]t)[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
+GENERATED_WORD = re.compile(r'\b(?:auto-?)?generated\b', re.I)
+GENERATED_NEGATED = re.compile(r"(?:\b(?:not|never)|n['’]t)[ \t]+(?:(?:auto-?|really|actually)[ \t]*)?$", re.I)
+PATH_SPAN = re.compile(r'`([^`\s]*[/.][^`\s]*)`')
+SOURCE_OF = re.compile(r'\b(?:by|from|with|using)\b', re.I)
+WRITER = re.compile(r'[`*)]*[ \t]*(?:\(?(?:is[ \t]+)?(?:the|its)[ \t]+generator\b|(?:re)?generates\b|writes\b|builds\b|'
+                    r'produces\b|renders\b|emits\b|marks\b|says\b|lists\b|records\b)', re.I)
+
+
+def stale_listed(text, candidate):
+    ref = re.compile(r'%s:%d\b' % (re.escape(candidate['path']), candidate['line']))
+    declined = False
+    for line in text.splitlines():
+        if line.startswith('#'):
+            declined = DECLINE_HEAD.match(line) is not None
+        if declined or not ref.search(line):
+            continue
+        if any(not STALE_NEGATED.search(line[:m.start()]) for m in STALE_CUE.finditer(line)):
+            return True
+    return False
+
+
+def label_units(text):
+    """A bullet or paragraph line with the indented lines that continue it."""
+    units = []
+    for line in text.splitlines():
+        if units and line[:1] in (' ', '\t') and line.strip() and not re.match(r'\s*(?:[-*+]|[0-9]+[.)])\s', line):
+            units[-1] += ' ' + line.strip()
+        elif line.strip():
+            units.append(line)
+    return units
+
+
+def mislabelled_generated(text, scan):
+    """(sentence, path) pairs where a report calls a file generated that the scan doesn't list as generated. A
+    sentence that names no file ("They are generated output") speaks of the files the sentence before it names."""
+    made = {entry['path'] for entry in scan.get('generated', []) or []}
+    found = []
+    for unit in label_units(text):
+        previous = []
+        for sentence in re.split(r'(?<=[.!?])\s+(?=[A-Z`*])', unit):
+            paths = [(m.start(), m.end(), m.group(1)) for m in PATH_SPAN.finditer(sentence)]
+            said = [m.start() for m in GENERATED_WORD.finditer(sentence)
+                    if not GENERATED_NEGATED.search(sentence[:m.start()])]
+            for start, end, given in (paths or [(-1, -1, given) for _, _, given in previous]) if said else ():
+                path = re.sub(r':[0-9]+(?:-[0-9]+)?$', '', given)
+                path = path[2:] if path.startswith('./') else path
+                before = [at for at in said if at < start]
+                # The generator or the source it reads: after "generated ... by/from/with/using" with no later
+                # "generated" that could describe it, or followed by "writes", "generates" or "(the generator)".
+                source = (before and not any(at > start for at in said)
+                          and SOURCE_OF.search(sentence[before[-1]:start])) or (end >= 0 and WRITER.match(sentence[end:]))
+                if path not in made and not source:
+                    found.append((sentence, path))
+            previous = paths or previous
+    return found
 
 
 def final_reply(trace):
@@ -681,6 +748,18 @@ def nested_calls(path):
     return [c for c in out if isinstance(c, dict)]
 
 
+def keep_nested(log, stem):
+    """Keep what the nested prompt-audit said (#193 4.3.1): the helper's records as <stem>.jsonl and each call's raw
+    report text in <stem>-audit.md (numbered when there is more than one call)."""
+    calls = nested_calls(log)
+    if not calls:
+        return
+    Path(f'{stem}.jsonl').write_text(''.join(json.dumps(c) + '\n' for c in calls))
+    for n, call in enumerate(calls, 1):
+        name = f'{stem}-audit.md' if len(calls) == 1 else f'{stem}-audit-{n}.md'
+        Path(name).write_text(f"<!-- status: {call.get('status')} -->\n{call.get('report') or ''}\n")
+
+
 def deep_flags(plugin):
     return ('--plugin-dir', str(plugin), *HEADLESS_FLAGS)
 
@@ -742,15 +821,20 @@ def grade_with_graders(text, graders, judge, workdir):
             results.append({'name': grader['name'], 'type': 'regex', 'passed': passed, 'scored': True})
         elif grader.get('type') == 'llm':
             prompt = JUDGE_PROMPT.format(criteria=grader['criteria'], output=judge_output(text))
-            votes = []
+            votes, replies = [], []
             for _ in range(JUDGE_VOTES):
-                _, raw, _, _, code, _ = claude_call(prompt, workdir, JUDGE_FLAGS, judge['model'], judge['budget'],
-                                                    stdin_prompt=True)
+                _, raw, stdout, stderr, code, _ = claude_call(prompt, workdir, JUDGE_FLAGS, judge['model'],
+                                                              judge['budget'], stdin_prompt=True)
                 cost += number(raw.get('total_cost_usd'))
                 reply = raw.get('result') if isinstance(raw.get('result'), str) and code == 0 else ''
                 votes.append(bool(re.search(r'\bPASS\b', reply, re.I)) and not re.search(r'\bFAIL\b', reply, re.I))
+                # Every reply is evidence (#193 4.3.1): the text, or why there was none.
+                replies.append({'reply': raw.get('result') if isinstance(raw.get('result'), str) else None,
+                                'exit': code, 'isError': bool(raw.get('is_error')),
+                                'costUsd': number(raw.get('total_cost_usd')),
+                                'stderr': None if code == 0 else (stderr or stdout or '')[-2000:]})
             results.append({'name': grader['name'], 'type': 'llm', 'passed': sum(votes) > len(votes) / 2,
-                            'scored': True, 'judgeVotes': votes,
+                            'scored': True, 'judgeVotes': votes, 'judgeReplies': replies,
                             'explanation': 'judge votes: ' + ' '.join('PASS' if v else 'FAIL' for v in votes)})
         else:
             results.append({'name': grader['name'], 'type': grader.get('type'), 'passed': False, 'scored': False})
@@ -781,6 +865,7 @@ def combined_case_run(case, number, args, out, judge):
 
         if args.arm == 'claudit-deep':
             report, parts = claudit_deep(workspace, args, record, scratch / 'deep-record.jsonl')
+            keep_nested(scratch / 'deep-record.jsonl', calls / f'{case.name}-run{number}-nested')
         else:
             report, parts = doctor_combined(workspace, args.model, args.max_budget_usd, record)
         judge_dir = scratch / 'judge'
@@ -953,13 +1038,14 @@ def headless(args):
             proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                                   env=dict(claude_env(), **{DEEP_RECORD: str(log), DEEP_MODEL: args.model}))
             wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
-            nested = nested_calls(log)
+            run_dir = out / f'run{number}'
+            run_dir.mkdir(exist_ok=True)
+            keep_nested(log, run_dir / 'nested')
+            nested = [{k: c.get(k) for k in NESTED_FIELDS} for c in nested_calls(log)]
             scan = subprocess.run([sys.executable, str(plugin / HELPER), 'scan', '--root', str(clone)],
                                   capture_output=True, text=True)
         finally:
             shutil.rmtree(work, ignore_errors=True)
-        run_dir = out / f'run{number}'
-        run_dir.mkdir(exist_ok=True)
         (run_dir / 'raw.json').write_text(proc.stdout)
         (run_dir / 'stderr.txt').write_text(proc.stderr)
         (run_dir / 'scan.json').write_text(scan.stdout)
@@ -990,6 +1076,74 @@ def headless(args):
     (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     print(json.dumps(summary))
     return 0 if summary['passed'] == len(runs) else 1
+
+
+def recorded_verdicts(folder):
+    """{(case, run, grader): passed} from a results folder's result.json, as `claude plugin eval` or this runner wrote
+    it; {} when there is none."""
+    try:
+        result = json.loads((folder / 'result.json').read_text())
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for case in result.get('cases', []) or []:
+        for number, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
+            for grader in item.get('graders', []) or []:
+                out[(case.get('name'), number, grader.get('name'))] = grader.get('passed')
+    return out
+
+
+def judge(args):
+    """Grade the saved reports of a results folder (any arm) with this runner's judge, so both modes' llm graders are
+    judged the same way (#193 4.3.1). Keeps every reply; records the folder's own verdict beside each one."""
+    folder = Path(args.results).resolve()
+    reports = sorted((folder / 'reports').glob('*-run*.md'))
+    if not reports:
+        raise Failure(f'no reports in {folder / "reports"}')
+    cases = {path.parent.name: path.parent for path in SUITE.glob('cases/*/case.yaml')}
+    recorded = recorded_verdicts(folder)
+    out = folder / 'judge'
+    out.mkdir(exist_ok=True)
+    judge_setup = {'model': args.judge_model, 'budget': args.judge_budget_usd}
+    spent, rows = 0.0, []
+    for path in reports:
+        match = re.fullmatch(r'(.+)-run([0-9]+)', path.stem)
+        if not match or match.group(1) not in cases:
+            raise Failure(f'{path.name}: not <case>-run<N>.md for a suite case')
+        case, number = match.group(1), int(match.group(2))
+        graders = [g for g in (read_grader(p) for p in sorted((cases[case] / 'graders').glob('*.md')))
+                   if g.get('type') == 'llm']
+        if not graders:
+            continue
+        if spent >= args.max_cost_usd:
+            print(f'Cost ceiling reached at {path.name}: the rest are not judged (PARTIAL).', file=sys.stderr)
+            return 2
+        work = Path(tempfile.mkdtemp(prefix='claudit-judge-')).resolve()
+        try:
+            refuse_instructions_above(work, 'the judge folder')
+            results, cost = grade_with_graders(path.read_text(), graders, judge_setup, work)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        spent += cost
+        for item in results:
+            item['recorded'] = recorded.get((case, number, item['name']))
+            rows.append({'case': case, 'run': number, 'grader': item['name'], 'passed': item['passed'],
+                         'recorded': item['recorded'], 'votes': item['judgeVotes']})
+        (out / f'{path.stem}.json').write_text(json.dumps(results, indent=2) + '\n')
+        verdicts = [r['name'] + (' PASS' if r['passed'] else ' FAIL') + (
+            '' if r['recorded'] in (None, r['passed']) else ' (recorded %s)' % ('PASS' if r['recorded'] else 'FAIL'))
+            for r in results]
+        print(f"{path.name}: {', '.join(verdicts)}, ${cost:.4f}, cumulative ${spent:.4f}", flush=True)
+    command = shlex.join(['claude', '-p', *JUDGE_FLAGS, '--model', args.judge_model, '--max-budget-usd',
+                          str(args.judge_budget_usd)]) + ' < prompt'
+    summary = {'results': str(folder), 'judge': command,
+               'votes': JUDGE_VOTES, 'cost_usd': round(spent, 6), 'graded': len(rows),
+               'differs_from_recorded': [r for r in rows if r['recorded'] is not None and r['recorded'] != r['passed']],
+               'rows': rows}
+    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+    print(f"Judged {len(rows)} llm verdicts, ${spent:.4f}; {len(summary['differs_from_recorded'])} differ from the "
+          f"folder's recorded verdicts. Summary: {out / 'summary.json'}")
+    return 0
 
 
 def grade(args):
@@ -1380,6 +1534,11 @@ def main():
     p.add_argument('--rule', required=True, choices=('principles-skill', 'doc-skills', 'history-lines'),
                    help='principles-skill: f19 rule 6; doc-skills: python-sdk rule 4; history-lines: quickstop rule 4')
     p.add_argument('reports', nargs='+', help='report files, or folders searched for *.md')
+    p = sub.add_parser('judge', help="judge a results folder's saved reports with this runner's llm judge (paid)")
+    p.add_argument('--results', required=True, help='a results folder with reports/<case>-run<N>.md (any arm)')
+    p.add_argument('--max-cost-usd', type=positive_cost, required=True, help='stop judging once this is spent')
+    p.add_argument('--judge-model', default=DEFAULT_JUDGE)
+    p.add_argument('--judge-budget-usd', type=positive_cost, default=0.05, help='cap per judge vote')
     p = sub.add_parser('grade', help="script-check a report against the scan of the same tree")
     p.add_argument('--report', required=True)
     p.add_argument('--scan', required=True)
@@ -1394,6 +1553,8 @@ def main():
             return grade(args)
         if args.command == 'gate':
             return gate(args)
+        if args.command == 'judge':
+            return judge(args)
         summary = summarize_files(args.result, args.arm, web_fetch=args.web_fetch)
         print(json.dumps(summary, indent=2))
         print(markdown(summary))

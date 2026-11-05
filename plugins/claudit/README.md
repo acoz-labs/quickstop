@@ -28,8 +28,9 @@ only the accepted release; a development checkout can contain a newer candidate.
 `--deep` runs Claude Code's own instruction audit, `/doctor prompt-audit .`, headless
 and read-only in the project (project settings only, no edits, Bash denied, Claudit
 not loaded again), and `claude doctor` for invalid settings, user level included. It
-costs one more model call and up to three minutes. Every prompt-audit finding is kept
-in a change, added as a note, or dropped with a reason. If the nested run can't happen
+costs one more model call and up to three minutes. Every prompt-audit finding gets a
+disposition with its reason: kept (in a change or a note), merged with what the scan
+already found, or not kept. If the nested run can't happen
 (no login, a sandbox, no permission) the footer says so and the report is still graded.
 
 Asking Claude to audit or improve the Claude Code setup also invokes it.
@@ -136,6 +137,13 @@ and the diffs. The rules:
   file's are one change, and Alignment can't be A while one stands. A name in a line
   that says it isn't there ("provides no `bin/container`") or is conditional ("where
   supported") is not stale.
+- **History narrative.** A sentence in the instruction files, their imports, skills,
+  subagents or the docs they say to read that tells what happened (a past run that
+  passed, something that "has been retired", a dated event, a past version) is listed
+  under Also worth knowing as possibly stale, with its line. It changes no grade.
+  Decision records and changelogs are skipped. A retirement told this way is never
+  read as a decline: only a decision record (`decisions.md`, `docs/adr/`) declines a
+  feature.
 - **Human gates.** A sentence in the loaded instructions where a person must approve
   a merge, deploy, release, publish or push to main, with no ask or deny rule for its
   command, is a Coverage change: the exact `Bash(<command> *)` ask rule, plus the plain
@@ -152,7 +160,11 @@ and the diffs. The rules:
   nowhere else as one to run, without `disable-model-invocation: true` is an Alignment
   low. A sentence of 8 or more words copied word for word into three or more files
   (instruction files, skills, subagents, docs, script strings) is one Alignment low,
-  listed with its paraphrase candidates; two copies are left alone. Sizes are in words
+  listed with its paraphrase candidates (5 or more shared content words); two copies
+  are left alone. A script string is cited by the script's own line. A file is called
+  generated only when its first lines say so ("Generated from …", "DO NOT EDIT") or
+  `.gitattributes` marks it `linguist-generated`; text it shares with the script that
+  writes it is one source, not a copy. Sizes are in words
   and estimated tokens.
 - **Procedures already reachable are optional.** A procedure doc that loaded team
   instructions (CLAUDE.md, AGENTS.md or their imports, not the personal

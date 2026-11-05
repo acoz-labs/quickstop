@@ -73,7 +73,12 @@ From the README, instructions, scripts, CI and layout (not only the Claude confi
 write one short paragraph: what the project builds, how work gets done (check and
 CI commands, procedure docs, release flow) and who drives it (a person, agents,
 CI). The scan's `profiles` and `signals` are evidence; correct them if the files
-say otherwise.
+say otherwise. Don't name test data or fixture paths in it.
+
+Name the file in every sentence that describes one (its size, what it loads, whether
+it's current); after a sentence that names two files, never write "it". Call a file
+generated only when the scan's `generated` list names it; the script that writes it
+is its generator, not generated.
 
 If you can ask the user (the AskUserQuestion tool is available), ask once whether
 the intent is right, offering "Yes" and a short correction field, and use the
@@ -106,9 +111,17 @@ intent, the explanations and the diffs. Use the scan's output as given:
   when a finding is factually wrong about the files (cite the line that shows it),
   list it under "Not counted" in Also worth knowing with that reason instead; its
   grade stays as the scan gives it.
-- **Problem lines**: when a finding has `problem`, write it as given, one sentence
-  per finding (each stale fact, gate or copy on its own), then what it causes. Never
-  merge two stale paths into one sentence such as "neither exists".
+- **Problem lines**: when a finding has `problem`, start with its text unchanged
+  and in its order (don't move a quoted rule ahead of it), one sentence per finding
+  (each stale fact, gate or copy on its own), then what it causes. Never merge two
+  stale paths into one sentence such as "neither exists".
+- **Possibly stale**: each `stale_candidates` entry is history narrative (a past
+  run, a retirement, a date or past version told as what happened). Give each its
+  own bullet under Also worth knowing: "Possibly stale: `<path>:<line>` is history
+  ("<quote>"); <what to do>": cut it, or move it to a changelog or a decision record.
+  With `not_a_decline`, add that it reads like a decision against that feature, but
+  no decision record says so, so it isn't listed as declined and the feature isn't
+  recommended while the line stands. It changes no grade and no plan item.
 - **Optional**: `optional` entries (procedure docs the loaded instructions already
   link) and `plan.overflow` items go under Also worth knowing, framed as optional.
 - **Declined**: `declined` lists features the project documents a deliberate choice
@@ -140,11 +153,16 @@ command for a list of principles, rules or facts, anywhere in the report: only a
 numbered procedure the scan lists gets one.
 
 **With `--deep`**, weigh every finding in `prompt_audit.report` (the scan's always
-win where they conflict): keep it under an item it belongs to ("Also in item 2: ..."),
-add it to Also worth knowing, or drop it with a one-line reason (wrong about the
-files, outside the repo, already covered, or a style preference). List each one under
-"From /doctor prompt-audit" as a bullet, never a numbered line. If the status isn't
-`ran`, say so in the footer and grade from the scan alone.
+win where they conflict) and give each one disposition, as a bullet under "From
+/doctor prompt-audit" (never a numbered line) that starts with it:
+- "Kept in item N" (and add "Also in item N: ..." to that item) or "Kept under Also
+  worth knowing" (and write it there too);
+- "Merged with <the scan finding, stale candidate or note it repeats>";
+- "Not kept: <one-line reason>" (wrong about the files, already covered, or a style
+  preference). For a file above the repo write exactly "Not kept: outside the repo,
+  not graded", with no fix verb.
+A finding on a line the scan lists in `stale_candidates` merges with that entry. If
+the status isn't `ran`, say so in the footer and grade from the scan alone.
 
 **Consistency pass** before you answer: drop or correct any line that contradicts
 the scan, the Intent paragraph or the grades (a file called missing that the
@@ -203,7 +221,7 @@ in exactly this form:
 
 ## From /doctor prompt-audit
 
-- <with --deep only: each finding, kept (where) or dropped (why)>
+- <with --deep only: each finding's disposition (Kept in ..., Merged with ..., Not kept: ...) and the finding>
 
 ---
 <footer>
