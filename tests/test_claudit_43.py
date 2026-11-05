@@ -213,6 +213,78 @@ class Duplicates(Project):
         self.assertEqual(result['duplicates'][0]['copies'], ['CLAUDE.md:3', 'docs/contributing.md:3'])
 
 
+    def test_script_copies_cite_the_file_line_and_common_words_are_no_paraphrase(self):
+        sentence = 'Pi links local packages, so keep each verified version checkout available.'
+        self.write('CLAUDE.md', '# x\n\n%s\n' % sentence)
+        self.write('bin/build', '#!/bin/sh\n' + 'x=1\n' * 20 + 'echo "short" "%s"\n' % sentence)
+        self.write('docs/install.md', '# I\n\nCommands change settings only when you run them; no package is '
+                   'auto-installed.\n')
+        self.write('bin/check', '#!/bin/sh\n# These files change only on install, marketplace or settings changes.\n')
+        self.write('docs/more.md', '# M\n\nCommands change settings only when you run them; no package is '
+                   'auto-installed.\n')
+        result = self.scan()
+        copies = {tuple(d['copies']): d['paraphrases'] for d in result['duplicates']}
+        self.assertIn(('CLAUDE.md:3', 'bin/build:22'), copies)  # the file's line, not the literal's position
+        self.assertEqual(copies[('docs/install.md:3', 'docs/more.md:3')], [])  # 4 shared common words
+
+    def test_generated_output_and_its_generator_are_not_copies(self):
+        sentence = 'Only accepted targets receive installation commands in the list below.'
+        self.write('CLAUDE.md', '# x\n\nThe [generated catalog](docs/catalog.md) lists the plugins.\n')
+        self.write('docs/catalog.md', '# Catalog\n\nGenerated from `catalog.json`; do not edit by hand.\n\n%s\n'
+                   % sentence)
+        self.write('bin/check-marketplace', "#!/usr/bin/env python3\nOUT = 'docs/catalog.md'\nLINES = ['%s']\n"
+                   % sentence)
+        self.write('.gitattributes', 'uv.lock linguist-generated=true\n*.svg linguist-generated\n')
+        self.write('uv.lock', 'x\n')
+        result = self.scan()
+        self.assertEqual(result['generated'], [{'path': 'docs/catalog.md', 'evidence': 'docs/catalog.md:3'},
+                                               {'path': 'uv.lock', 'evidence': '.gitattributes:1'}])
+        self.assertEqual(result['duplicates'], [])  # the generator and its output are one source
+        self.write('docs/other.md', '# O\n\n%s\n' % sentence)  # a real copy outside them still counts
+        found = self.scan()['duplicates']
+        self.assertEqual(found[0]['generated'], ['docs/catalog.md'])
+
+
+class History(Project):
+    def test_history_narrative_is_a_stale_candidate(self):
+        self.write('CLAUDE.md', '# x\n\n@docs/repository.md\n\nAlways run `bin/ci` before you finish.\n')
+        self.write('docs/repository.md', '# R\n\nRun `bin/ci`.\nThe initial compatibility run also passed on '
+                   'Python 3.9.6; release evidence\nuses the pinned runtime.\n\nThe wrapper remains. Push hooks '
+                   'and Claude shell-match hooks\nhave been retired; clean-checkout evidence is the gate.\n'
+                   'On 2026-03-02 the docs moved to `docs/`.\nIn version 2.1 the cache was per user.\n'
+                   'Hooks are disabled in CI. Old runs may have failed; rerun them.\n')
+        self.write('bin/ci', '#!/bin/sh\n')
+        self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(bin/ci)']}})
+        result = self.scan()
+        self.assertEqual([(c['path'], c['line'], c['why']) for c in result['stale_candidates']], [
+            ('docs/repository.md', 4, 'past run'), ('docs/repository.md', 8, 'retirement'),
+            ('docs/repository.md', 9, 'dated'), ('docs/repository.md', 10, 'past version')])
+        retired = result['stale_candidates'][1]
+        self.assertTrue(retired['not_a_decline'].startswith('Hooks: no decision record says so'))
+        self.assertEqual(result['declined'], [])  # history is never filed under Declined by the project
+        # ... but it still keeps Claudit from recommending hooks, and the baseline says why.
+        self.assertNotIn('stop-hook', self.ids(result))
+        status = {b['id']: (b['status'], b['evidence']) for b in result['baseline']}
+        self.assertEqual(status['enforced'], ('declined', 'not recommended: history line in docs/repository.md:7'))
+
+    def test_a_decision_record_replaces_a_history_line(self):
+        self.write('CLAUDE.md', '# x\n\nClaude Code hooks were retired.\nDecisions: [docs/decisions.md](docs/decisions.md).\n')
+        self.write('docs/decisions.md', '# Decisions\n\n- Claude Code hooks were retired in favour of CI.\n')
+        result = self.scan()
+        self.assertEqual([(d['path'], d['line']) for d in result['declined']], [('docs/decisions.md', 3)])
+        self.assertEqual([(c['path'], c['line']) for c in result['stale_candidates']], [('CLAUDE.md', 3)])
+
+    def test_a_decision_record_still_declines_and_tells_no_history(self):
+        self.write('CLAUDE.md', '# x\n\nDecisions are in [docs/decisions.md](docs/decisions.md).\n')
+        self.write('docs/decisions.md', '# Decisions\n\n- Claude Code hooks were retired in favour of the review '
+                   'checklist.\n')
+        self.write('CHANGELOG.md', '# Changes\n\nThe old cache was removed in 2025.\n')
+        result = self.scan()
+        self.assertEqual([(d['feature'], d['path'], d['line']) for d in result['declined']],
+                         [('stop-hook', 'docs/decisions.md', 3)])
+        self.assertEqual(result['stale_candidates'], [])
+
+
 class DeclarativeLists(Project):
     def test_principles_are_not_a_procedure(self):
         self.write('CLAUDE.md', '# x\nThe principles in `docs/principles.md` hold for every change.\n')
@@ -337,6 +409,7 @@ class Deep(Project):
                          'claude doctor: 1 invalid setting: ./.claude/settings.json › hooks.Stop: must be an array.')
         recorded = json.loads(Path(record).read_text())
         self.assertEqual((recorded['cost_usd'], recorded['model'], recorded['max_budget_usd']), (0.2, 'sonnet', 0.4))
+        self.assertEqual(recorded['report'], '1. A stale line')  # the nested audit's raw text is kept
 
     def test_the_eval_runner_pins_the_nested_model(self):
         _, out, args, _ = self.run_deep(model='claude-sonnet-5-5')

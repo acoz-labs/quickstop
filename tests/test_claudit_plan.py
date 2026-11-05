@@ -261,10 +261,11 @@ class Declines(Project):
     """Requirement 4: a documented decision against a feature is listed, not recommended, not counted."""
 
     def must_run(self, extra):
-        self.write('CLAUDE.md', '@docs/repository.md\n\nAlways run `bin/ci` before you report a change as done.\n')
+        # A decision record (#193 4.3.1: a retirement told as history anywhere else is a stale candidate instead).
+        self.write('CLAUDE.md', '@docs/decisions.md\n\nAlways run `bin/ci` before you report a change as done.\n')
         self.write('bin/ci', '#!/bin/sh\n', 0o755)
         self.write('.claude/settings.json', SETTINGS)
-        self.write('docs/repository.md', '# Repository\n\n' + extra)
+        self.write('docs/decisions.md', '# Decisions\n\n' + extra)
 
     def declined(self, result):
         return [(d['feature'], d['path'], d['line']) for d in result['declined']]
@@ -273,7 +274,7 @@ class Declines(Project):
         self.must_run('`scripts/check.sh` remains. Repository\npush hooks and Claude shell-match hooks have been '
                       'retired; clean-checkout\nevidence is the gate.\n')
         result = self.scan()
-        self.assertEqual(self.declined(result), [('stop-hook', 'docs/repository.md', 4)])
+        self.assertEqual(self.declined(result), [('stop-hook', 'docs/decisions.md', 4)])
         self.assertEqual(result['declined'][0]['quote'],
                          'Repository push hooks and Claude shell-match hooks have been retired; clean-checkout '
                          'evidence is the gate.')
@@ -290,8 +291,8 @@ class Declines(Project):
         self.write('skills/advise/SKILL.md', '---\nname: advise\n---\n')
         self.write('README.md', 'Run `claude plugin validate .` in CI.\n')
         result = self.scan()
-        self.assertEqual(self.declined(result), [('stop-hook', 'docs/repository.md', 4),
-                                                 ('plugin-eval', 'docs/repository.md', 3)])
+        self.assertEqual(self.declined(result), [('stop-hook', 'docs/decisions.md', 4),
+                                                 ('plugin-eval', 'docs/decisions.md', 3)])
         self.assertEqual(self.ids(result), [])
         self.assertEqual(result['plan']['summary'], 'No changes worth making: the scan found no defects or gaps; '
                                                     'declined features are under Declined by the project.')
@@ -403,13 +404,13 @@ class Declines(Project):
                 self.assertEqual([d[0] for d in self.declined(self.scan())], [feature])
 
     def test_only_loaded_linked_or_readme_sources_count(self):
-        self.must_run('See [delivery](delivery.md).\n')
-        self.write('docs/delivery.md', 'Claude Code hooks were retired.\n')
+        self.must_run('See [delivery](decisions/delivery.md).\n')
+        self.write('docs/decisions/delivery.md', 'Claude Code hooks were retired.\n')
         self.write('docs/other.md', 'We decided against the allowlist.\n')
         self.write('tests/fixtures/repo/README.md', 'LSP was deliberately dropped.\n')
-        self.write('README.md', 'Code intelligence plugins were retired.\n')
+        self.write('README.md', 'Code intelligence plugins: retired.\n')
         result = self.scan()
-        self.assertEqual(self.declined(result), [('stop-hook', 'docs/delivery.md', 1), ('lsp', 'README.md', 1)])
+        self.assertEqual(self.declined(result), [('stop-hook', 'docs/decisions/delivery.md', 1), ('lsp', 'README.md', 1)])
 
 
 class Neighbours(Project):
@@ -439,7 +440,7 @@ class Neighbours(Project):
         result = self.scan()
         self.assertEqual(result['declined'], [])
         self.assertIn('stop-hook', self.ids(result))
-        self.write('README.md', 'Claude Code hooks were retired, so Cursor hooks run alone.\n')
+        self.write('README.md', 'We retired Claude Code hooks, so Cursor hooks run alone.\n')
         self.assertEqual([d['feature'] for d in self.scan()['declined']], ['stop-hook'])
 
     def test_an_imported_procedure_is_an_instruction_not_a_procedure(self):
