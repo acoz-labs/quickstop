@@ -14,6 +14,13 @@ import uuid
 
 MARKER = "<!-- sdlc-evidence-v1 -->"
 CONFIG = ".sdlc/config.json"
+# GitHub stores every C0 control except BS, TAB, LF, VT, FF and CR, and every
+# C1 control (U+0080-U+009F), in caret notation, so a published log holding one
+# cannot match its hash. Remove whole terminal sequences first (CSI such as
+# colours, OSC such as hyperlinks, which stops at a newline so an unterminated
+# one cannot swallow log lines, and other ESC forms), then any remaining control.
+CONTROLS = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|(?:\x1b\]|\x9d)[^\x07\x1b\x9c\n]*(?:\x07|\x1b\\|\x9c)"
+                      r"|\x1b[ -/]*[0-~]|[\x00-\x07\x0e-\x1f\x80-\x9f]")
 
 
 class Failure(Exception):
@@ -287,7 +294,7 @@ def publish(receipt_path, number, expected_actor, logs_reviewed, summary):
         p = receipt_path.parent / name
         if p.is_symlink():
             raise Failure("Symlink log refused")
-        text = p.read_bytes().decode("utf-8", errors="replace")
+        text = CONTROLS.sub("",p.read_bytes().decode("utf-8", errors="replace"))
         data = text.encode()
         links = []
         # Character budget conservatively below GitHub's byte limit, including

@@ -274,7 +274,7 @@ def finalize(receipt_file, actor, logs_reviewed, summary, close=False):
         name = c["log"]
         if Path(name).name != name or (receipt_file.parent / name).is_symlink():
             raise e.Failure("Invalid release log path")
-        text = (receipt_file.parent / name).read_text(errors="replace")
+        text = e.CONTROLS.sub("", (receipt_file.parent / name).read_text(errors="replace"))
         urls = []
         for offset in range(0, max(1, len(text)), 10000):
             body = f"Release log `{name}` for `{candidate['sha']}` / part {offset // 10000 + 1}\n\n" + text[offset:offset + 10000]
