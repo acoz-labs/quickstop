@@ -140,8 +140,11 @@ and the diffs. The rules:
 - **History narrative.** A sentence in the instruction files, their imports, skills,
   subagents or the docs they say to read that tells what happened (a past run that
   passed, something that "has been retired", a dated event, a past version) is listed
-  under Also worth knowing as possibly stale, with its line. It changes no grade.
-  Decision records and changelogs are skipped. A retirement told this way is never
+  under Also worth knowing as possibly stale, with its line. It changes no grade. A
+  past verb in a relative clause or a condition ("the last release that passed", "if
+  the build failed") and a date used as a name ("a 2026-07-28 server") are not history.
+  Decision records, changelogs, release notes, migration and upgrade guides and
+  what's-new pages are skipped. A retirement told this way is never
   read as a decline: only a decision record (`decisions.md`, `docs/adr/`) declines a
   feature.
 - **Human gates.** A sentence in the loaded instructions where a person must approve

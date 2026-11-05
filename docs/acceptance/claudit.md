@@ -81,11 +81,16 @@ graders follow the scan, rebuilt with `python3 tests/test_claudit_case_graders.p
   `docs/repository.md`, each of quickstop's two stale history lines (by line number or
   its words) and calls it history or stale; a decline doesn't count. Their positive, negative and attacker
   controls are in `tests/test_claudit_gate_graders.py`.
-- `headless` also checks each report against the scan (4.3.1): `stale_candidates_listed`
-  (each history line the scan lists is cited by `path:line` and called stale or history,
-  outside Declined) and `generated_labels` (no sentence calls a file generated unless the
-  scan lists it, or the file follows "generated … by/from" as its generator or source;
-  a sentence naming no file speaks of the files the one before it names).
+- `headless` also checks each report against the scan (4.3.1), failing closed:
+  - `stale_candidates_listed`: one clause of one sentence cites each history line's `path:line` with a stale or
+    history cue (or under a "Possibly stale:" label), with no negation, hedge or question in that clause and no
+    dismissal ("Not kept", "dropped", "accurate", "on purpose", "needs no change") in its bullet, outside Declined.
+    `meta.json`'s `stale_outcomes` gives each line as `listed`, `dropped with a reason` (a "Not kept:" line, for a
+    hand-read against `nested-audit.md`) or `missing`; only `listed` passes.
+  - `generated_labels`: a sentence with an unnegated "generated" labels every file it names (backticked, bold or
+    bare) and, when it names none or says "they", "it", "both", "all", "these", "those", "each" or "either", the
+    files of the sentence before it, across bullets. Every labelled file must be in the scan's `generated` list,
+    except the objects of "generated from/by `<file>`" in a sentence with one "generated" and no back-reference.
 
 Before a paid run, every fixture hook must run on the host toolchain: scaffold each
 case and run its Stop hook with the run's environment. f19's Stop hook runs

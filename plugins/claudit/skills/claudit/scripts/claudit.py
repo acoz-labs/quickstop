@@ -261,33 +261,49 @@ DESCRIBED = re.compile(r"\b(?:is|was|were|has been|had|used to|no longer|removed
 HISTORY = re.compile(r"\b(?:no longer|deprecated|obsolete|removed|is gone|used to|don['\u2019]t run|never run|do not run)\b",
                      re.I)
 # History narrative (#193 4.3.1): a sentence telling what happened rather than what holds now. Each form needs a
-# tensed past (or a date with one), so a present rule ("Hooks are disabled in CI") is never history.
+# tensed past verb (`verb`) that is the sentence's own statement: not in a relative clause ("the last release that
+# passed CI is tagged latest"), a condition ("If the previous build failed, rerun it") or a hedge ("may have
+# failed"). So a present rule ("Hooks are disabled in CI") or a description of something that exists now is never
+# history. A date counts only as when something happened ("On 2026-03-02 the docs moved"), never as a name ("a
+# 2026-07-28 server", "negotiates 2026-07-28").
 RETIRED = r'(?:retired|removed|dropped|replaced|deprecated|superseded|phased out|abandoned|disabled|discontinued)'
 PAST = (r'(?:passed|failed|ran|worked|succeeded|broke|moved|changed|switched|added|introduced|became|was|were|'
         r'had|used|showed|found)')
+DATE = (r'(?:20\d\d-\d\d-\d\d|(?:January|February|March|April|May|June|July|August|September|October|November|'
+        r'December)\s+(?:\d{1,2},\s+)?20\d\d|20\d\d)')
 HISTORY_FORMS = (
-    ('retirement', re.compile(r'\b(?:have|has|had)\s+been\s+%s\b|\b(?:was|were)\s+%s\b' % (RETIRED, RETIRED), re.I)),
+    ('retirement', re.compile(r'\b(?P<verb>(?:have|has|had)\s+been|was|were)\s+%s\b' % RETIRED, re.I)),
     ('past run', re.compile(r'\b(?:initial|first|earlier|previous|original|last|old)\s+(?:[\w-]+\s+){0,2}?'
                             r'(?:runs?|releases?|migrations?|attempts?|pass|checks?|builds?|versions?)\b[^.;]{0,80}?'
-                            r'\b%s\b' % PAST, re.I)),
-    ('dated', re.compile(r'(?=.*\b%s\b)(?:\b20\d\d-\d\d-\d\d\b|\b(?:January|February|March|April|May|June|July|'
-                         r'August|September|October|November|December)\s+(?:\d{1,2},\s+)?20\d\d\b|'
-                         r'\b(?:in|since|until|as of)\s+20\d\d\b)' % PAST, re.I)),
+                            r'\b(?P<verb>%s)\b' % PAST, re.I)),
+    # The date leads a time phrase and isn't followed by its noun ("Since 2026-07-28 servers were …").
+    ('dated', re.compile(r'(?<![\w`-])(?:on|in|since|until|as of|by|before|after|from|during)\s+(?:the\s+)?%s\b'
+                         r'(?![\w`-]|\s+[a-z][\w-]*\s+(?:is|are|was|were|has|have)\b)[^.;]*?\b(?P<verb>%s)\b'
+                         % (DATE, PAST), re.I)),
     ('past version', re.compile(r'\b(?:in|until|before|prior to)\s+(?:version\s+|v)\d+(?:\.\d+)+\b[^.;]{0,60}?'
-                                r'\b%s\b' % PAST, re.I)),
+                                r'\b(?P<verb>%s)\b' % PAST, re.I)),
 )
 SPECULATIVE = re.compile(r'\b(?:may|might|could|would|should|will|must|can)\b', re.I)  # "may have failed"
+# A relative clause's own verb: "… that was added", "… which we used", "… whose first run passed".
+RELATIVE = re.compile(r'\b(?:(?:that|which|who|whom)\s+(?:\S+\s+)?|(?:whose|where)\s+(?:\S+\s+){0,3})$', re.I)
+CONDITION = re.compile(r'\b(?:if|unless|whether|once|when|whenever)\b[^.;]*$', re.I)  # "If the build failed, …"
 # Where a project records decisions and history on purpose: a decision record (decisions.md, docs/adr/...) owns a
-# decline, and a changelog or release notes may tell history.
+# decline, and changelogs, release notes, migration and upgrade guides and what's-new pages tell history as
+# their contract ("`X` has been removed; use `Y`").
 DECISION_RECORD = re.compile(r'decision|(?:^|/)adrs?(?:/|[-_.])', re.I)
-HISTORY_FILE = re.compile(r'(?:^|/)(?:change-?log|changes|history|news|release[-_ ]?notes)[^/]*$', re.I)
+HISTORY_FILE = re.compile(r'(?:^|/)(?:change-?log|changes|history|news|release[-_ ]?notes|releases|migrat\w*|'
+                          r'upgrad\w*|what[\'’]?s[-_ ]?new|deprecat\w*|breaking[-_ ]changes)[^/]*$', re.I)
+HISTORY_TITLE = re.compile(r'^#\s+.*\b(?:change-?log|release notes|migrat\w*|upgrad\w*|what[\'’]?s new|'
+                           r'deprecat\w*|breaking changes)\b', re.I | re.M)
 
 
 def history_form(sentence):
-    """(name, offset) of the first history form a sentence holds, or None."""
+    """(name, offset) of the first history form a sentence holds as its own statement, or None."""
     for name, form in HISTORY_FORMS:
-        match = form.search(sentence)
-        if match and not SPECULATIVE.search(match.group()):
+        for match in form.finditer(sentence):
+            before = sentence[:match.start('verb')]
+            if SPECULATIVE.search(match.group()) or RELATIVE.search(before) or CONDITION.search(before):
+                continue
             return name, match.start()
     return None
 
@@ -1235,10 +1251,11 @@ class Scan:
         subagents and docs: stale candidates for the report, never graded. Decision records and changelogs tell
         history on purpose and are skipped."""
         for path in paths:
-            if DECISION_RECORD.search(path) or HISTORY_FILE.search(path) or self.data(path) or os.path.isabs(path) \
-                    or path.startswith('..'):
+            text = self.text(path) or ''
+            if DECISION_RECORD.search(path) or HISTORY_FILE.search(path) or HISTORY_TITLE.search(text[:2000]) \
+                    or self.data(path) or os.path.isabs(path) or path.startswith('..'):
                 continue
-            for sentence, line_at in sentences(self.text(path) or ''):
+            for sentence, line_at in sentences(text):
                 form = history_form(sentence)
                 if form and not UNSURE.search(sentence):
                     self.history_line(path, line_at(form[1]), sentence, form[0])
@@ -2341,12 +2358,16 @@ def team_instructions(instructions):
     return [i for i in instructions if i['loaded'] and i['kind'] in ('project', 'import') and not personal(i)]
 
 
+# A Markdown admonition marker (`!!! tip`, `??? note "Title"`): a heading for its indented text, never part of it.
+ADMONITION = re.compile(r'(?:!!!|\?\?\?\+?)\s+[\w-]+(?:\s+"[^"]*")?\s*$')
+
+
 def sentences(text):
     """(sentence, line number of an offset in it) for a text's prose; a paragraph or list item may wrap over lines."""
     units, current, last = [], [], None
     for number, line in prose(text):
         body = line.strip().lstrip('>').strip()
-        heading = body.startswith(('#', '|'))
+        heading = body.startswith(('#', '|')) or ADMONITION.match(body) is not None
         if not body or heading or LIST_ITEM.match(line) or last is None or number != last + 1:
             if current:
                 units.append(current)

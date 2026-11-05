@@ -553,32 +553,94 @@ def grade_report(text, scan, helper):
     return checks
 
 
-# 4.3.1 script checks. A stale candidate is listed when one line, outside a Declined section, cites its `path:line`
-# and calls it stale or history (unnegated). A file is mislabelled generated when a sentence says "generated" and
-# names a backticked path the scan's `generated` list doesn't hold, unless the path comes after "generated ... by",
-# "from", "with" or "using" (the generator or its source) with no later "generated", or a negation governs
-# "generated" ("isn't generated"). Fail closed: any other co-occurrence counts.
-STALE_CUE = re.compile(r'\b(?:stale|histor\w*|outdated|out of date)\b', re.I)
-STALE_NEGATED = re.compile(r"\b(?:not|never|no|isn['’]t|aren['’]t|wasn['’]t)[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
-GENERATED_WORD = re.compile(r'\b(?:auto-?)?generated\b', re.I)
-GENERATED_NEGATED = re.compile(r"(?:\b(?:not|never)|n['’]t)[ \t]+(?:(?:auto-?|really|actually)[ \t]*)?$", re.I)
-PATH_SPAN = re.compile(r'`([^`\s]*[/.][^`\s]*)`')
-SOURCE_OF = re.compile(r'\b(?:by|from|with|using)\b', re.I)
-WRITER = re.compile(r'[`*)]*[ \t]*(?:\(?(?:is[ \t]+)?(?:the|its)[ \t]+generator\b|(?:re)?generates\b|writes\b|builds\b|'
-                    r'produces\b|renders\b|emits\b|marks\b|says\b|lists\b|records\b)', re.I)
+# 4.3.1 script checks, both fail closed.
+#
+# stale_listed: a stale candidate is listed when one clause of one sentence cites its `path:line` with a stale or
+# history cue, and nothing takes it back: no negation in that clause, and no dismissal anywhere in the sentence or
+# its bullet ("Not kept", "dropped", "accurate", "on purpose", "needs no change", "fine"). A clause ends at ; or at
+# "but", "though", "although", "however", "yet", "while", "whereas" or a spaced dash. A `--deep` report that drops the
+# line with a reason is a separate outcome (`stale_outcome`), never "listed".
+#
+# mislabelled_generated: a sentence with an unnegated "generated" labels every file it names (backticked, bold or
+# bare), and, when it names none or refers back ("they", "it", "both", "all", "these", "those", "each", "either"),
+# every file the sentence before it names (in its bullet, or else the bullet before). Each labelled file must be in
+# the scan's `generated` list. The one exception is the object list of "generated from/by/with/using `<file>`" in a
+# sentence with a single "generated" and no back-reference: those files are the source or the generator.
+STALE_CUE = re.compile(r'\b(?:stale|histor(?:y|ical|ically)|outdated|out[ -]of[ -]date)\b', re.I)
+STALE_LABEL = re.compile(r'^\W*(?:Possibly\s+stale|Stale(?:\s+candidates?)?)(?:\s*\([^)]*\))?\s*:\s*', re.I)
+NEGATION = re.compile(r"\b(?:not|no|none|nothing|never|neither|nor|without|isn|aren|wasn|weren|doesn|don|didn)\b|"
+                      r"n['’]t\b", re.I)
+HEDGE = re.compile(r'\b(?:may|might|could|perhaps|maybe|possibly|probably|arguably|seems?|looks?|appears?|if)\b', re.I)
+DISMISSAL = re.compile(r"\bnot[ \t]+kept\b|\bdrop(?:s|ped|ping)?\b|\b(?:accurate|correct|current|intentional|valid|"
+                       r"true|fine|harmless|deliberate(?:ly)?)\b|\bon[ \t]+purpose\b|\bas[ \t]+is\b|\b(?:keep|leave)[ \t]+"
+                       r"(?:it|them|this|that)\b|\b(?:no|nothing)[ \t]+(?:change|action|fix)\w*\b|\bneeds?[ \t]+no\b|"
+                       r"\bfalse[ \t]+positive\b|\bnot[ \t]+a[ \t]+(?:defect|problem|finding)\b", re.I)
+CLAUSE_END = re.compile(r'\s*;\s*|,?\s+(?:but|though|although|however|yet|while|whereas)\b|\s+[—–-]\s+', re.I)
+QUOTED = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d')
+SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z`*"(\[])')
+GENERATED_WORD = re.compile(r'\b(?:auto-?|machine-)?generated\b', re.I)
+GENERATED_NEGATED = re.compile(r"(?:\b(?:not|never)|n['’]t)[ \t]+(?:been[ \t]+)?$", re.I)
+NEGATION_UNDONE = re.compile(r'\b(?:but|only|just|merely|also|either|rather)\b', re.I)
+BACK_REFERENCE = re.compile(r'\b(?:they|them|it|its|both|all|these|those|each|either)\b', re.I)
+FILE = (r'(?:`[^`\s]*[/.][^`\s]*`|\*\*[^*\s]*[/.][^*\s]*\*\*|(?<![\w/.`*@-])(?:\.{0,2}/)?(?:[\w.-]+/)+[\w.-]*[\w-]|'
+        r'(?<![\w/.`*@-])[\w-][\w.-]*\.(?:md|json|ya?ml|toml|txt|py|sh|lock|cfg|ini|js|ts|go|rs)\b)')
+FILE_TOKEN = re.compile(FILE)
+URL = re.compile(r'(?:https?://|www\.)\S+|\]\([^)\s]*\)')
+SOURCE_OBJECTS = re.compile(r'\b(?:auto-?|machine-)?generated[ \t]+(?:(?:from|by|with|using)[ \t]+(?:the[ \t]+)?%s'
+                            r'(?:[ \t]*(?:,|and|or)[ \t]+(?:the[ \t]+)?%s)*[ \t]*)+' % (FILE, FILE), re.I)
+
+
+def file_paths(sentence):
+    """[(start, end, path)] for the files a sentence names, outside URLs and link targets."""
+    masked = URL.sub(lambda m: ' ' * len(m.group()), sentence)
+    out = []
+    for m in FILE_TOKEN.finditer(masked):
+        path = m.group().strip('`*').rstrip('.,;:)')
+        path = re.sub(r':[0-9]+(?:[-–][0-9]+)?$', '', path)
+        path = path[2:] if path.startswith('./') else path
+        if path and not re.fullmatch(r'[\d.]+|v?\d+(?:\.\d+)+', path):  # a version number isn't a file
+            out.append((m.start(), m.end(), path))
+    return out
+
+
+def report_sentences(text):
+    """(unit index, sentence) for each sentence of each bullet or paragraph line; a heading is its own unit."""
+    for n, unit in enumerate(label_units(text)):
+        for sentence in SENTENCE_END.split(unit):
+            yield n, sentence
+
+
+def stale_outcome(text, candidate):
+    """'listed', 'dropped with a reason' (a line citing it under "Not kept:" with more than the citation), or
+    'missing'."""
+    ref = re.compile(r'%s:%d(?![0-9])' % (re.escape(candidate['path']), candidate['line']))
+    declined, dropped = False, False
+    for unit in label_units(text):
+        if unit.startswith('#'):
+            declined = DECLINE_HEAD.match(unit) is not None
+            continue
+        unit = QUOTED.sub('""', unit)  # a quote is the file's text, not the report's judgement
+        if declined or not ref.search(unit):
+            continue
+        if re.match(r'^\W*Not[ \t]+kept\b', unit, re.I) and len(ref.sub('', unit).split()) > 4:
+            dropped = True
+        if DISMISSAL.search(unit):
+            continue
+        for sentence in SENTENCE_END.split(unit):
+            if '?' in sentence:  # a question asserts nothing
+                continue
+            labelled = STALE_LABEL.match(sentence)
+            body = sentence[labelled.end():] if labelled else sentence
+            for clause in CLAUSE_END.split(body):
+                if not ref.search(clause) or NEGATION.search(clause) or HEDGE.search(clause):
+                    continue
+                if labelled or STALE_CUE.search(clause):
+                    return 'listed'
+    return 'dropped with a reason' if dropped else 'missing'
 
 
 def stale_listed(text, candidate):
-    ref = re.compile(r'%s:%d\b' % (re.escape(candidate['path']), candidate['line']))
-    declined = False
-    for line in text.splitlines():
-        if line.startswith('#'):
-            declined = DECLINE_HEAD.match(line) is not None
-        if declined or not ref.search(line):
-            continue
-        if any(not STALE_NEGATED.search(line[:m.start()]) for m in STALE_CUE.finditer(line)):
-            return True
-    return False
+    return stale_outcome(text, candidate) == 'listed'
 
 
 def label_units(text):
@@ -593,27 +655,25 @@ def label_units(text):
 
 
 def mislabelled_generated(text, scan):
-    """(sentence, path) pairs where a report calls a file generated that the scan doesn't list as generated. A
-    sentence that names no file ("They are generated output") speaks of the files the sentence before it names."""
+    """(sentence, path) pairs where a report calls a file generated that the scan doesn't list as generated."""
     made = {entry['path'] for entry in scan.get('generated', []) or []}
-    found = []
-    for unit in label_units(text):
-        previous = []
-        for sentence in re.split(r'(?<=[.!?])\s+(?=[A-Z`*])', unit):
-            paths = [(m.start(), m.end(), m.group(1)) for m in PATH_SPAN.finditer(sentence)]
-            said = [m.start() for m in GENERATED_WORD.finditer(sentence)
-                    if not GENERATED_NEGATED.search(sentence[:m.start()])]
-            for start, end, given in (paths or [(-1, -1, given) for _, _, given in previous]) if said else ():
-                path = re.sub(r':[0-9]+(?:-[0-9]+)?$', '', given)
-                path = path[2:] if path.startswith('./') else path
-                before = [at for at in said if at < start]
-                # The generator or the source it reads: after "generated ... by/from/with/using" with no later
-                # "generated" that could describe it, or followed by "writes", "generates" or "(the generator)".
-                source = (before and not any(at > start for at in said)
-                          and SOURCE_OF.search(sentence[before[-1]:start])) or (end >= 0 and WRITER.match(sentence[end:]))
-                if path not in made and not source:
-                    found.append((sentence, path))
-            previous = paths or previous
+    found, previous = [], []
+    for _, sentence in report_sentences(text):
+        if sentence.startswith('#'):
+            previous = []
+            continue
+        paths = file_paths(sentence)
+        said = [m for m in GENERATED_WORD.finditer(sentence)
+                if not (GENERATED_NEGATED.search(sentence[:m.start()]) and not NEGATION_UNDONE.search(sentence))]
+        if said:
+            back = BACK_REFERENCE.search(sentence) is not None
+            labelled = [p for _, _, p in paths] + ([p for _, _, p in previous] if back or not paths else [])
+            excused = set()
+            if len(said) == 1 and not back:
+                for m in SOURCE_OBJECTS.finditer(sentence):
+                    excused |= {p for start, end, p in paths if m.start() <= start and end <= m.end()}
+            found += [(sentence, p) for p in dict.fromkeys(labelled) if p not in made and p not in excused]
+        previous = paths or previous
     return found
 
 
@@ -1063,6 +1123,10 @@ def headless(args):
                 'cost_usd': round(raw['total_cost_usd'] + sum(c.get('cost_usd') or 0 for c in nested), 6)
                 if isinstance(raw.get('total_cost_usd'), (int, float)) else None,
                 'nested': nested, 'checks': checks,
+                # Each stale candidate: listed, dropped with a reason (hand-read against nested-audit.md) or missing.
+                'stale_outcomes': {'%s:%d' % (c['path'], c['line']): stale_outcome(text, c)
+                                   for c in json.loads(scan.stdout).get('stale_candidates', [])}
+                if scan.returncode == 0 and text else {},
                 'passed': bool(checks) and all(checks.values())}
         (run_dir / 'meta.json').write_text(json.dumps(meta, indent=2) + '\n')
         runs.append(meta)

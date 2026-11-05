@@ -267,6 +267,43 @@ class History(Project):
         status = {b['id']: (b['status'], b['evidence']) for b in result['baseline']}
         self.assertEqual(status['enforced'], ('declined', 'not recommended: history line in docs/repository.md:7'))
 
+    def test_present_tense_text_is_no_history(self):
+        # Review round 1: relative clauses, conditions, dates that name a protocol version, and migration guides.
+        self.write('CLAUDE.md', '# x\n\n@docs/guide.md\n')
+        self.write('docs/guide.md', '# Guide\n\nRun the first check that was added to `bin/ci` before pushing.\n'
+                   'The last release that passed CI is tagged latest; deploy from it.\n'
+                   'Keep the old version string that was used in `plugin.json` until the release is verified.\n'
+                   'Tag the build whose first run passed.\nIf the previous build failed, rerun it.\n'
+                   'When the last build failed, CI pages the owner.\nOld runs may have failed; rerun them.\n'
+                   '`Client(mcp)` negotiates 2026-07-28 against your v2 server.\n'
+                   'A 2026-07-28 server answers them with `-32601`.\n'
+                   'Since 2026-07-28 servers were required to answer.\n'
+                   'Use the version that was released on 2026-03-02.\nHooks are disabled in CI.\n'
+                   '\nSee [migrating](migration.md) and [what is new](whats-new.md) and [upgrade](v2.md).\n')
+        self.write('bin/ci', '#!/bin/sh\n')
+        for rel, title in (('docs/migration.md', 'Migration'), ('docs/whats-new.md', 'News'),
+                           ('docs/v2.md', 'Upgrading to v2')):
+            self.write(rel, '# %s\n\n`Server.run_sse` has been removed; use `run_http`.\n' % title)
+        self.write('docs/other.md', '# Other\n\n`Server.run_sse` has been removed; use `run_http`.\n')
+        self.write('CLAUDE.md', '# x\n\n@docs/guide.md\n\nSee docs/migration.md, docs/whats-new.md, docs/v2.md and '
+                   'docs/other.md.\n')
+        result = self.scan()
+        self.assertEqual(len(result['context']['likely_read']), 4)  # every guide is read, and only other.md tells history
+        self.assertEqual([(c['path'], c['line']) for c in result['stale_candidates']], [('docs/other.md', 3)])
+
+    def test_history_still_found_beside_relative_clauses(self):
+        self.write('CLAUDE.md', '# x\n\nPush hooks, which we used for years, have been retired.\n'
+                   'The hooks that we had were retired.\nThe first release ran on Python 3.8, which is gone now.\n')
+        self.assertEqual([(c['line'], c['why']) for c in self.scan()['stale_candidates']],
+                         [(3, 'retirement'), (4, 'retirement'), (5, 'past run')])
+
+    def test_admonition_text_is_cited_by_its_own_line(self):
+        sentence = 'Read the client secret from the environment or a secret manager, never from source control.'
+        self.write('CLAUDE.md', '# x\n')
+        self.write('docs/a.md', '# A\n\n!!! tip\n    %s\n' % sentence)
+        self.write('docs/b.md', '# B\n\n??? note "Secrets"\n    %s\n' % sentence)
+        self.assertEqual(self.scan()['duplicates'][0]['copies'], ['docs/a.md:4', 'docs/b.md:4'])
+
     def test_a_decision_record_replaces_a_history_line(self):
         self.write('CLAUDE.md', '# x\n\nClaude Code hooks were retired.\nDecisions: [docs/decisions.md](docs/decisions.md).\n')
         self.write('docs/decisions.md', '# Decisions\n\n- Claude Code hooks were retired in favour of CI.\n')
