@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-10-29",
+  "catalog_version": "2026-11-03",
   "reviewed_with": "2.1.312",
   "docs_index": "https://code.claude.com/docs/llms.txt",
   "docs": {
@@ -28,6 +28,10 @@
     "skill-doctor": {"url": "https://code.claude.com/docs/en/skills", "heading": "Find unused skills"},
     "doctor": {"url": "https://code.claude.com/docs/en/skills", "heading": "Check your setup with `/doctor`"},
     "mcp-project": {"url": "https://code.claude.com/docs/en/mcp", "heading": "Project scope"},
+    "bash-rule-limits": {"url": "https://code.claude.com/docs/en/permissions", "heading": "What a Bash rule doesn't match"},
+    "skill-invocation": {"url": "https://code.claude.com/docs/en/skills", "heading": "Control who invokes a skill"},
+    "skill-frontmatter": {"url": "https://code.claude.com/docs/en/skills", "heading": "Frontmatter reference"},
+    "hooks-session-start": {"url": "https://code.claude.com/docs/en/hooks", "heading": "SessionStart"},
     "plugin-validate": {"url": "https://code.claude.com/docs/en/plugins/cli-reference", "heading": "plugin validate"},
     "plugin-evals": {"url": "https://code.claude.com/docs/en/plugin-evals", "heading": "Test plugins with evals"},
     "code-intelligence": {"url": "https://code.claude.com/docs/en/plugins/code-intelligence", "heading": "Code intelligence plugins"},

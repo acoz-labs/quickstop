@@ -393,7 +393,7 @@ class Correctness(Project):
         inst = {i['path']: (i['kind'], i['loaded']) for i in result['inventory']['instructions']}
         self.assertEqual(inst['docs/e.md'], ('import', True))
         self.assertNotIn('docs/f.md', inst)  # sixth hop: past the five-hop import limit
-        self.assertEqual(result['inventory']['instruction_lines_loaded'], 2 + 2 + 2 * 4 + 3)
+        self.assertEqual(result['inventory']['instruction_words_loaded'], 2 + 2 + 2 * 4 + 10)  # words, not lines
         self.assertEqual([r['path'] for r in result['signals']['must_rules']], ['docs/e.md'])
         self.assertIn('stale-ref:docs/e.md:docs/old/gone.md', self.ids(result))
         self.assertEqual(result['signals']['documented_checks'], ['bin/ci'])
@@ -405,7 +405,7 @@ class Correctness(Project):
         result = self.scan()
         inst = {i['path']: i['loaded'] for i in result['inventory']['instructions']}
         self.assertEqual(inst, {'CLAUDE.md': True, 'AGENTS.md': False, 'docs/agent.md': False})
-        self.assertEqual(result['inventory']['instruction_lines_loaded'], 1)
+        self.assertEqual(result['inventory']['instruction_words_loaded'], 2)
 
     def loading(self, version='2.1.312'):
         result = self.scan(version)
@@ -776,18 +776,18 @@ class Coverage(Project):
         self.assertNotIn('$(bin/sdlc 2>&1)', fix)
 
     def test_procedure_docs(self):
-        steps = ''.join('%d. Step\n' % n for n in range(1, 6))
+        steps = ''.join('%d. Run the step\n' % n for n in range(1, 6))
         self.write('CLAUDE.md', '# x\n')
-        self.write('docs/RELEASE.md', '# Release\n1. a\n2. b\n3. c\n')
+        self.write('docs/RELEASE.md', '# Release\n1. Tag a\n2. Push b\n3. Publish c\n')
         self.write('docs/deploy-guide.md', '# Ship it\n' + steps)
-        self.write('docs/notes.md', '# Notes\n1. a\n2. b\n3. c\n')
+        self.write('docs/notes.md', '# Notes\n1. Tag a\n2. Push b\n3. Publish c\n')
         self.write('README.md', steps)
         self.write('CHANGELOG.md', steps)
         self.write('tests/fixtures/release.md', '# Release\n' + steps)
         self.write('.claude/skills/ship/SKILL.md', '---\nname: ship\ndescription: Follows docs/deploy-guide.md\n---\n')
         self.write('.claude-plugin/plugin.json', {'name': 'p'})
         self.write('skills/shipped/SKILL.md', '---\nname: shipped\n---\nFollow docs/RELEASE.md and docs/runbook.md.\n')
-        self.write('docs/runbook.md', '# Runbook\n1. a\n2. b\n3. c\n')
+        self.write('docs/runbook.md', '# Runbook\n1. Tag a\n2. Push b\n3. Publish c\n')
         self.write('.claude/commands/runbook.md', 'Follow docs/runbook.md.\n')
         result = self.scan()
         docs = {d['path']: d['has_skill'] for d in result['signals']['procedure_docs']}
@@ -890,9 +890,9 @@ class Cli(Project):
     def test_dismiss_writes_only_its_file_and_filters(self):
         self.write('go.mod', 'module x\n')
         before = tree(self.root)
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'no LSP here')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'no LSP here')
         self.assertEqual((code, out['added']), (0, True))
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'again')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'again')
         self.assertEqual((code, out['added']), (0, False))
         after = tree(self.root)
         self.assertEqual(set(after) - set(before), {'.claude/claudit-dismissed.json'})
@@ -906,7 +906,7 @@ class Cli(Project):
         result = self.scan()
         self.assertIn('lsp', self.ids(result))
         self.assertTrue([l for l in result['limits'] if 'claudit-dismissed' in l])
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'x', '--reason', 'y')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'x', '--reason', 'y')
         self.assertEqual(code, 2)
         self.assertEqual(Path(self.root, '.claude/claudit-dismissed.json').read_text(), '{bad')
 
@@ -915,7 +915,7 @@ class Cli(Project):
         self.write('outside.txt', 'keep\n')
         os.makedirs(os.path.join(self.root, '.claude'))
         os.symlink(outside, os.path.join(self.root, '.claude/claudit-dismissed.json.tmp'))
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'r')
         self.assertEqual((code, out['added']), (0, True))
         self.assertEqual(Path(outside).read_text(), 'keep\n')
         data = json.loads(Path(self.root, '.claude/claudit-dismissed.json').read_text())
@@ -930,21 +930,21 @@ class Cli(Project):
         Path(target).write_text('{"version": 1, "dismissed": []}\n')
         os.makedirs(os.path.join(self.root, '.claude'))
         os.symlink(target, os.path.join(self.root, '.claude/claudit-dismissed.json'))
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'r')
         self.assertEqual(code, 2)
         self.assertIn('refusing', out['error'])
         self.assertEqual(Path(target).read_text(), '{"version": 1, "dismissed": []}\n')
         shutil.rmtree(os.path.join(self.root, '.claude'))
         os.symlink(elsewhere.name, os.path.join(self.root, '.claude'))
         before = tree(elsewhere.name)
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'r')
         self.assertEqual(code, 2)
         self.assertIn('refusing', out['error'])
         self.assertEqual(tree(elsewhere.name), before)
 
     def test_dismiss_refuses_when_claude_is_a_file(self):
         self.write('.claude', 'not a directory\n')
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'r')
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'r')
         self.assertEqual(code, 2)
         self.assertIn('refusing', out['error'])
         self.assertEqual(Path(self.root, '.claude').read_text(), 'not a directory\n')

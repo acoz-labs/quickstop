@@ -44,13 +44,15 @@ CSTART = r';[ \t]+|:[ \t]+(?=(?:\*\*)?%s\b)|' % IMPER + JOIN
 # A character inside one sentence: . ! ? end it only before a space or the end (not inside a file name).
 SENT = r'(?:[^\n.!?]|[.!?](?=[^\s*_)"\x60]))'
 SOURCE = r'(?![ \t]*(?:[-*>][ \t]+)?(?:\*\*|_)?Sources?\b)'
-QUESTION = r'(?!%s*?(?:\bwhy[ \t]+not\b|\?(?=[ \t*_"\x60)]|\n|(?![\s\S]))))' % SENT
+QUESTION_P = r'(?:\bwhy[ \t]+not\b|\?(?=[ \t*_"\x60)]|\n|(?![\s\S])))'
+QUESTION = r'(?!%s*?%s)' % (SENT, QUESTION_P)
 # Hypothetical or optional framing: "would do it", "you could", "if you want", "If the parent had".
 HYPO_P = (r'(?:[.;:!?][ \t]+if\b|\bif[ \t]+(?:you|we|they|needed|wanted|desired|preferred|so|there[ \t]+(?:were|was)|it[ \t]+(?:were|had))\b'
           r'|\bif\b[^\n]{0,40}?\bhad\b|\bunless\b|\bwhether\b|\b(?:could|might)\b|\bwould[ \t]+(?:\S+[ \t]+)?(?:do|work'
           r'|help|fix|cover|be|suffice|stop|catch|gate|hold|need|go)\b|\boptional(?:ly)?\b|\bnice[ -]to[ -]have\b)')
 # A line or sentence that opens with "If" is a hypothetical too.
-HYPOTHETICAL = r'(?![ \t]*(?:[-*+>]|[0-9]+[.)])?[ \t]*(?:\*\*|_)?if\b)(?!%s*?%s)' % (SENT, HYPO_P)
+HYPOTHETICAL_LEAD = r'(?![ \t]*(?:[-*+>]|[0-9]+[.)])?[ \t]*(?:\*\*|_)?if\b)'
+HYPOTHETICAL = HYPOTHETICAL_LEAD + r'(?!%s*?%s)' % (SENT, HYPO_P)
 # Declined from the plan: "I didn't add it to the plan", "left it out", "not recommended".
 DECLINED_P = (r'(?:\b(?:not|n%st)[ \t]+(?:\S+[ \t]+){0,4}?(?:in|into|to|part[ \t]+of|on)[ \t]+(?:the|my|this)[ \t]+plan\b'
               r'|\bleft[ \t]+(?:\S+[ \t]+){0,2}?out\b|\bout[ \t]+of[ \t]+(?:the[ \t]+)?plan\b|\bnot[ \t]+(?:planned'
@@ -118,10 +120,11 @@ def line(parts, drop):
     return head + r'(?:[^\n]*?[.!?][*_\x60)"]*[ \t]+)?' + rest + r'[^\n]*'
 
 
-def framing(drop):
-    """The guards every finding line carries."""
-    return {'source': SOURCE, 'question': QUESTION, 'hypothetical': HYPOTHETICAL, 'declined': DECLINED,
-            'rejected': r'(?!%s*?%s)' % (SENT, REJECT_P)}
+def framing(drop, sent=SENT):
+    """The guards every finding line carries, each looking at one sentence (`sent` is a character inside it)."""
+    return {'source': SOURCE, 'question': r'(?!%s*?%s)' % (sent, QUESTION_P),
+            'hypothetical': HYPOTHETICAL_LEAD + r'(?!%s*?%s)' % (sent, HYPO_P), 'declined': DECLINED,
+            'rejected': r'(?!%s*?%s)' % (sent, REJECT_P)}
 
 
 def block(inner, drop=frozenset()):
@@ -248,11 +251,30 @@ FILLER = (r'(?:(?:need\w*|requir\w*|ha(?:ve|s)|us(?:e|ing)|is|are|be|any|a|an|th
           r'|even|yet|this|that|such|rule|rules)[ \t]+)')
 
 
+def quoted(open_, close):
+    """A quoted span inside a sentence, its full stops included: one with no stop at its end, one ending in a stop
+    that a continuation follows ("…<name>`." is copied into …), and an opening mark with no close on the line."""
+    body = r'[^%s\n]*' % close
+    return [r'%s(?:%s[^%s\n.!?*_\x60)])?[*_\x60)]*%s' % (open_, body, close, close),
+            r'%s%s[.!?][*_\x60)]*%s(?=[,;:)]|[ \t]+(?:\(|%s))' % (open_, body, close, QUOTE_GOES_ON),
+            r'%s(?!%s%s)' % (open_, body, close)]
+
+
+# After a quote that ends in a stop, the sentence goes on only with a parenthesis or a verb or link word of the claim
+# ("… ." is copied", "… ." appears in", "… ." (copied into …)); anything else starts a new sentence.
+QUOTE_GOES_ON = (r'(?:is|are|was|were|appears?|occurs?|recurs?|sits?|lives?|shows?|turns?|reads?|exists?|repeats?|'
+                 r'and|in|into|across|from|also|word|verbatim|copied|duplicated|repeated|restated)\b')
+# f15 only (4.3.1): a character inside one sentence, where a quoted rule's own full stops don't end the sentence.
+QSENT = r'(?:%s|[^\n.!?"“]|[.!?](?=[^\s*_)"\x60]))' % '|'.join(quoted('"', '"') + quoted('“', '”'))
+
+
 def duplicates_grouped(drop=frozenset()):
     """One stretch of the report (up to 900 characters, no heading) names the duplication, the migrations rule and
-    the three files that copy it word for word, and doesn't deny the duplication."""
+    the three files that copy it word for word, and doesn't deny the duplication. A quoted rule is one span of its
+    sentence: its own full stops don't end it."""
     # The stretch starts on the line that names the duplication; that line carries the usual framing guards.
-    start = BOL + ''.join(v for k, v in framing(drop).items() if k not in drop) + has(DUP)
+    sent = SENT if 'quotes' in drop else QSENT
+    start = BOL + ''.join(v for k, v in framing(drop, sent).items() if k not in drop) + '(?=%s*?%s)' % (sent, DUP)
     parts = {'rule': r'\bmigrat', 'claude': r'CLAUDE\.md', 'contributing': r'contributing\.md',
              'migrator': r'migrator\.md'}
     out = start + ''.join('(?=%s%s)' % (WINDOW, pattern) for name, pattern in parts.items() if name not in drop)
@@ -520,7 +542,9 @@ GRADERS = {
          'duplication (duplicate, repeat, copy, word for word, verbatim, identical, restate, same rule, "3 '
          'files") and, from that line on (up to 900 characters, not past a heading), the report names the '
          'migrations rule, `CLAUDE.md`, `contributing.md` and `migrator.md`, with no negation governing a '
-         'duplication word in that stretch. The first line carries the usual guards.'),
+         'duplication word in that stretch. The first line carries the usual guards. A quoted rule is one span of '
+         'its sentence: its own full stops don\'t end the sentence when the claim goes on after the quote ("…<name>`." '
+         'is copied into …), and the guards don\'t read inside it.'),
     ],
     'f16-stale-facts': [
         ('finding-stale-folder', stale, (r'carriers/',), 'i', '',
@@ -1411,6 +1435,34 @@ ROUND4 = {
 }
 CONTROLS.update(ROUND4)
 
+# 4.3.1: the f15 quote split. Claudit 4.3.0's recorded Problem lines put the quoted rule, with its own full stop,
+# before "is copied word for word"; the attacker lines put a negation, question, condition or new sentence outside
+# the quote.
+RULE_Q = '"Never edit files under `migrations/` by hand; create a new one with `bin/migrate new <name>`."'
+COPIES = '`CLAUDE.md:6`, `.claude/agents/migrator.md:10` and `docs/contributing.md:10`'
+QUOTE_SPLIT = ([
+    '   Problem: %s is copied word for word into %s. It is also paraphrased in `docs/architecture.md:19`. Copies '
+    'drift apart and cost context.' % (RULE_Q, COPIES),
+    '   Problem: The rule %s is copied word for word into %s. Copies can drift apart.' % (RULE_Q, COPIES),
+    '- "Never edit files under migrations/ by hand. Create a new one. Run bin/migrate new." is repeated verbatim '
+    'in CLAUDE.md, docs/contributing.md and migrator.md.',
+    '- The rule \u201cNever edit \u2018migrations/\u2019 by hand; use "bin/migrate new".\u201d appears word for word '
+    'in CLAUDE.md, docs/contributing.md and migrator.md.',
+    '- %s, copied into %s, belongs in one place.' % (RULE_Q, COPIES),
+    '- "Agents could edit migrations/ by hand if they wanted?" is copied word for word into %s.' % COPIES,
+    '- The rule %s (copied word for word into %s) should live in one place.' % (RULE_Q, COPIES),  # review round 1
+], [
+    '- The rule %s (not copied word for word into %s) is fine.' % (RULE_Q, COPIES),
+    '- The rule %s is not copied word for word into %s.' % (RULE_Q, COPIES),
+    '- Is %s copied word for word into %s?' % (RULE_Q, COPIES),
+    '- `CLAUDE.md` says %s Copies elsewhere, in `docs/contributing.md` and `migrator.md`, hold other rules.' % RULE_Q,
+    '- If %s were copied word for word into %s, it would drift.' % (RULE_Q, COPIES),
+    '- %s is copied word for word into %s, but this repo doesn\'t need it fixed.' % (RULE_Q, COPIES),
+    '- Why not keep %s in one file? It sits in %s.' % (RULE_Q, COPIES),
+])
+CONTROLS['finding-duplicates-grouped'][0].extend(QUOTE_SPLIT[0])
+CONTROLS['finding-duplicates-grouped'][1].extend(QUOTE_SPLIT[1])
+
 
 # Each named part a builder can drop: the control it must flip is in CONTROLS. structure-alignment-below-a has none.
 LINE_PARTS = ('source', 'question', 'hypothetical', 'declined', 'rejected', 'claim')
@@ -1423,7 +1475,7 @@ MUTATIONS = {
     'finding-always-loaded-table': ('units', 'claude-row', 'import-row'),
     'finding-visible-skill': LINE_PARTS + ('already', 'not-false', 'intro'),
     'finding-duplicates-grouped': ('source', 'question', 'hypothetical', 'declined', 'neg', 'contributing',
-                                   'migrator'),
+                                   'migrator', 'quotes'),
     'finding-stale-folder': LINE_PARTS + ('refer',),
     'finding-stale-file': LINE_PARTS,
     'finding-stale-dependency': LINE_PARTS,
