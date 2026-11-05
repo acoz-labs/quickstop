@@ -6,11 +6,9 @@ A practical software delivery workflow you and your agents can make your own.
 Get your project shipshape: agree on the destination, do the work, and check what
 actually arrived.
 
-Shipshape is a guide to adapting working practices, with an optional versioned
-[Codex package candidate](../../plugins/codex/shipshape/README.md). Guide-only adoption remains valid.
-Start with useful gaps in your process; leave the rest alone. The package is not
-yet accepted, published or installable through the accepted native indexes. It is
-publicly discoverable in the catalog and supplies no integration service or credentials.
+Shipshape is a guide to adapting working practices. Start with useful gaps in
+your process; leave the rest alone. It supplies no integration service or
+credentials.
 
 ## Start here
 
@@ -67,24 +65,18 @@ more preparation, evidence and recovery planning.
 Shipshape can help an agent reason about and document a delivery process. It
 cannot provide credentials, independent reviewers, CI, deployment access, or
 enforcement through prose. Name missing capabilities honestly; do not turn them
-into fictional passed checks. Native package installation/runtime acceptance is
-pending; guide readers use whatever tools they have. Package static checks do
-not prove independent execution, native loading or release readiness.
+into fictional passed checks. Guide readers use whatever tools they have.
 
-Use a shared pinned role package in separate author/reviewer environments, not
-copies per repository. Keep existing `.sdlc/config.json` as the local contract
-and preserve stronger rules. No autoadoption or auto-upgrade: record package
-digest, guide, harness/tool and configuration revisions per run. Read-only tasks
-yield proposals only. Fresh-context independent executing review, correction and
-new-head re-review remain mandatory where required; reviewer-written fixes need
-another reviewer. Missing tools, auth, reviewer or sandbox blocks progress.
-The first public package release waits for full integrated issue acceptance.
-Preserve exact revisions and a bounded handoff outside disposable consumer
-checkouts. Offline helper recommendations do not grant execution or release
-authority; the trusted adapter supplies observations and independent evidence.
+Keep an existing `.sdlc/config.json` as the local contract and preserve stronger
+rules. No autoadoption or auto-upgrade: record the guide, tool and configuration
+revisions per run. Read-only tasks yield proposals only. Fresh-context
+independent executing review, correction and new-head re-review remain mandatory
+where required; reviewer-written fixes need another reviewer. Missing tools,
+auth, reviewer or sandbox blocks progress.
 
 Storefront impact: the first fenced starter prompt, summary and proposal-only
-next step remain unchanged; this candidate addition needs no receipt refresh.
+next step remain unchanged, so removing the archived Codex package needs no
+receipt refresh.
 
 ## Where it comes from
 
