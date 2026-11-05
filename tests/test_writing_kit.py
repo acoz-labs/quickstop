@@ -5,7 +5,7 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / 'plugins/claude-code/writing-for-humans'
+PACKAGE = ROOT / 'plugins/writing-for-humans'
 
 
 class WritingKitTests(unittest.TestCase):
@@ -48,5 +48,4 @@ class WritingKitTests(unittest.TestCase):
         catalog = json.loads((ROOT / 'catalog.json').read_text())
         kit = next(p for p in catalog['plugins'] if p['name'] == 'writing-for-humans')
         self.assertEqual(set(kit['targets']), {'claude-code'})
-        self.assertFalse((ROOT / 'plugins/codex/writing-for-humans').exists())
-        self.assertFalse((ROOT / 'plugins/pi/writing-for-humans').exists())
+        self.assertEqual(kit['targets']['claude-code']['path'], 'plugins/writing-for-humans')

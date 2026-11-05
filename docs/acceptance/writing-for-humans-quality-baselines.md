@@ -313,6 +313,8 @@ From the merge of this PR, the suite, runner, graders and keys don't change for 
 | Judge model | `claude-sonnet-5-5`, matched by the runner between calibration and counted runs |
 | Claude Code | 2.1.317, recorded and not matched; a later run on another version says so in its summary |
 
+The runner changed after #189 only to follow the package to `plugins/writing-for-humans` ([#202](https://github.com/acoz-labs/quickstop/issues/202)): its blob is now `7edf1a616a833c8db71235cca9be151df9ee48ba`, and the diff from `f03bee3a` is the default plugin path and its two help strings. The suite tree is unchanged. The runner checks both hashes, so at the new blob it refuses the retained 1.0 results and the 1.0 calibration. The 1.0 record below stays as written: re-summarizing it needs a checkout with the runner at `f03bee3a`, and the next counted quality run needs a fresh calibration. Writing for Humans 1.0.1 changes only the manifest's version and homepage, so these 1.0 measurements still describe its style and skills.
+
 ### Candidate and settings
 
 | | |

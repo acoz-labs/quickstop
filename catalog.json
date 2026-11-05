@@ -23,7 +23,7 @@
       "targets": {
         "claude-code": {
           "format": "claude-plugin",
-          "path": "plugins/claude-code/writing-for-humans",
+          "path": "plugins/writing-for-humans",
           "acceptance": "docs/acceptance/writing-for-humans.md"
         }
       }
