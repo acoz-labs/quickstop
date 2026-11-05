@@ -1,25 +1,25 @@
 {
   "schema": 1,
-  "version": "2026.10.02.1",
+  "version": "2026.11.05.1",
   "files": {
     "AGENTS.md": {
-      "sha256": "760545ff9ff66f12c5f9da3093281657874e7507f77eaa224264c7e5d1b06fae",
+      "sha256": "35b2fae1c11fa938dbe908bb8d09e3b260c16920c887fe52120df9d92bd9b691",
       "mode": "644"
     },
     "CONTRIBUTING.md": {
-      "sha256": "d1f20f89357d62afcfe6e72b089a2358db911c7137d79e29618d236e347fc946",
+      "sha256": "dbffde26671016bb3b9a4719dd7943fcec3a8eacc0b74f80ac15323a84b42fa6",
       "mode": "644"
     },
     "SDLC_VERSION": {
-      "sha256": "083192fff4753ff755d861a170281df2bbcc301daa8368a97665f4a99cbeb92f",
+      "sha256": "ae61f6a64e1c666be964c2a9bb884a346031ba4415a5055739507df0c1fb72ac",
       "mode": "644"
     },
     ".github/ISSUE_TEMPLATE/feature.yml": {
-      "sha256": "6545e4f6d1783d70cdcff24e3863a627940c669a8ef1e5f0049cf466db4fdd12",
+      "sha256": "df9d2f4de75f4814cd73a5adb5ded1f9218840893b0d1b20c50e0a55cdd18678",
       "mode": "644"
     },
     "bin/sdlc": {
-      "sha256": "17028d54de61338226d13a9dca864cfded072f60fc88a1fff5c883836c96b137",
+      "sha256": "c1796bc6a6b1501d9de930be146b031a0d9e627303063d9ee3c88c9abdb1040b",
       "mode": "755"
     },
     "bin/sdlc-evidence": {
@@ -31,7 +31,7 @@
       "mode": "755"
     },
     "bin/validate-solution-plans": {
-      "sha256": "dd6018b07b61c3d56d386e9263df82418ae82cdfe621384cff26372e5ad86b8e",
+      "sha256": "00b68a056f8495cb0bc165dfce6efffb012fea78ae98c22e2ab3cfdb2ab41055",
       "mode": "755"
     },
     "bin/dependency-merge-steward": {
@@ -50,44 +50,32 @@
       "sha256": "f596fed57064280454ab3a838f2d847ac05b80b9413030d22d1f6de4c1b9fb36",
       "mode": "644"
     },
+    "tests/test_sdlc_plans.py": {
+      "sha256": "994fa87c1a48815159757194a699ef866f68165edca6d3aa02619898c68a7ed1",
+      "mode": "644"
+    },
     "docs/operations/sdlc.md": {
-      "sha256": "d727fd2b3a440aaa049ae09126793382a983fbb8cfb6ebf467044aee2b9ff0c7",
+      "sha256": "ad6ac821644e5af7705ae45e40941638c0fd734cf194bca7c82366ef3946a2ef",
       "mode": "644"
     },
     "docs/operations/repo-standard.md": {
-      "sha256": "c4d2e100bfdad625b8d9f244a4fc361034aec8e51ef4b12415fa8ae8270dd12e",
+      "sha256": "bee619c0e2b59a55a4229dba7473eb23bec54deaf3e0a2ba415b3d77ee34313e",
       "mode": "644"
     },
     "docs/operations/local-verification.md": {
       "sha256": "578c7190fbdd2778235e4ee761cf73624f6826982e927e82ce68726984693662",
       "mode": "644"
     },
-    "docs/plans/README.md": {
-      "sha256": "ca03bca2514b5df8e3529fa5d550017d4ccf9844ec3277c79fb2200ba59a1ff1",
+    "docs/changes/README.md": {
+      "sha256": "01f7517703d4df0823465e5a5ffca4fb7c746285686f49a6fc32773716e03749",
       "mode": "644"
     },
-    "docs/plans/_template/README.md": {
-      "sha256": "c6e402e84b96e368a71f3a5099baf341afeca8779bbd5f1f22c56544966f705f",
-      "mode": "644"
-    },
-    "docs/discovery/README.md": {
-      "sha256": "dac505278bcdf6d285deacc7aefbd402601f6bc8debf3a15d978fcf7e856c377",
-      "mode": "644"
-    },
-    "docs/discovery/_template/README.md": {
-      "sha256": "656d08067a647138fa0fb2f8a2fd41f022a4982eb5ae33d8951d1af84de182fb",
+    "docs/changes/_template/plan.md": {
+      "sha256": "c662dd10b9bfc6813c5331b7ae63a16f817aed365102a016114dc536ec4d8588",
       "mode": "644"
     },
     ".github/PULL_REQUEST_TEMPLATE.md": {
-      "sha256": "05a1a4d9a7e48083eb407751ef37d5ad7e5b15a8cd30bafe0a81ee2f58a04235",
-      "mode": "644"
-    },
-    ".github/PULL_REQUEST_TEMPLATE/product-discovery.md": {
-      "sha256": "97e547ce69448623845a5d6665deea491c479a7041dde40a5e80d4fc3ad1c79f",
-      "mode": "644"
-    },
-    ".github/PULL_REQUEST_TEMPLATE/solution-design.md": {
-      "sha256": "2e0c7ecddd196ae3184500e0a3c896fcdb24d0cd268346cc847273e6f65f8017",
+      "sha256": "bc085ca40cfef61266af18b0387577e2ea572bffc5e3307db81d8e7b72aa5248",
       "mode": "644"
     },
     ".github/workflows/sdlc.yml": {

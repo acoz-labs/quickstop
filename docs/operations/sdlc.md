@@ -1,6 +1,6 @@
 # Software delivery
 
-Standard version: `2026.10.02.1`.
+Standard version: `2026.11.05.1`.
 
 GitHub Issues, the Project board, and in-repository documents are the
 coordination layer. Agent chat and local notes do not replace an issue, a
@@ -63,21 +63,46 @@ agent authority, policy and configuration changes are not ordinary prose. Use
 code review for executable changes and standards maintenance for shared policy.
 Mixed code/documentation changes follow the code workflow.
 
+## Plans
+
+A plan is required before code when any of these hold:
+
+- a new feature or user-visible behaviour;
+- a security, authentication or permission change;
+- a release, storage or data-format change;
+- a paid eval or gate;
+- more than about three non-test source files change.
+
+A plan is not required for documentation-only changes, single-file fixes,
+dependency bumps or publishing an approved post. The maintainer who prepares
+the issue records `plan: required` or `plan: not required` in the issue.
+
+A plan is `docs/changes/<issue>-<slug>/plan.md`, started from
+`docs/changes/_template/plan.md`; `docs/changes/README.md` explains the folder.
+The author commits `plan.md` alone as the first commit on the PR branch. An
+independent maintainer reviews that commit before code is written. This plan
+review is counted separately from code review rounds. When the work departs
+from the plan, the author updates `plan.md` in the same commit. Code review
+checks the diff against `plan.md`. On ship, the PR updates the durable docs
+(architecture, operations, decisions) from what shipped. The folder stays in
+the repository afterwards.
+
 ## Product code
 
 1. Maintainer prepares a bounded issue: outcome, acceptance criteria, constraints,
    validation and release expectations, and any explicit stopping point.
+   It records whether a plan is required (see Plans above).
 2. Contributor implements from an isolated branch and tests meaningful behavior.
-   Use a plan only when risk or design complexity justifies one. Maintainer owns
-   the plan, using contributor findings. A separate planning PR and six-file pack
-   are not prerequisites for Ready or implementation.
+   When a plan is required, its reviewed `plan.md` commit comes first on the same
+   branch; no separate planning PR is needed.
 3. Contributor opens a PR linking the issue and, when ready, requests the
    designated independent maintainer through GitHub's native PR review request.
    Describe behavior, validation,
-   documentation impact and rollout/rollback when relevant. Reconcile against
-   the issue and any actual plan; explain material deviations. Promote durable
-   knowledge and retire completed temporary plans.
-4. Maintainer reviews the current code and specification independently. A
+   documentation impact and rollout/rollback when relevant. Link the change
+   folder when there is one. Reconcile against the issue and the plan; explain
+   material deviations. Promote durable knowledge into permanent docs.
+4. Maintainer reviews the current code and specification independently,
+   checking the diff against `plan.md` when there is one. A
    credential switch alone is not a review. Record findings and resolutions.
    Contributors address findings in the same PR and re-request review after
    revisions. Changes after approval require review of the new head. Required repository
@@ -250,7 +275,9 @@ roles and no fallback to an unintended account.
 Historical approvals, exceptions and releases remain evidence. This standard
 supersedes prior mandatory owner gates and routine engineering self-review for
 new work. Version `2026.10.02.1` keeps that delegation, names the only owner
-escalations, and requires independent proof of the real artifact. Existing PRs
+escalations, and requires independent proof of the real artifact. Version
+`2026.11.05.1` replaces optional, retired plans with reviewed plans kept in
+`docs/changes/`; plans already in `docs/plans/` stay in place. Existing PRs
 retain real authorship and receive an eligible independent review; never
 rewrite attribution. Preserve open issue/PR links and acceptance
 records while transitioning. A historical exception is not authority for a new

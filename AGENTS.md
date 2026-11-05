@@ -23,7 +23,8 @@ Follow `docs/operations/sdlc.md` for the shared delivery contract and
   Optional Cursor pstack skills may structure that proof where already installed.
 - Resolve implementation, design, and acceptance findings internally to the spec.
 - Documentation-only work follows write, validate, publish. Code uses a bounded
-  issue and PR. Plans are optional and proportional, not a Ready prerequisite.
+  issue and PR. Non-trivial code commits a reviewed `plan.md` first under
+  `docs/changes/`, as `docs/operations/sdlc.md` defines.
 - SDLC improvements update the template and every active repository in one
   maintenance operation, without pilot stages or deferred adoption waves.
 - Use isolated worktrees and clean up completed task workspaces and temporary

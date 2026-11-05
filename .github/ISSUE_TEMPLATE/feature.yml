@@ -1,5 +1,5 @@
 name: Feature
-description: Define an executable outcome without a mandatory planning ceremony.
+description: Define an executable outcome; non-trivial changes get a reviewed plan.
 title: ""
 labels: ["enhancement"]
 body:
@@ -21,7 +21,7 @@ body:
     id: constraints
     attributes:
       label: Constraints and risks
-      description: Include real dependencies and an optional plan when complexity warrants one.
+      description: Include real dependencies, and record plan: required or plan: not required (docs/operations/sdlc.md).
   - type: textarea
     id: validation
     attributes:

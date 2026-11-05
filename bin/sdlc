@@ -10,19 +10,16 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
-VERSION = "2026.10.02.1"
+VERSION = "2026.11.05.1"
 MANIFEST = ".sdlc/managed.json"
 CONFIG = ".sdlc/config.json"
 MANAGED = [
     "AGENTS.md", "CONTRIBUTING.md", "SDLC_VERSION",
     ".github/ISSUE_TEMPLATE/feature.yml",
-    "bin/sdlc", "bin/sdlc-evidence", "bin/sdlc-release", "bin/validate-solution-plans", "bin/dependency-merge-steward", "tests/test_sdlc.py", "tests/test_sdlc_evidence.py", "tests/test_sdlc_release.py",
+    "bin/sdlc", "bin/sdlc-evidence", "bin/sdlc-release", "bin/validate-solution-plans", "bin/dependency-merge-steward", "tests/test_sdlc.py", "tests/test_sdlc_evidence.py", "tests/test_sdlc_release.py", "tests/test_sdlc_plans.py",
     "docs/operations/sdlc.md", "docs/operations/repo-standard.md", "docs/operations/local-verification.md",
-    "docs/plans/README.md", "docs/plans/_template/README.md",
-    "docs/discovery/README.md", "docs/discovery/_template/README.md",
+    "docs/changes/README.md", "docs/changes/_template/plan.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
-    ".github/PULL_REQUEST_TEMPLATE/product-discovery.md",
-    ".github/PULL_REQUEST_TEMPLATE/solution-design.md",
     ".github/workflows/sdlc.yml", ".github/workflows/main-branch-audit.yml",
 ]
 

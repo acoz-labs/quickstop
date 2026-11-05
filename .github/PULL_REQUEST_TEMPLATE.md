@@ -12,7 +12,8 @@ A green check or a successful compile is supporting evidence, not the verdict.
 
 ## Documentation and specification
 
-Documentation updated (or why unnecessary); relevant plan only if one exists.
+Documentation updated (or why unnecessary). Link the `docs/changes/` folder when
+the issue required a plan, and note any departure from `plan.md`.
 Explain any material deviation from the issue's acceptance criteria.
 
 ## Delivery
