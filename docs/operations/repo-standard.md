@@ -1,6 +1,6 @@
 # Managed repository standard
 
-SDLC template version: `2026.11.05.1`.
+SDLC template version: `2026.11.05.2`.
 
 The template owns the files enumerated in `.sdlc/managed.json`. Their hashes
 identify the installed content. `bin/sdlc check` verifies them.
@@ -11,6 +11,16 @@ only an absent file or the exact prior manifest version plus newline. Inspect an
 reconcile other content explicitly before applying; local edits are not discarded.
 Application configuration lives in `.sdlc/config.json`, outside the managed-file set.
 Product instructions, code, tests and deployment commands remain repo-specific.
+
+The template also ships repo-owned starters from `.sdlc/starters/`: `CLAUDE.md`
+(imports `AGENTS.md` and `docs/repository.md`), `docs/repository.md` (Commands
+with healthy output, Conventions, Known mistakes), `REVIEW.md` (passes,
+severity, the cap on lows, what not to report) and `.claude/settings.json`
+(exact allow rules for `bin/ci` and `bin/sdlc check` only). `apply` adds a
+starter only where nothing exists at its path and never overwrites one. They
+are not in the manifest, so `bin/sdlc check` ignores them and each repository
+edits its own. After a cascade the template's `bin/check-starters --root PATH
+--ref origin/main` confirms each target's copies still hold the required parts.
 
 Use `bin/sdlc apply --source PATH --target PATH` to update an already managed
 checkout. Initial adoption requires `--adopt`. Edited managed files cause a

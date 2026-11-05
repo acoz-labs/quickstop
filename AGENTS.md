@@ -36,6 +36,8 @@ Follow `docs/operations/sdlc.md` for the shared delivery contract and
 - Keep personal identities and machine/account configuration outside product repos.
 - Use existing application patterns. Test meaningful behavior and update durable
   docs. Do not replace repository-specific checks with conformity checks.
+- Keep `CLAUDE.md` under a page. Repository truth (commands, conventions,
+  known mistakes) goes in `docs/repository.md`; review follows `REVIEW.md`.
 
 ## Validation
 

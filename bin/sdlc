@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
-VERSION = "2026.11.05.1"
+VERSION = "2026.11.05.2"
 MANIFEST = ".sdlc/managed.json"
 CONFIG = ".sdlc/config.json"
 MANAGED = [
@@ -22,6 +22,10 @@ MANAGED = [
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/workflows/sdlc.yml", ".github/workflows/main-branch-audit.yml",
 ]
+# Repo-owned starters: copied from the source's STARTER_ROOT only where the
+# target has nothing at that path, never hashed and never overwritten.
+STARTER_ROOT = ".sdlc/starters"
+STARTERS = ["CLAUDE.md", "REVIEW.md", ".claude/settings.json", "docs/repository.md"]
 
 class Failure(Exception):
     pass
@@ -147,12 +151,19 @@ def apply(source, target, adopt=False):
         marker = path(target, "SDLC_VERSION")
         if marker.exists() and (not marker.is_file() or marker.read_bytes() != (prior["version"] + "\n").encode()):
             raise Failure("Existing version marker requires explicit reconciliation before managed ownership")
-    entries = set(m["files"]) | set(prior["files"] if prior else ()) | {MANIFEST}
+    starters = [n for n in STARTERS if path(source, STARTER_ROOT + "/" + n).is_file()
+                and not path(target, n).exists()]
+    entries = set(m["files"]) | set(prior["files"] if prior else ()) | {MANIFEST} | set(starters)
     # Validate every destination before any mutation, including ancestor redirects.
     for name in entries:
         p = path(target, name)
         if p.exists() and not p.is_file():
             raise Failure(f"Destination is not a regular file: {name}")
+        for parent in p.parents:
+            if parent == target:
+                break
+            if parent.exists() and not parent.is_dir():
+                raise Failure(f"Destination parent is not a directory: {name}")
     lock = Path(run("git", "rev-parse", "--git-path", "sdlc-apply.lock", cwd=target).strip())
     if not lock.is_absolute():
         lock = target / lock
@@ -163,31 +174,53 @@ def apply(source, target, adopt=False):
     os.close(fd)
     backup = {n: ((target / n).read_bytes(), (target / n).stat().st_mode & 0o777)
               if (target / n).is_file() else None for n in entries}
+    created = []
+    keep_lock = False
+    def write(name, data, mode=None):
+        p = path(target, name)
+        created.extend(reversed([d for d in p.parents if target in d.parents and not d.exists()]))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+        if mode is not None:
+            p.chmod(mode)
     try:
         # An exception rolls back this application. Abrupt termination retains the
         # lock and partial state for inspection rather than claiming conformity.
         for name, spec in m["files"].items():
-            p = path(target, name)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(path(source, name).read_bytes())
-            p.chmod(int(spec["mode"], 8))
+            write(name, path(source, name).read_bytes(), int(spec["mode"], 8))
         for name in set(prior["files"] if prior else ()) - set(m["files"]):
             path(target, name).unlink()
-        p = path(target, MANIFEST)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(path(source, MANIFEST).read_bytes())
-    except BaseException:
-        for name, old in backup.items():
+        for name in starters:
+            write(name, path(source, STARTER_ROOT + "/" + name).read_bytes())
+        write(MANIFEST, path(source, MANIFEST).read_bytes())
+    except BaseException as error:
+        # Restore every entry even if one fails; an incomplete rollback keeps the
+        # lock so the next apply refuses until someone inspects the target.
+        problems = []
+        for name, old in sorted(backup.items()):
             p = target / name
-            if old is None:
-                p.unlink(missing_ok=True)
-            else:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_bytes(old[0]); p.chmod(old[1])
+            try:
+                if old is None:
+                    p.unlink(missing_ok=True)
+                else:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_bytes(old[0]); p.chmod(old[1])
+            except OSError as e:
+                problems.append(f"{name}: {e}")
+        for d in reversed(created):
+            try:
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+            except OSError as e:
+                problems.append(f"{d.relative_to(target)}: {e}")
+        if problems:
+            keep_lock = True
+            raise Failure("Rollback incomplete; lock kept for inspection: " + "; ".join(problems)) from error
         raise
     finally:
-        lock.unlink()
-    print(json.dumps({"version": m["version"], "target": str(target), "applied": True}))
+        if not keep_lock:
+            lock.unlink()
+    print(json.dumps({"version": m["version"], "target": str(target), "applied": True, "starters": starters}))
 
 def classify(names):
     if not names:
