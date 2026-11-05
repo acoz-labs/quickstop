@@ -131,16 +131,16 @@ release tag):
 
 1. Plan PR: this file alone, draft PR, plan review. No code until the plan
    review has nothing above low.
-2. Archive tag first. Create the annotated tag
-   `archive/shipshape-codex-2026-11-05` on `f4900063106e04f36e0360eb152c61941ef32f9b`
-   (the main commit that still has `plugins/codex/shipshape`) and push that
-   tag alone, before any commit removes the package. Confirm by tree hash:
-   `git ls-remote origin 'refs/tags/archive/shipshape-codex-2026-11-05*'`
-   shows the peeled `^{}` line at `f4900063106e04f36e0360eb152c61941ef32f9b`,
-   and `git rev-parse <tag>^{}:plugins/codex/shipshape` equals
-   `git rev-parse f490006:plugins/codex/shipshape`, whose `ls-tree -r` lists
-   10 files. If the pre-push hook refuses a tag push, stop and tell the
-   lead.
+2. Archive tag first. The reviewer (Batcomputer67) creates the annotated
+   tag `archive/shipshape-codex-2026-11-05` on
+   `f4900063106e04f36e0360eb152c61941ef32f9b` (the main commit that still has
+   `plugins/codex/shipshape`) and pushes it, before any commit removes the
+   package; the implementer's pre-push hook refuses tag pushes. I then
+   confirm it by tree hash: `git ls-remote origin
+   'refs/tags/archive/shipshape-codex-2026-11-05*'` shows the peeled `^{}`
+   line at `f4900063106e04f36e0360eb152c61941ef32f9b`, and `git rev-parse
+   <tag>^{}:plugins/codex/shipshape` equals `git rev-parse
+   f490006:plugins/codex/shipshape`, whose `ls-tree -r` lists 10 files.
 3. Shipshape Codex package removal: package, catalog entry, acceptance doc,
    test, archive note, workflow sentences, regenerated catalog table. The
    current validator still passes once the Codex entry is gone; the Codex
@@ -231,8 +231,8 @@ The scratch directories are deleted by exact path at the end.
   excluding `docs/archive/`) returns only the policy line, the archive note
   and justified hits, listed in the PR (criterion 2).
 - The #172 regression suite (`bin/writing-for-humans-eval`) runs once on the
-  candidate package at its new path, with `--max-cost-usd 1` (the 1.0.0 run
-  cost $0.20). It runs because it covers exactly what a path move can break:
+  candidate package at its new path, with `--model claude-sonnet-5-5` (the
+  1.0.0 run's model) and `--max-cost-usd 1` (the 1.0.0 run cost $0.20). It runs because it covers exactly what a path move can break:
   install from a marketplace, style selection and the user-only audit
   contract. The quality gate does not run again: 1.0.1's style and skill
   bytes equal 1.0.0's.
@@ -265,15 +265,20 @@ path, these are the checks a move could break, and each runs:
   `--setting-sources project,local` and `--strict-mcp-config`, asking for a
   task that makes the `writing-style` skill read a package-local reference.
   The trace must show the Read of that reference resolving under the new
-  install path. Capped with `--max-budget-usd 0.5`.
+  install path. Capped with `--max-budget-usd 0.5`, with
+  `DISABLE_AUTOUPDATER=1` and the same before/after hashes of the real
+  config files, and run before the temporary install directory is deleted.
 - Recovery to the previous version is criterion 7 below.
 
-Criterion 5 before review uses the same steps against the candidate: a
-local `file://` git mirror of this clone serves as the marketplace, with a
-temporary marketplace file whose Claudit entry is the published one and whose
-writing-for-humans entry is a git-subdir source at the pushed candidate
-commit, path `plugins/writing-for-humans`. The plugins' sources fetch from
-GitHub.
+Criterion 5 before review uses the same steps against the candidate. The
+marketplace is a scratch commit in a `file://` git mirror, not a local
+directory marketplace: a scratch clone of the pushed candidate commit gets
+one local commit changing only `.claude-plugin/marketplace.json`, so its
+Claudit entry stays the published one and its writing-for-humans entry is
+1.0.1 as a git-subdir source at the candidate commit, path
+`plugins/writing-for-humans`. That clone is added as a `file://` URL under
+the name `quickstop`. The plugins' sources fetch from GitHub, and the scratch
+commit is never pushed.
 
 ### After the tag and the pointer exist
 
