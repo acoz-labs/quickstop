@@ -38,22 +38,22 @@
     {
       "name": "writing-for-humans",
       "harness": "claude-code",
-      "commit": "5581a159e10d523c68a514fec0237c46a44ac988",
-      "sha256": "f2df06a1cef1e5073e3adab9f3abf8cc8cddc063826de143b07eb88306004e35",
+      "commit": "84c6a3c5c2e07e7c6f063fe6f9fb30eff6394cf4",
+      "sha256": "02b206d87dc28107643f98745e16484a93003931ecd61586dc1d0cc8bc1d1b6a",
       "target": {
         "format": "claude-plugin",
-        "path": "plugins/claude-code/writing-for-humans",
+        "path": "plugins/writing-for-humans",
         "acceptance": "docs/acceptance/writing-for-humans.md"
       },
       "manifest": {
         "name": "writing-for-humans",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "description": "An output style that makes what Claude writes easy to take in at reading speed: the point, the ask and the stakes first, for a reader who wasn't in the session.",
         "author": {
           "name": "quickstop",
           "url": "https://github.com/acoz-labs/quickstop"
         },
-        "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/claude-code/writing-for-humans",
+        "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/writing-for-humans",
         "repository": "https://github.com/acoz-labs/quickstop",
         "license": "MIT",
         "keywords": [
@@ -66,9 +66,9 @@
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 189,
-        "artifact": "sha256:1ccfd3202ee44f586c7cf86ad120d38cad36cdbf24b73b19552ac39051d9d90c",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/189#issuecomment-6615336599"
+        "issue": 202,
+        "artifact": "sha256:e247d1ab46c2a25f0a7380862742f967ec7f5ba2366821fc25edeb8dd87a34ea",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/202#issuecomment-6665407260"
       }
     }
   ]
