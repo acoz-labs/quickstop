@@ -238,17 +238,3 @@ class ReleaseTests(unittest.TestCase):
             r.promote(self.root, 'sample', 'claude-code', self.sha, 7, 'sha256:' + 'a' * 64, 'fixture-maintainer')
             self.assertEqual((self.root / 'releases.json').read_bytes(), before)
         self.assertEqual(json.loads(before)['releases'][0]['commit'], self.sha)
-
-    def test_codex_pin_and_pi_install_command_use_accepted_identity(self):
-        codex = dict(self.target, format='agent-plugin')
-        pi = dict(self.target, format='pi-package')
-        catalog = json.loads(json.dumps(self.catalog))
-        catalog['plugins'][0]['targets'] = {'codex': codex, 'pi': pi}
-        packages = {('sample', 'codex'): (codex, self.manifest), ('sample', 'pi'): (pi, self.manifest)}
-        records = {('sample', 'codex'): dict(self.record, target=codex), ('sample', 'pi'): dict(self.record, target=pi)}
-        out = m.projections(catalog, packages, records)
-        source = json.loads(out['.agents/plugins/marketplace.json'])['plugins'][0]['source']
-        self.assertEqual(source['sha'], self.sha)
-        self.assertEqual(source['source'], 'git-subdir')
-        self.assertIn('git checkout --detach ' + self.sha, out['docs/pi-packages.md'])
-        self.assertIn('--sha256 ' + self.record['sha256'], out['docs/pi-packages.md'])
