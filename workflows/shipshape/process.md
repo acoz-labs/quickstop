@@ -1,3 +1,5 @@
+> **Retired:** this guide is kept for reference only; see the [retirement note](README.md).
+
 # The process
 
 [Shipshape](README.md) describes outcomes to achieve, not a fixed sequence of

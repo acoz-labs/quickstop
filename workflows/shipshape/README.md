@@ -1,3 +1,7 @@
+> **Retired.** Shipshape was retired on 2026-11-05 and superseded by this
+> repository's [software delivery standard](../../docs/operations/sdlc.md).
+> This guide is kept for reference only.
+
 # Shipshape
 
 **From first idea to ready to ship.**

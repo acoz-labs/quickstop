@@ -1,7 +1,8 @@
 # Quickstop repository
 
 Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
-[Shipshape](../workflows/shipshape/README.md) is its first workflow. Claudit and the
+Its first workflow, [Shipshape](../workflows/shipshape/README.md), was retired on
+2026-11-05 and is kept for reference only. Claudit and the
 Writing for Humans kit are Claude Code plugins at `plugins/<name>/`; Quickstop supports
 no other agent tool. Their advertised versions and publication
 state are recorded in the [generated catalog](catalog.md). `catalog.json`
