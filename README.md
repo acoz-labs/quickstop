@@ -8,24 +8,18 @@ Quickstop brings together two kinds of open-source tools from
 
 | On the shelf | What you get | Get started |
 | --- | --- | --- |
-| **Plugins** | Installable capabilities for the agents they explicitly support. | [Browse plugins](docs/catalog.md) |
+| **Plugins** | Installable capabilities for Claude Code. | [Browse plugins](docs/catalog.md) |
 | **Workflows** | Practical guides you and your agent can adapt to your project. | [Read and adapt](workflows/README.md) |
 
 Visit the [Quickstop storefront](https://acoz.dev/projects/quickstop/) for a look around.
 
 ## Plugins
 
-[Writing for Humans](plugins/claude-code/writing-for-humans) provides a selectable
+Quickstop is a Claude Code plugin marketplace.
+[Writing for Humans](plugins/writing-for-humans) provides a selectable
 writing style and two skills for clearer human-facing communication.
 [Claudit](plugins/claudit) audits and improves Claude Code configuration.
-Both currently support **Claude Code only**. The [plugin catalog](docs/catalog.md)
-records advertised versions and supported harnesses.
-
-A plugin can support one harness or several. Support is explicit; parity is not
-required. Quickstop has native distribution patterns for Claude Code, Codex and Pi,
-but that does not make every plugin compatible with all three.
-
-### Claude Code
+The [plugin catalog](docs/catalog.md) records advertised versions.
 
 Inside Claude Code:
 
@@ -44,23 +38,6 @@ For local plugin development:
 git clone https://github.com/acoz-labs/quickstop.git
 claude --plugin-dir /path/to/quickstop/plugins/claudit
 ```
-
-### Codex
-
-Quickstop provides a native Codex marketplace index. It currently contains no
-plugins because none advertise Codex support yet.
-
-```sh
-codex plugin marketplace add acoz-labs/quickstop
-```
-
-This registers the marketplace. Use the harness's plugin browser to install a
-listed package when one is available.
-
-### Pi
-
-Pi installs individual packages. The [Pi package list](docs/pi-packages.md)
-contains generated installation instructions; no Pi packages are advertised yet.
 
 ## Workflows
 

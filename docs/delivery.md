@@ -23,14 +23,13 @@ Run repository checks in a clean full-history checkout at the same candidate SHA
 release-lock verification needs the pinned historical Git objects, which a source
 archive intentionally does not contain. Compare each extracted package digest with
 the candidate checkout and exercise the extracted retained package bytes, not a
-freshly rebuilt substitute. For every advertised target in the release,
-follow its `catalog.json` acceptance procedure in an isolated native harness.
+freshly rebuilt substitute. For every plugin in the release,
+follow its `catalog.json` acceptance procedure in an isolated Claude Code setup.
 Catalog/fixture checks cannot substitute for installing and exercising actual
-packages. Record harness version and target package digest independently:
+packages. Record the Claude Code version and package digest independently:
 
-- `plugin-installation`: each advertised target installs from the retained bytes
-  and discovers its declared components. Unsupported targets are absent from
-  native indexes; no host-compatibility fallback establishes product support.
+- `plugin-installation`: each released plugin installs from the retained bytes
+  and discovers its declared components.
 - `assigned-plugin-scenarios`: actual issue criteria and target-specific workflows
   from its acceptance document; record synthetic inputs and observed outcomes.
 - `consumer-state-boundaries`: compare consumer files and state before and after;
@@ -38,14 +37,10 @@ packages. Record harness version and target package digest independently:
   personal configuration or externally sent test PRs without scoped authorization.
 
 For Claudit, use [its Claude Code procedure](acceptance/claudit.md). For Writing for Humans, use [its conversion and bounded follow-up procedures](acceptance/writing-for-humans.md).
-Both current plugin products target Claude Code; no Codex or Pi runtime acceptance
-is required for them. Pi acceptance includes dependency and extension behavior as well
-as its linked local-package lifecycle.
-For separate packages, acceptance and version changes can be scoped to affected
-targets; retained evidence must identify unchanged targets rather than silently
-reusing a verdict for changed bytes. A shared-package change affects every target
-receiving that root. Release reports must identify results per target even when
-they roll up under the shared SDLC criterion identifiers.
+Acceptance and version changes are scoped to the affected plugins; retained
+evidence must identify unchanged plugins rather than silently reusing a verdict
+for changed bytes. Release reports identify results per plugin even when they
+roll up under the shared SDLC criterion identifiers.
 
 Supply the actual observations and openable sanitized evidence for these criteria
 and `issue-criteria`; run the independent acceptance receipt and release gate.
@@ -54,20 +49,18 @@ A missing host or unavailable scenario is a gap to resolve, not a passing result
 ## Publication and verification
 
 Candidate source lives in `catalog.json`; advertised packages are selected by
-`releases.json`. Claude and Codex install commit-pinned subdirectories. Pi's
-published commands create a separate detached checkout at the accepted commit,
-verify the package digest and install that local directory. No candidate becomes
+`releases.json`. Claude Code installs commit-pinned subdirectories. No candidate becomes
 advertised merely because its source or manifest is merged.
 
 After exact-candidate acceptance, use the existing SDLC gate through:
 
 ```sh
-bin/marketplace-release promote --name PLUGIN --harness HARNESS \
+bin/marketplace-release promote --name PLUGIN --harness claude-code \
   --commit ACCEPTED_SHA --issue ISSUE --artifact sha256:ARCHIVE_DIGEST \
   --expected-actor MAINTAINER
 ```
 
-Repeat for each accepted target. This prepares the release lock and generated
+Repeat for each accepted plugin. This prepares the release lock and generated
 indexes; it does not publish them or replace independent review. The command
 requires live independently authenticated acceptance for the nominated candidate.
 Inspect the package digest, manifest snapshot, source commit and acceptance
@@ -100,9 +93,9 @@ consumer environment; record:
 
 - `published-byte-identity`: downloaded archive SHA-256 equals the accepted digest
   and the release resolves to the nominated commit.
-- `marketplace-installation`: each affected native marketplace loads the same
-  accepted target package, installs its intended version and passes relevant
-  smoke scenarios. No unsupported target appears in its native listing.
+- `marketplace-installation`: the published marketplace loads the same
+  accepted package, installs its intended version and passes relevant
+  smoke scenarios.
 - `recovery-recorded`: previous source/version and recovery steps are retained and
   verified; an initial release is stated explicitly when no predecessor exists.
 

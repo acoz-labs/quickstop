@@ -69,3 +69,8 @@ indexes and adapter checks replace the earlier assumption that every package is
 a Claude Code plugin. Claudit remains Claude Code-only at its existing path and
 version. See [the current contract](marketplace.md). This establishes marketplace
 patterns, not new Claudit behavior or migration of other projects.
+
+[Issue 202](https://github.com/acoz-labs/quickstop/issues/202) later narrowed
+Quickstop to Claude Code only, with every plugin at `plugins/<name>/`, because
+no plugin for another tool could be tested; see the
+[archive note](archive/shipshape-codex.md).
