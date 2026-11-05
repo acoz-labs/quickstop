@@ -19,10 +19,22 @@ at 4.2.0.
 Flattening would be a bigger change, not a smaller one. The release-history
 check keys every published commit, version and digest by `(name, harness)`,
 and it reads the catalog at each released commit, so historical locks would
-need a compatibility reader. Keeping the shape means the existing Claudit
-4.2.0 record and the Writing for Humans 1.0.0 record stay byte-identical and
-keep validating as they are (both pin the catalog at their own commit, so
-the 1.0.0 record still names the old path and still digests correctly).
+need a compatibility reader. Keeping the shape means both existing records
+keep validating as they are: each pins the catalog and package at its own
+commit, so the 1.0.0 record still names the old path and still digests
+correctly. No lock in history holds a `codex` or `pi` record, so the history
+check is unaffected by the narrowing.
+
+Which PR touches which record:
+
+- Plugin PR: `releases.json` does not change; the Claudit 4.2.0 and Writing
+  for Humans 1.0.0 records stay byte-identical.
+- Pointer PR: the Claudit record stays byte-identical. The Writing for Humans
+  1.0.0 record is replaced by the 1.0.1 record, because the lock holds one
+  record per name and harness and `promote` swaps it
+  (`bin/marketplace-release`). The 1.0.0 record remains in history, which is
+  what rollback restores.
+
 `bin/marketplace-release promote` keeps its `--harness` flag.
 
 ## Files that change
@@ -56,9 +68,12 @@ This PR (the plugin PR, `Refs #202`):
 - Eval runners: the default plugin path and `--plugin` help text in
   `bin/writing-for-humans-eval` and `bin/writing-for-humans-quality-eval`.
   The frozen suite directory is untouched. The quality runner's blob changes
-  from `f03bee3a` only by that path; the quality-baselines document gets a
-  line recording the new blob and that the diff is the path alone, so the
-  1.0 gate record stays readable.
+  from `f03bee3a` only by that path. The quality-baselines document gets a
+  note saying so, with the new blob, and what follows from it: the runner
+  at the new blob refuses the retained 1.0 results and the 1.0 calibration,
+  which are tied to `f03bee3a`. The 1.0 record stays readable as written;
+  re-summarizing it needs a checkout at the old blob, and the next counted
+  quality run needs a fresh calibration.
 - Tests:
   - `tests/test_marketplace.py`: delete the Codex-only, Pi-only, shared
     two-tool package, portable-schema, overlay and Codex resource-type
@@ -119,19 +134,27 @@ release tag):
 2. Archive tag first. Create the annotated tag
    `archive/shipshape-codex-2026-11-05` on `f4900063106e04f36e0360eb152c61941ef32f9b`
    (the main commit that still has `plugins/codex/shipshape`) and push that
-   tag alone, before any commit removes the package. Confirm with
-   `git ls-remote` and `git ls-tree -r <tag> plugins/codex/shipshape`. If the
-   pre-push hook refuses a tag push, stop and tell the lead.
-3. Validator narrowing with its tests (still passes on the current tree,
-   since Shipshape's Codex entry goes in the same commit as its package).
-4. Shipshape Codex package removal: package, catalog entry, acceptance doc,
-   test, archive note, workflow sentences, retired generated outputs,
-   regenerated catalog table.
-5. Writing for Humans move and 1.0.1 bump, runner paths, test paths.
+   tag alone, before any commit removes the package. Confirm by tree hash:
+   `git ls-remote origin 'refs/tags/archive/shipshape-codex-2026-11-05*'`
+   shows the peeled `^{}` line at `f4900063106e04f36e0360eb152c61941ef32f9b`,
+   and `git rev-parse <tag>^{}:plugins/codex/shipshape` equals
+   `git rev-parse f490006:plugins/codex/shipshape`, whose `ls-tree -r` lists
+   10 files. If the pre-push hook refuses a tag push, stop and tell the
+   lead.
+3. Shipshape Codex package removal: package, catalog entry, acceptance doc,
+   test, archive note, workflow sentences, regenerated catalog table. The
+   current validator still passes once the Codex entry is gone; the Codex
+   index was already empty.
+4. Validator narrowing with its tests, removal of the retired generated
+   outputs, regenerated catalog table. This comes after step 3 because the
+   narrowed validator rejects Shipshape's `codex` target.
+5. Writing for Humans move and 1.0.1 bump, runner paths, test paths, the
+   quality-baselines note.
 6. Docs sweep and the grep review.
 7. `bin/ci`, `bin/check-marketplace --base origin/main`, `claude plugin
-   validate` on both packages, candidate install (Proof, part 1). Simplify,
-   mark the PR ready, request review from Batcomputer67, tell the lead.
+   validate` on both packages, the regression suite and candidate install
+   checks (Proof, before review). Simplify, mark the PR ready, request
+   review from Batcomputer67, tell the lead.
 8. After merge (rebase merge only), the reviewer accepts the merged commit
    and tags `writing-for-humans-v1.0.1`. I then open the pointer PR, with the
    records written by `promote`'s logic; the reviewer confirms by running
@@ -158,8 +181,10 @@ release tag):
 - Narrowing removes checks a future tool would need. Accepted: the policy
   line says a new tool needs testable plugins first, and the archive tag plus
   git history keep the old adapters recoverable.
-- The quality runner's blob hash changes. Contained by the recorded new blob
-  and the one-line diff note; 1.0.1's style and skill bytes are identical to
+- The quality runner's blob hash changes, so it refuses the retained 1.0
+  results and calibration. Contained by the baselines note (new blob, the
+  path-only diff, re-summarizing 1.0 needs the old blob, the next counted run
+  needs a fresh calibration). 1.0.1's style and skill bytes are identical to
   1.0.0's, so the 1.0 quality gate still describes them (proved by comparing
   the package trees with the manifest excluded).
 - A tag on the wrong commit would leave no named copy of the Shipshape Codex
@@ -168,7 +193,24 @@ release tag):
 
 ## Proof
 
-Before review, on the candidate head:
+### Isolation for every install check
+
+Each install check runs from a script that sets `HOME` and
+`CLAUDE_CONFIG_DIR` to a fresh `mktemp -d` directory and sets
+`DISABLE_AUTOUPDATER=1` on every `claude` call. Before the run it hashes
+`~/.claude/settings.json` and `~/.claude/plugins/*.json` and copies them to
+the run's evidence directory; it does not hash `~/.claude.json`. After the
+run it hashes them again:
+
+- Hashes match: nothing is restored; the run left real config alone.
+- Hashes differ: the script stops without restoring. I diff the copies
+  against the live files, restore only entries the run itself wrote (if
+  any), leave changes made by other live sessions in place, and report the
+  diff and what was restored.
+
+The scratch directories are deleted by exact path at the end.
+
+### Before review, on the candidate head
 
 - `bin/ci` exits 0 on Python 3.11.15; `bin/check-marketplace --base
   origin/main` passes and confirms 1.0.1 is a higher version for changed
@@ -178,41 +220,91 @@ Before review, on the candidate head:
   directories are absent; the real `releases.json` (Claudit 4.2.0 and Writing
   for Humans 1.0.0) still validates through `bin/ci`'s marketplace check.
 - `git diff --stat -M` shows the package as a rename with only
-  `.claude-plugin/plugin.json` modified; the generated Claudit marketplace
-  entry is unchanged; `git ls-tree -r archive/shipshape-codex-2026-11-05
-  plugins/codex/shipshape` lists the full package (criterion 3).
+  `.claude-plugin/plugin.json` modified; the package tree with the manifest
+  excluded matches 1.0.0's; the generated Claudit marketplace entry is
+  unchanged.
+- Archive tag (criterion 3): the tree-hash checks in step 2 of the order of
+  work, repeated against the remote.
 - `claude plugin validate .` and `claude plugin validate
   ./plugins/writing-for-humans` pass.
 - The issue's grep (`codex|pi package|\.agents/plugins|plugins/claude-code`,
   excluding `docs/archive/`) returns only the policy line, the archive note
   and justified hits, listed in the PR (criterion 2).
-- Criterion 5 against the candidate: a script sets `HOME` and
-  `CLAUDE_CONFIG_DIR` to a fresh `mktemp -d`, sets `DISABLE_AUTOUPDATER=1`,
-  copies aside `~/.claude/plugins/*.json` and `~/.claude/settings.json` and
-  hashes them before and after, restoring the copies. It adds a scratch
-  local marketplace whose entries are Claudit's published entry and a
-  git-subdir entry for writing-for-humans at the candidate commit, path
-  `plugins/writing-for-humans`; installs both; checks 4.2.0 and 1.0.1 in
-  `installed_plugins.json`, the installed digests, the style listed by
-  `/output-style` and both skills plus Claudit's skill present in the
-  installed packages.
+- The #172 regression suite (`bin/writing-for-humans-eval`) runs once on the
+  candidate package at its new path, with `--max-cost-usd 1` (the 1.0.0 run
+  cost $0.20). It runs because it covers exactly what a path move can break:
+  install from a marketplace, style selection and the user-only audit
+  contract. The quality gate does not run again: 1.0.1's style and skill
+  bytes equal 1.0.0's.
 
-After the tag and the pointer exist (criteria 4 to 7, same isolation script):
+### Acceptance for 1.0.1, scaled to a path-only patch
+
+The catalog's procedure for Writing for Humans
+(`docs/acceptance/writing-for-humans.md`, "Bounded follow-up releases" and
+the 0.3.0 list) applies. For a release whose only change is the package
+path, these are the checks a move could break, and each runs:
+
+- In the temporary config, which isn't logged in, so model-free:
+  - Install both plugins and record `installed_plugins.json` (version,
+    install path, commit) and the installed package digests.
+  - The $0 `/output-style` preflight after selecting
+    `writing-for-humans:writing-for-humans` shows it as "(current)" in a
+    fresh session, with a negative control (a nonexistent style name is not
+    shown as current).
+  - The init event of a `claude -p` call lists the skills and slash commands
+    of both plugins: `writing-for-humans:writing-style`,
+    `writing-for-humans:writing-audit` and Claudit's skill.
+  - Every `${CLAUDE_SKILL_DIR}` and `${CLAUDE_PLUGIN_ROOT}` path in both
+    Writing for Humans skills, expanded against the install path, names a
+    readable file.
+  - Select another style, disable and uninstall Writing for Humans, and show
+    that a fresh session has no plugin style or skills and that an unrelated
+    setting placed beforehand is unchanged.
+- On the normal login, from a throwaway worktree of this clone, one model
+  turn: `claude -p` with `--plugin-dir` set to the installed 1.0.1 bytes,
+  `--setting-sources project,local` and `--strict-mcp-config`, asking for a
+  task that makes the `writing-style` skill read a package-local reference.
+  The trace must show the Read of that reference resolving under the new
+  install path. Capped with `--max-budget-usd 0.5`.
+- Recovery to the previous version is criterion 7 below.
+
+Criterion 5 before review uses the same steps against the candidate: a
+local `file://` git mirror of this clone serves as the marketplace, with a
+temporary marketplace file whose Claudit entry is the published one and whose
+writing-for-humans entry is a git-subdir source at the pushed candidate
+commit, path `plugins/writing-for-humans`. The plugins' sources fetch from
+GitHub.
+
+### After the tag and the pointer exist
 
 - Criterion 4: the published `.claude-plugin/marketplace.json` lists exactly
   claudit 4.2.0 (path `plugins/claudit`, sha `e3b1cd29…`) and
   writing-for-humans 1.0.1 (path `plugins/writing-for-humans`, the released
   sha); the tag `writing-for-humans-v1.0.1` resolves to that sha.
-- Criterion 5 again from `acoz-labs/quickstop` itself.
-- Criterion 6: add the marketplace as it stood at `f490006` (a git ref to
-  that commit), install both, then point the marketplace at released `main`,
-  update it and run `claude plugin update` for both. Writing for Humans ends
-  at 1.0.1 with an install path from the new source, Claudit stays at 4.2.0,
-  `claude plugin list` shows no error and no leftover 1.0.0 entry.
+- Criterion 5 again, from `acoz-labs/quickstop` itself, with the model-free
+  checks above.
+- Criterion 6, modelled on a real user whose `acoz-labs/quickstop`
+  marketplace tracks `main`. A local mirror of quickstop
+  (`git clone --mirror`, added as a `file://` git URL) is reset to
+  `f490006` and added as the `quickstop` marketplace; install both plugins
+  and record `installed_plugins.json` and the plugin cache directory
+  listing. Then advance the mirror's `main` to released `main` and, under
+  the same marketplace name, run `claude plugin marketplace update quickstop`
+  and `claude plugin update` for each plugin. The marketplace is never
+  removed or re-added, since removal can uninstall its plugins. The plugins'
+  git-subdir sources still fetch from GitHub. Pass: Writing for Humans
+  ends at 1.0.1 with an install path and commit from the new source, Claudit
+  stays at 4.2.0 with the same commit, `claude plugin list` shows no error,
+  and the init event still lists Claudit's skill and both Writing for
+  Humans skills. Record `installed_plugins.json` and the cache listing again
+  and show the 1.0.0 cache entry is gone, or explain why it remains (for
+  example, if Claude Code keeps old versions by design). If the host refuses
+  a `file://` marketplace source, I report it to the lead before choosing
+  another mechanism.
 - Criterion 7: a scratch marketplace with a git-subdir source at
   `5581a159e10d523c68a514fec0237c46a44ac988`, path
   `plugins/claude-code/writing-for-humans`, installs 1.0.0 with its digest
-  matching the 1.0.0 record.
+  matching the 1.0.0 record. This is also the recovery check for 1.0.1.
 - Transcripts of commands and outputs go on the issue, compared with the
   1.0.0 baseline in the retained release evidence for #189.
 
