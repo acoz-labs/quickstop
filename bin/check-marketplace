@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-# Quickstop targets Claude Code only. Another agent tool is added only once its plugins can be tested in that tool.
+# Quickstop targets Claude Code only; docs/marketplace.md says when another tool may be added.
 FORMATS = {'claude-code': {'claude-plugin': '.claude-plugin/plugin.json'}}
 OUTPUTS = ('.claude-plugin/marketplace.json', 'docs/catalog.md')
 
