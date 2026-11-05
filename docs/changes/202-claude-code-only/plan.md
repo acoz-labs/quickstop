@@ -270,15 +270,16 @@ path, these are the checks a move could break, and each runs:
   config files, and run before the temporary install directory is deleted.
 - Recovery to the previous version is criterion 7 below.
 
-Criterion 5 before review uses the same steps against the candidate. The
-marketplace is a scratch commit in a `file://` git mirror, not a local
-directory marketplace: a scratch clone of the pushed candidate commit gets
-one local commit changing only `.claude-plugin/marketplace.json`, so its
-Claudit entry stays the published one and its writing-for-humans entry is
-1.0.1 as a git-subdir source at the candidate commit, path
-`plugins/writing-for-humans`. That clone is added as a `file://` URL under
-the name `quickstop`. The plugins' sources fetch from GitHub, and the scratch
-commit is never pushed.
+Criterion 5 before review uses the same steps against the candidate,
+through a local directory marketplace. Claude Code 2.1.318 refuses a
+`file://` marketplace source ("Invalid marketplace source format"), so the
+planned `file://` mirror was replaced: a scratch clone of the pushed
+candidate commit gets one local commit changing only
+`.claude-plugin/marketplace.json`, so its Claudit entry stays the published
+one and its writing-for-humans entry is 1.0.1 as a git-subdir source at the
+candidate commit, path `plugins/writing-for-humans`. That clone is added by
+path; its marketplace name is `quickstop`. The plugins' sources fetch from
+GitHub, and the scratch commit is never pushed.
 
 ### After the tag and the pointer exist
 
@@ -288,24 +289,27 @@ commit is never pushed.
   sha); the tag `writing-for-humans-v1.0.1` resolves to that sha.
 - Criterion 5 again, from `acoz-labs/quickstop` itself, with the model-free
   checks above.
-- Criterion 6, modelled on a real user whose `acoz-labs/quickstop`
-  marketplace tracks `main`. A local mirror of quickstop
-  (`git clone --mirror`, added as a `file://` git URL) is reset to
-  `f490006` and added as the `quickstop` marketplace; install both plugins
-  and record `installed_plugins.json` and the plugin cache directory
-  listing. Then advance the mirror's `main` to released `main` and, under
-  the same marketplace name, run `claude plugin marketplace update quickstop`
-  and `claude plugin update` for each plugin. The marketplace is never
-  removed or re-added, since removal can uninstall its plugins. The plugins'
-  git-subdir sources still fetch from GitHub. Pass: Writing for Humans
-  ends at 1.0.1 with an install path and commit from the new source, Claudit
-  stays at 4.2.0 with the same commit, `claude plugin list` shows no error,
-  and the init event still lists Claudit's skill and both Writing for
-  Humans skills. Record `installed_plugins.json` and the cache listing again
-  and show the 1.0.0 cache entry is gone, or explain why it remains (for
-  example, if Claude Code keeps old versions by design). If the host refuses
-  a `file://` marketplace source, I report it to the lead before choosing
-  another mechanism.
+- Criterion 6, the real user's update path. `claude plugin marketplace add
+  acoz-labs/quickstop` makes a shallow git clone of `main` under the config's
+  `plugins/marketplaces/quickstop`, and `marketplace update` pulls it. (The
+  planned `file://` mirror is refused by Claude Code.) In a fresh temporary
+  config: add `acoz-labs/quickstop`; in that clone, `git fetch --depth 1
+  origin f4900063106e04f36e0360eb152c61941ef32f9b` and `git reset --hard` to
+  it. Before installing, check that the clone's HEAD is `f490006` and that
+  the marketplace lists writing-for-humans 1.0.0 at
+  `plugins/claude-code/writing-for-humans`. Install both plugins and record
+  `installed_plugins.json` and the plugin cache listing. Then, under the same
+  marketplace name, run `claude plugin marketplace update quickstop` and
+  `claude plugin update` for each plugin. The marketplace is never removed or
+  re-added, since removal can uninstall its plugins. If `marketplace update`
+  refuses or doesn't move the clone to released `main`, stop and report
+  rather than switching mechanism. Pass: the clone is at released `main`,
+  Writing for Humans ends at 1.0.1 with an install path and commit from the
+  new source, Claudit stays at 4.2.0 with the same commit, `claude plugin
+  list` shows no error, and the init event still lists Claudit's skill and
+  both Writing for Humans skills. Record `installed_plugins.json` and the
+  cache listing again and show the 1.0.0 cache entry is gone, or explain why
+  it remains (for example, if Claude Code keeps old versions by design).
 - Criterion 7: a scratch marketplace with a git-subdir source at
   `5581a159e10d523c68a514fec0237c46a44ac988`, path
   `plugins/claude-code/writing-for-humans`, installs 1.0.0 with its digest
