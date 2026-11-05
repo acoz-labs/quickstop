@@ -2,6 +2,8 @@ import importlib.machinery
 import importlib.util
 import json
 import base64
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -160,6 +162,70 @@ class ApplyTests(unittest.TestCase):
         sdlc.apply(self.source,self.target,True);self.write_source('second')
         sdlc.apply(self.source,self.target)
         self.assertEqual((self.target/'docs/managed.md').read_text(),'second')
+    def write_starters(self):
+        starters=self.source/'.sdlc/starters'
+        for name in sdlc.STARTERS:
+            (starters/name).parent.mkdir(parents=True,exist_ok=True);(starters/name).write_text('starter '+name)
+    def test_missing_starters_added_and_existing_left_alone(self):
+        self.write_starters()
+        (self.target/'CLAUDE.md').write_text('repo-owned')
+        sdlc.apply(self.source,self.target,True)
+        self.assertEqual((self.target/'CLAUDE.md').read_text(),'repo-owned')
+        for name in sdlc.STARTERS[1:]:
+            self.assertEqual((self.target/name).read_text(),'starter '+name)
+        self.assertFalse(set(sdlc.STARTERS)&set(sdlc.load_manifest(self.target)['files']))
+        (self.target/'REVIEW.md').write_text('edited')
+        self.assertEqual(sdlc.differences(self.target,sdlc.load_manifest(self.target)),[])
+        output=io.StringIO()
+        with contextlib.redirect_stdout(output):sdlc.apply(self.source,self.target)
+        self.assertEqual(json.loads(output.getvalue())['starters'],[])
+        self.assertEqual((self.target/'REVIEW.md').read_text(),'edited')
+    def test_source_without_starters_adds_none(self):
+        sdlc.apply(self.source,self.target,True)
+        self.assertFalse(any((self.target/name).exists() for name in sdlc.STARTERS))
+    def test_symlinked_starter_directory_refused_before_writes(self):
+        self.write_starters()
+        outside=self.root/'outside';outside.mkdir()
+        (self.target/'.claude').symlink_to(outside,target_is_directory=True)
+        with self.assertRaises(sdlc.Failure):sdlc.apply(self.source,self.target,True)
+        self.assertFalse(list(outside.iterdir()))
+        self.assertFalse((self.target/'docs').exists())
+    def snapshot(self):
+        return {str(p.relative_to(self.target)):p.read_bytes() if p.is_file() else None
+                for p in self.target.rglob('*') if '.git' not in p.relative_to(self.target).parts}
+    def test_file_where_a_starter_directory_goes_refused_before_writes(self):
+        sdlc.apply(self.source,self.target,True)
+        self.write_starters();self.write_source('second')
+        (self.target/'.claude').write_text('a file, not a directory')
+        before=self.snapshot()
+        with self.assertRaisesRegex(sdlc.Failure,'not a directory'):sdlc.apply(self.source,self.target)
+        self.assertEqual(self.snapshot(),before)
+        self.assertFalse((self.target/'.git/sdlc-apply.lock').exists())
+    def test_rollback_finishes_every_entry_and_keeps_lock_when_a_restore_fails(self):
+        sdlc.apply(self.source,self.target,True)
+        self.write_starters();self.write_source('second')
+        write,unlink=Path.write_bytes,Path.unlink
+        def fail_on_manifest(p,data):
+            if p==self.target.resolve()/sdlc.MANIFEST:raise OSError('disk full')
+            return write(p,data)
+        def fail_on_claude(p,*args,**kwargs):
+            if p.name=='CLAUDE.md':raise OSError('busy')
+            return unlink(p,*args,**kwargs)
+        with patch.object(Path,'write_bytes',fail_on_manifest),patch.object(Path,'unlink',fail_on_claude):
+            with self.assertRaisesRegex(sdlc.Failure,'Rollback incomplete.*CLAUDE.md'):
+                sdlc.apply(self.source,self.target)
+        self.assertEqual((self.target/'docs/managed.md').read_text(),'first')
+        self.assertFalse((self.target/'docs/repository.md').exists())
+        self.assertTrue((self.target/'.git/sdlc-apply.lock').exists())
+    def test_failure_after_starter_write_rolls_back_files_and_directories(self):
+        self.write_starters()
+        original=Path.write_bytes
+        def fail_on_manifest(p,data):
+            if p==self.target.resolve()/sdlc.MANIFEST:raise OSError('disk full')
+            return original(p,data)
+        with patch.object(Path,'write_bytes',fail_on_manifest):
+            with self.assertRaises(OSError):sdlc.apply(self.source,self.target,True)
+        self.assertEqual(sorted(p.name for p in self.target.iterdir()),['.git'])
 
 class AuditTests(unittest.TestCase):
     def test_code_hidden_before_documentation_tip_is_rejected(self):

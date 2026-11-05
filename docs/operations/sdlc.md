@@ -1,6 +1,6 @@
 # Software delivery
 
-Standard version: `2026.11.05.1`.
+Standard version: `2026.11.05.2`.
 
 GitHub Issues, the Project board, and in-repository documents are the
 coordination layer. Agent chat and local notes do not replace an issue, a
@@ -277,7 +277,9 @@ supersedes prior mandatory owner gates and routine engineering self-review for
 new work. Version `2026.10.02.1` keeps that delegation, names the only owner
 escalations, and requires independent proof of the real artifact. Version
 `2026.11.05.1` replaces optional, retired plans with reviewed plans kept in
-`docs/changes/`; plans already in `docs/plans/` stay in place. Existing PRs
+`docs/changes/`; plans already in `docs/plans/` stay in place. Version
+`2026.11.05.2` adds repo-owned `CLAUDE.md`, `REVIEW.md`, `.claude/settings.json`
+and `docs/repository.md` starters, added only where missing. Existing PRs
 retain real authorship and receive an eligible independent review; never
 rewrite attribution. Preserve open issue/PR links and acceptance
 records while transitioning. A historical exception is not authority for a new
