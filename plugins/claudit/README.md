@@ -168,13 +168,20 @@ repo"), so a report can be reproduced.
   (`pyproject.toml`, `package.json`, ...) must be declared there, and a skill or
   subagent named as "the `x` skill" must exist (not checked when the project enables a
   plugin, which can supply them). Each missing one is its own finding on its own line.
-  A path is present when it exists from the root or the naming file's folder, or when
-  any tracked file or folder ends with it (`src/cli/next-dev.ts` inside
-  `packages/next/`). A name in a line that says it isn't there ("provides no
-  `bin/container`"), is conditional ("where supported", "if exists") or places it in
-  another repository or package ("part of the `vercel/next.js` repository", "inside
-  that installed package") is not stale, and neither is a placeholder (`foo/bar.py`,
-  `path/to`), a module of a declared dependency (`react-dom/server.edge`) or, on a
+  A path is present when it exists from the root, the naming file's folder or a
+  package root (a folder with a `package.json`, `pyproject.toml`, `setup.py`,
+  `Cargo.toml` or `go.mod`, its `src/`, or a top-level Python package):
+  `src/cli/next-dev.ts` inside `packages/next/`, `lib/foundry.py` inside
+  `src/anthropic/`. A folder also counts when any tracked folder ends with it; a
+  file doesn't, so an unrelated `packages/old/config/settings.toml` never hides a
+  missing `config/settings.toml`. A name in a line that says it isn't there
+  ("provides no `bin/container`"), is conditional ("where supported", "if exists")
+  or places it in another repository or package, by naming it ("part of the
+  `vercel/next.js` repository") or calling it another, upstream, installed, source,
+  external or vendored one ("inside that installed package"), is not stale; "from
+  the root of the repository" and "in the main package" are about this one. Neither
+  is a placeholder segment (`foo/bar.py`, `path/to`, `tests/...`; `nav-bar.md` is a
+  real name), a module of a declared dependency (`react-dom/server.edge`) or, on a
   line about GitHub, forks or pull requests, an `owner/name` whose owner is no
   folder here.
 - **History lines.** A sentence in the instruction files, their imports, skills,

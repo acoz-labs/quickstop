@@ -422,3 +422,108 @@ class Dismissals(Project):
                                 env={'CLAUDE_PLUGIN_DATA': ''})
         self.assertEqual(code, 2)
         self.assertIn('pass --data, or --shared', out['error'])
+
+
+class DevSetNarrowings(Project):
+    """#207 code round 2: each check narrowed on the dev set (five public repositories, CONDITIONS.md), tested with
+    the line that motivated it and a near miss that must still be raised. Removing any narrowing fails its test."""
+
+    def stale(self):
+        return sorted(i for i in self.ids(self.scan()) if i.startswith(('stale-', 'missing-')))
+
+    def test_another_repository_or_package(self):
+        # next.js AGENTS.md:534 and :536: paths in an installed package or another repository.
+        self.write('CLAUDE.md', '# x\n\nRead `docs/README.md` inside that installed package first.\n'
+                   'In the Turborepo source repository, its template is in `crates/cli/src/guidance.rs`.\n'
+                   'Branch PRs are part of the `acme/widgets` repository and run `bin/ci`.\n')
+        self.assertEqual(self.stale(), [])
+        # Near misses (review round 2): this repository's own root and package.
+        self.write('CLAUDE.md', '# x\n\nRun `bin/old-tool` from the root of the repository.\n'
+                   'The parser lives in `src/missing/parser.py` in the main package.\n')
+        self.assertEqual(self.stale(), ['stale-command:CLAUDE.md:bin/old-tool', 'stale-ref:CLAUDE.md:src/missing/parser.py'])
+
+    def test_placeholders_are_whole_segments(self):
+        # sentry tests/AGENTS.md:11-12 and next.js's `test/path/to/test.ts`.
+        self.write('CLAUDE.md', '# x\n\n- Code location: `src/sentry/foo/bar.py`\n- Run `test/path/to/test.ts` style paths.\n')
+        self.assertEqual(self.stale(), [])
+        self.write('CLAUDE.md', '# x\n\n- The menu is in `src/nav-bar.md` and `src/status_bar.py`.\n')
+        self.assertEqual(self.stale(), ['stale-ref:CLAUDE.md:src/nav-bar.md', 'stale-ref:CLAUDE.md:src/status_bar.py'])
+
+    def test_placeholder_calls_get_no_rule(self):
+        # sentry `pytest tests/...` and deno `cargo test spec::test_name`; `cargo test specs` is a real call.
+        self.write('Cargo.toml', '[package]\nname = "x"\n')
+        self.write('CLAUDE.md', '# x\n\n```bash\ncargo test spec::test_name\ncargo test specs\n```\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(cargo test specs)'])
+
+    def test_paths_resolve_from_package_roots(self):
+        # next.js AGENTS.md:28 (packages/next/) and anthropic-sdk-python CLAUDE.md:115 (src/anthropic/).
+        self.write('packages/next/package.json', {'name': 'next'})
+        self.write('packages/next/src/cli/next-dev.ts', '')
+        self.write('pyproject.toml', '[project]\nname = "anthropic"\n')
+        self.write('src/anthropic/__init__.py', '')
+        self.write('src/anthropic/lib/foundry.py', '')
+        self.write('crates/ty/resources/mdtest/generics/legacy/a.md', '')
+        self.write('CLAUDE.md', '# x\n\n- Dev server: `src/cli/next-dev.ts`.\n- Clients live in `lib/foundry.py`.\n'
+                   '- Add cases under `generics/legacy/`.\n')
+        self.assertEqual(self.stale(), [])
+        # Near miss (review round 2): a file under an unrelated folder doesn't make a missing file present.
+        self.write('packages/old/config/settings.toml', '')
+        self.write('CLAUDE.md', '# x\n\n- Settings load from `config/settings.toml`.\n')
+        self.assertEqual(self.stale(), ['stale-ref:CLAUDE.md:config/settings.toml'])
+
+    def test_conditional_words(self):
+        # next.js AGENTS.md:48: "(if exists)".
+        self.write('CLAUDE.md', '# x\n\n- `turbopack/README.md` (if exists)\n')
+        self.assertEqual(self.stale(), [])
+        self.write('CLAUDE.md', '# x\n\n- `turbopack/README.md`\n')
+        self.assertEqual(self.stale(), ['stale-ref:CLAUDE.md:turbopack/README.md'])
+
+    def test_modules_of_declared_dependencies(self):
+        # next.js AGENTS.md:491: Turbopack resolves `react-dom/server.edge`.
+        self.write('package.json', {'name': 'x', 'devDependencies': {'react-dom': '19'}})
+        self.write('CLAUDE.md', '# x\n\nTurbopack resolves `react-dom/server.edge` here.\n')
+        self.assertEqual(self.stale(), [])
+        self.write('CLAUDE.md', '# x\n\nTurbopack resolves `widgets/server.edge` here.\n')
+        self.assertEqual(self.stale(), ['stale-ref:CLAUDE.md:widgets/server.edge'])
+
+    def test_github_names_on_repository_lines(self):
+        # next.js AGENTS.md:277: "where the merge target is `vercel/next.js`".
+        self.write('CLAUDE.md', '# x\n\n- Fork PRs where the merge target is `vercel/next.js` need no description.\n')
+        self.assertEqual(self.stale(), [])
+        self.write('CLAUDE.md', '# x\n\n- The build entry is `vercel/next.js`.\n')
+        self.assertEqual(self.stale(), ['stale-ref:CLAUDE.md:vercel/next.js'])
+
+    def test_situational_runs_are_not_the_routine_check(self):
+        # ruff AGENTS.md:63: a run inside a purpose ("To run the `file_watching` binary, ... run `x`") is situational.
+        self.write('bin/test', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\nTo check file watching on a machine with real events, run `bin/test --watch`.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test)'])  # the script found in bin/, not the situational call
+        self.write('CLAUDE.md', '# x\n\nOnly run `bin/test --watch` where file events arrive.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test)'])
+        # Near miss: the routine call is still suggested as written.
+        self.write('CLAUDE.md', '# x\n\nRun `bin/test --watch` before you report a change as done.\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/test --watch)'])
+
+    def test_only_scripts_are_duplicate_sources(self):
+        # ruff scripts/*.py.lock: the same comment in every lock file is not a copied rule.
+        line = '# requires-python is pinned so the resolver picks the same wheels on every machine we use.\n'
+        for name in ('a', 'b', 'c'):
+            self.write('scripts/%s.py.lock' % name, line)
+        self.write('CLAUDE.md', '# x\n')
+        self.assertNotIn('duplicate', self.ids(self.scan()))
+        for name in ('a', 'b', 'c'):
+            self.write('scripts/%s.py' % name, line)
+        self.assertIn('duplicate', self.ids(self.scan()))
+
+    def test_must_run_rules_name_the_end_of_the_work(self):
+        # sentry AGENTS.md:11 and next.js AGENTS.md:491: how or when to run a command, not a rule to run it at the end.
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\nPython commands MUST run `bin/ci` in the virtualenv.\n'
+                   'When updating snapshots, always run `bin/ci` with the CI flags.\n')
+        self.assertNotIn('stop-hook', self.ids(self.scan()))
+        self.write('CLAUDE.md', '# x\n\nYou must run `bin/ci` before every commit.\n')
+        self.assertIn('stop-hook', self.ids(self.scan()))

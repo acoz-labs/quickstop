@@ -623,13 +623,18 @@ WORD = re.compile(r'\S+')
 # A command named only where it exists ("`bin/container bin/ci` where supported") is not a stale fact.
 CONDITIONAL = re.compile(r'\b(?:where|when|if)\s+(?:supported|available|present|installed|provided|it exists|exists|any)\b',
                          re.I)
-# A line that places what it names in another repository or package ("part of the `vercel/next.js` repository",
-# "inside that installed package", "In the Turborepo source repository"): its paths aren't this repository's.
-ELSEWHERE = re.compile(r'\b(?:in|inside|of|from|within)\s+(?:the|that|an?|its|their)\s+(?:\S+\s+){1,3}?'
-                       r'(?:repository|repo|package|project)\b', re.I)
+# A line that places what it names in another repository or package, by naming it ("part of the `vercel/next.js`
+# repository", "the acme/tools repo") or calling it another one ("inside that installed package", "In the Turborepo
+# source repository", "an upstream project"): its paths aren't this repository's. "From the root of the repository" and
+# "in the main package" are about this one.
+ELSEWHERE = re.compile(r'(?:`[^`\n]+`|\b[\w.-]+/[\w.-]+)\s+(?:repository|repo|package|project)\b|'
+                       r'\b(?:another|other|upstream|installed|source|external|third[- ]party|vendored)\s+'
+                       r'(?:\S+\s+){0,2}?(?:repository|repo|package|project)\b', re.I)
 # Example names stand for any path or argument: `src/foo/bar.py`, `test/path/to/test.ts`, `tests/...`, `spec::test_name`.
-PLACEHOLDER = re.compile(r'(?:^|[/:._\s-])(?:foo|bar|baz|qux|xxx|test_name|your[_-]\w+|my[_-]\w+)(?=$|[/:._\s-])|'
-                         r'\bpath/to\b|\.\.\.', re.I)
+# Only a whole path segment (or `::` part) is one, so `src/nav-bar.md` and `status_bar.py` are real names.
+PLACEHOLDER = re.compile(r'(?:^|[/\s]|::)(?:foo|bar|baz|qux|xxx|test_name|your[_-]\w+|my[_-]\w+)(?:\.\w+)?(?=$|[/\s]|::)|'
+                         r'(?:^|[/\s])path/to(?=/|$)|\.\.\.', re.I)
+MANIFEST_FILES = ('package.json', 'pyproject.toml', 'setup.py', 'Cargo.toml', 'go.mod')
 # On such a line an `owner/name` whose owner is no folder here is a repository name (`vercel/next.js`), not a path.
 REPO_WORDS = re.compile(r'\b(?:github|gitlab|fork|forks|repository|repo|pull requests?|PRs?|merge target)\b', re.I)
 SCRIPT_EXTENSIONS = ('', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl')
@@ -1263,12 +1268,40 @@ class Scan:
                 and not (slugs and t.count('/') == 1 and t.split('/')[0] not in self.known_paths())]
 
     def present(self, token, base):
-        """True when a named path exists from the root or the naming file's folder, or any tracked file or folder ends
-        with it (`src/cli/next-dev.ts` in packages/next/, `generics/legacy/` deep in a crate)."""
+        """True when a named path exists from the root, the naming file's folder or a package root (a folder with a
+        package.json, pyproject.toml, setup.py, Cargo.toml or go.mod, its `src/`, or a top-level Python package):
+        `src/cli/next-dev.ts` in packages/next/, `lib/foundry.py` in src/anthropic/. A folder also counts when any
+        tracked folder ends with it (`generics/legacy/` deep in a crate's test data); a file never does that way, so an
+        unrelated `packages/old/config/settings.toml` doesn't hide a missing `config/settings.toml`."""
         if os.path.exists(os.path.join(self.root, token)) or os.path.exists(os.path.join(base, token)):
             return True
         bare = re.sub(r'^(?:\./)+', '', token).rstrip('/')
-        return any(p == bare or p.endswith('/' + bare) for p in self.known_paths())
+        known = self.known_paths()
+        if any((r + '/' + bare if r else bare) in known for r in self.package_roots()):
+            return True
+        is_dir = token.endswith('/') or not re.search(r'\.[A-Za-z][A-Za-z0-9]{0,9}$', bare.split('/')[-1])
+        return is_dir and any(p.endswith('/' + bare) and p in self.known_dirs() for p in known)
+
+    def package_roots(self):
+        """Folders a project's own paths are written from: each manifest's folder and its `src/`, and each top-level
+        Python package (a folder with `__init__.py` whose parent has none)."""
+        if getattr(self, '_roots', None) is None:
+            known = self.known_paths()
+            roots = set()
+            for p in known:
+                head, _, name = p.rpartition('/')
+                if name in MANIFEST_FILES:
+                    roots.update({head, (head + '/src') if head else 'src'})
+                elif name == '__init__.py' and head and (head.rpartition('/')[0] + '/__init__.py').lstrip('/') not in known:
+                    roots.add(head)
+            self._roots = sorted(roots)
+        return self._roots
+
+    def known_dirs(self):
+        if getattr(self, '_known_dirs', None) is None:
+            known = self.known_paths()
+            self._known_dirs = {p.rpartition('/')[0] for p in known if '/' in p} | self.dirs
+        return self._known_dirs
 
     def known_paths(self):
         """Every tracked or untracked-but-not-ignored file and folder (git ls-files, complete however large the repo),
