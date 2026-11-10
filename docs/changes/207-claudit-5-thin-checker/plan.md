@@ -52,7 +52,7 @@ Plugin package (`plugins/claudit/`, version 4.3.1 to 5.0.0):
 
   ---
   <the scan's scope lines, when any: files above the repository, a CLAUDE.md above that stops AGENTS.md being read, symlinks>
-  Not checked: user and managed settings, settings validity (`/doctor`), server-side branch protection.
+  Not checked: user and managed settings, settings validity, server-side branch protection.
   Run `/doctor prompt-audit` for contradictions and wording.
   Claudit 5.0.0; audited commit <sha>; <n> dismissed (<where stored>)
   ```
@@ -73,6 +73,16 @@ Plugin package (`plugins/claudit/`, version 4.3.1 to 5.0.0):
   - Each finding carries `path`, `line` (the real line of the cited text, or
     the file's first line for a whole-file fact such as `oversized`),
     `problem`, `fix` and an optional `source` (URL and heading).
+  - A history finding's fix keeps the line's current fact and moves only the
+    dated narrative out: "Keep `<current fact>`; move the dated detail
+    (`<date or run>`) to a changelog or decision record." It never says to
+    delete the sentence. Quickstop's `docs/repository.md:4` ("Shipshape ...
+    was retired on 2026-11-05 and is kept for reference only") gets "keep
+    that Shipshape is retired and kept for reference only; move the date".
+    Unit tests pin this on a status-line fixture (the fix keeps "retired"
+    and "kept for reference only" and names the date) and pin that a
+    lessons-list line such as "A glob delete once killed a running eval" is
+    not raised.
   - Declines stay only to suppress `stop-hook` and `allowlist`: a documented
     decision against hooks or pre-approved commands moves that finding to a
     `respected` list with the decision's `path:line` and reason. When a fact
@@ -81,6 +91,10 @@ Plugin package (`plugins/claudit/`, version 4.3.1 to 5.0.0):
     while `CLAUDE.md` names one; and new, f12's allowlist replaced by project
     `bypassPermissions`, which Claude Code ignores in project settings), the
     finding stays, citing both the decision and the contradicting evidence.
+    The `bypassPermissions` fact is the one settings-validity fact Claudit
+    keeps, only as evidence against a decision; it cites its live docs page
+    in the URL map, and the README's "not checked" list names this
+    exception.
   - Settings that don't parse skip the settings-based checks (allowlist, ask
     rules, hooks) and add a "not checked" footer line naming the file, so a
     broken `settings.json` never yields false "not allowed" findings.
@@ -110,13 +124,27 @@ Plugin package (`plugins/claudit/`, version 4.3.1 to 5.0.0):
 Eval suite and runner (repository only, not plugin bytes):
 
 - Graders (`evals/claudit/cases/*/graders/`): regenerated. Every grader is a
-  script (regex) grader anchored on structure, not phrasing: a `finding-*`
-  grader needs a numbered item that cites the expected `path:line` and whose
-  fix holds the exact token (for example `Bash(bin/check-notes)`); every case
-  gets `no-unraised-findings` (numbered items cite only the case's expected
-  locations) and `structure-footer` (version, commit, the `/doctor
-  prompt-audit` line); clean cases get `structure-nothing-found`. The grade,
-  intent, plan, declined and reconsider graders and all 15 llm graders go.
+  script (regex) grader anchored on structure, not phrasing, and grades the
+  fixtures the way `headless` grades real repositories:
+  - `finding-*`: a numbered item that cites the expected `path:line` and
+    whose fix holds the exact token (for example `Bash(bin/check-notes)`).
+  - `no-unraised-findings`, on every case: the count line and the number of
+    numbered items both equal the case's expected count; each item maps
+    one-to-one to an expected finding by location plus kind or fix token, so
+    a second, invented item at an expected location fails; an item with no
+    `path:line` fails.
+  - `structure-template`, on every case: the report holds only the
+    template's parts (title, count line, numbered items, "Not reported",
+    "Always loaded", the footer), each in its own shape: "Not reported"
+    lines are a citation and a reason, "Always loaded" is the table, and the
+    footer is the scope, "Not checked", `/doctor prompt-audit` and version
+    lines. Any other prose (advice under the table or in the footer, an
+    extra section) fails.
+  - `structure-footer` (version, commit, the `/doctor prompt-audit` line) on
+    every case, and `structure-nothing-found` on clean cases.
+
+  The grade, intent, plan, declined and reconsider graders and all 15 llm
+  graders go.
 - Expected findings per case (the successors the issue allows), pinned by the
   scan's unit tests and checked against each fixture by the reviewer:
   - f1: `allowlist` (`bin/ci`), `stop-hook`. f2: `allowlist`, `stale-ref`
@@ -130,25 +158,30 @@ Eval suite and runner (repository only, not plugin bytes):
   - f10: `stop-hook` and `allowlist`, each citing `docs/decisions.md` and
     the contradicting evidence. f12: `allowlist` for `bin/test`, citing
     `docs/decisions.md:3` and the ignored project `bypassPermissions`.
-  - f13: the fixture gains one must-rule ("Always run `npm test` before you
-    report a change as done"), so its no-reason hooks decision suppresses a
-    real finding: expected is the "Respected" line with "no reason given" and
-    no hook recommended.
+  - Respected decisions (no numbered finding, a "Respected" line, no hook
+    recommended anywhere): f8 as it is (its `CLAUDE.md` must-rule for
+    `bin/check`, its decision retiring hooks for the review checklist); f11,
+    whose `CLAUDE.md` gains "Always run `bin/check` before you report a
+    change as done", expecting its checklist reason quoted; f13, whose
+    `CLAUDE.md` gains "Always run `npm test` before you report a change as
+    done", expecting "no reason given".
   - f17: no numbered finding; the footer's scope lines (the scan already
     writes them) name the parent `CLAUDE.md` and `AGENTS.md`, say the parent
     `CLAUDE.md` keeps the repository's `AGENTS.md` from being read on its
     own, and name the symlink's real file.
-  - Clean (0 findings, "Nothing found."): f4, f7, f8, f9, f11 (no must-rule,
-    so its hooks decision suppresses nothing), f19, and f17's findings list.
+  - Clean (0 findings, "Nothing found."): f4, f7, f9, f19, and the
+    findings lists of f8, f11, f13 and f17.
   - Case descriptions (`case.yaml`) follow; prompts, budgets and fixtures are
-    otherwise unchanged.
+    otherwise unchanged apart from the f11 and f13 lines.
 - Grader builder and controls (`tests/test_claudit_fixture_graders.py`):
   rewritten around the citation-anchored form. Each grader has passing
-  controls (at least six real phrasings of the item, several taken from the
-  screen's recorded reports once they exist) and failing ones (wrong line,
-  missing fix token, the item under "Not reported", a negated or
-  hypothetical sentence, a citation outside the findings list), plus a
-  mutation check per named part.
+  controls (at least six phrasings of the item, several adapted from the
+  4.3.1 recorded reports under `~/factory/retained/quickstop-193/`) and
+  failing ones: wrong line, missing fix token, the item under "Not
+  reported", a negated or hypothetical sentence, an invented second item at
+  an expected location, an item with no citation, and advice in prose under
+  "Always loaded" and in the footer. Plus a mutation check per named part.
+  Graders and controls are frozen before the screen (see Proof).
 - Runner (`bin/claudit-eval`): the `claudit-deep` arm and `--deep` plumbing
   go, and the two-docs-path (`--web-fetch`) requirement for Claudit goes,
   since Claudit no longer fetches docs. `headless` script-checks a real-repo
@@ -192,16 +225,26 @@ checks.
    special case. Repeated at every head.
 4. Skill, apply reference, manifest, catalog and auditor deletions, README,
    changelog. Local `claude plugin validate` on the repository and plugin.
-5. Eval: graders and controls, f13 fixture line, runner changes, eval and
-   acceptance docs. `bin/ci` and `bin/check-marketplace --base origin/main`.
+5. Eval: graders and controls, the f11 and f13 fixture lines, runner
+   changes, eval and acceptance docs. `bin/ci` and `bin/check-marketplace --base origin/main`.
 6. Simplify pass over the whole diff; open the PR for review.
 7. After review clears the tree for the screen and the lead gives a go:
    screen at n=1 (19 fixtures and the three named repositories; the reviewer
-   runs the held-out one). Fix and re-review if the screen fails, within the
-   four code rounds.
-8. On a reviewer-cleared tree and the lead's go: the full n=3 gate. Results
-   posted on #207, not committed.
-9. Clean-install check from a local directory marketplace.
+   runs the held-out one). Then the spend projection (Proof); stop and
+   report if it doesn't fit. Fix, re-review and re-screen if the screen
+   fails, within the four code rounds.
+8. On the screened tree, cleared by the reviewer, and the lead's go: the
+   full n=3 gate. Results posted on #207, not committed.
+9. Clean-install check from a local directory marketplace; then the reviewer
+   merges, tags and the pointer PR follows.
+10. Release check from the published GitHub marketplace after the pointer PR
+    merges (Proof).
+11. Cleanup, triggered by a passing step 10 and done on the lead's go:
+    delete `~/factory/retained/quickstop-192/`,
+    `~/factory/retained/quickstop-193/` and the #193 clones
+    `~/factory/quickstop-193/implementer/` and
+    `~/factory/quickstop-193/reviewer/` by those exact paths, after checking
+    no process uses them. A failed gate keeps them.
 
 ## Risks
 
@@ -210,8 +253,9 @@ checks.
   README's upgrading note; 4.2.0 stays installable from its tag.
 - **Dropping config checks hides real defects** (invalid JSON, array
   matchers, ignored `bypassPermissions`). The footer says settings validity
-  isn't checked and points at `/doctor`; the unparseable-settings guard stops
-  false findings; f3's dropped defects are graded as unraised, so the model
+  isn't checked; it names `/doctor` for it only if the build-time docs check
+  finds a page saying `/doctor` reports settings errors, and then cites that
+  page. The unparseable-settings guard stops false findings; f3's dropped defects are graded as unraised, so the model
   can't reintroduce them.
 - **A wrong finding on an unseen repository.** History lines are the riskiest
   (main's `docs/repository.md` now has "was retired on 2026-11-05" at lines
@@ -254,14 +298,34 @@ Local, at every head:
 Paid gate (Claude Sonnet as pinned by the runner; list price; $15 cap; no run
 without the lead's go):
 
+- Per-run caps: fixture runs through `claude plugin eval`, which has no
+  per-run cap, get `--max-cost-usd 0.40` per case at n=1 and `1.20` per
+  case at n=3; real-repository runs through `bin/claudit-eval headless` get
+  `--max-budget-usd 0.40` per run.
 - Screen, n=1 per case: the 19 fixtures, and quickstop `main` (commit
   pinned), python-sdk `af4c6f4` and claude-code-action `c0949c50` through
   `bin/claudit-eval headless`. The reviewer runs the sealed held-out
-  repository (issue comment 6759553072); I never see or run it. Estimated
-  about $2.50.
-- Full gate, n=3 per case on the reviewer-cleared tree: estimated about
-  $7.50 for 57 fixture and 12 real-repository runs.
-- Bars: every expected finding above hit in 3 of 3 runs; 0 false findings
+  repository (issue comment 6759553072); I never see or run it. 23 runs; at
+  the $0.15 bar about $3.50.
+- Spend rule, from the screen's measured costs: the gate projects to 57
+  times the median fixture run plus 12 times the median real-repository
+  run (all four repositories, the held-out one included); a re-screen
+  projects to the screen's own total. Before the gate, and before any
+  re-screen, if spend so far plus that step plus (for a re-screen) the
+  projected gate would pass $15, stop and report to the lead with the
+  numbers. At the $0.15 bar the screen is about $3.45 and the gate about
+  $10.35, $13.80 together, so a re-screen fits only if the measured runs
+  are cheaper than the bar (about $0.12 or less).
+- Freeze: graders, controls and fixtures are frozen at the screened tree.
+  Recorded reports may be regraded at $0. Any later change to the tree,
+  under `evals/` or anywhere else, triggers a re-screen of the new tree
+  before the gate, budgeted by the spend rule; a screen never stands for a
+  tree it didn't run on.
+- Full gate, n=3 per case on the screened, reviewer-cleared tree: 57 fixture
+  and 12 real-repository runs.
+- Bars: every expected finding above hit in 3 of 3 runs, with f17's
+  scope-line graders and the f8, f11 and f13 Respected-line graders counting
+  as those cases' planted items; 0 false findings
   (`no-unraised-findings` and the clean-case graders) on f4, f15, f19 and
   every clean case; at most two hand-read corrections in total; on all four
   real repositories the headless script checks pass (real lines, no
@@ -284,6 +348,11 @@ Release checks:
   truncated. Real config hashes unchanged before and after.
 - The reviewer tags `claudit-v5.0.0` (my pre-push hook refuses tags); I check
   the peeled commit and tree.
+- Release verification, after the pointer PR merges: install from the
+  published GitHub marketplace (`acoz-labs/quickstop`) in the same fresh
+  `HOME` and `CLAUDE_CONFIG_DIR` script; check version 5.0.0, the inventory,
+  the cached bytes against the tagged plugin tree, and real config hashes
+  unchanged before and after.
 
 ## Rollback
 
