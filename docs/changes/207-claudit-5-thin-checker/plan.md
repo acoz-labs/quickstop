@@ -157,11 +157,17 @@ Eval suite and runner (repository only, not plugin bytes):
   - f1: `allowlist` (`bin/ci`), `stop-hook`. f2: `allowlist`, `stale-ref`
     `docs/architecture.md`. f3: `oversized` `CLAUDE.md`. f5, f6: `allowlist`
     (and `stop-hook` on f6). f14: the three `gate-ask` rules, branch
-    protection named, `stop-hook` for `bin/check`. f15: `allowlist`,
-    `stop-hook`, `visible-skill`, the verbatim `duplicate` group; the two
-    paraphrases and the lint list are false if reported. f16: two
-    `stale-ref`, `stale-dep`, `allowlist`. f18: `allowlist`
-    (`Bash(bun run check)`).
+    protection named, `stop-hook` for `bin/check`. f15: `stop-hook`,
+    `visible-skill`, the verbatim `duplicate` group; no `allowlist`, because
+    `bin/check` is allowed and its steps need no rules (code round 1); the
+    two paraphrases and the lint list are false if reported. f16: two
+    `stale-ref`, `stale-dep`, `allowlist` (`Bash(python3 -m unittest
+    discover -s tests)`, as documented). f18: `allowlist` with the four
+    `bun run` rules for `package.json`'s scripts.
+  - Since code round 1, each case's findings are pinned by hand in
+    `tests/test_claudit_graders.py` (kind, file, line and the exact fix
+    rules), not derived from the scan, so a scan change that moves one fails
+    `bin/ci`.
   - f10: `stop-hook` and `allowlist`, each citing `docs/decisions.md` and
     the contradicting evidence. f12: `allowlist` for `bin/test`, citing
     `docs/decisions.md:3` and the ignored project `bypassPermissions`.
@@ -338,22 +344,36 @@ without the lead's go):
   `bin/claudit-eval headless`. The reviewer runs the sealed held-out
   repository (issue comment 6759553072); I never see or run it. 23 runs; at
   the $0.15 bar about $3.50.
+- Dev set (requester's contract change, issue comment 6760599460), before
+  the screen: five public repositories with agent instructions, approved
+  by the lead and recorded with commits in
+  `~/factory/retained/quickstop-207/CONDITIONS.md` (astral-sh/ruff
+  `25c2129f`, vercel/next.js `0d6361d3`, anthropics/anthropic-sdk-python
+  `d4976414`, getsentry/sentry `9e85b69b`, denoland/deno `e7b39ebd`). The
+  $0 scan runs on each at every candidate tree and every finding is
+  hand-checked against the repository, verdicts in
+  `devset/<repo>-<tree12>.md`. Bar: 0 wrong findings on every dev repository
+  at the frozen tree. A wrong finding narrows the check that raised it, in
+  general and with a unit test, never by special-casing a repository.
 - Spend rule, from the screen's measured costs: the gate projects to 57
-  times the median fixture run plus 12 times the median real-repository
-  run (all four repositories, the held-out one included); a re-screen
+  times the median fixture run plus 15 times the median real-repository
+  run (five repositories at n=3: the named three and two held-out ones the
+  reviewer runs, counted from a row labelled `heldout`, which the projection
+  waits for); a re-screen
   projects to the screen's own total. Before the gate, and before any
   re-screen, if spend so far plus that step plus (for a re-screen) the
   projected gate would pass $15, stop and report to the lead with the
   numbers. At the $0.15 bar the screen is about $3.45 and the gate about
-  $10.35, $13.80 together, so a re-screen fits only if the measured runs
-  are cheaper than the bar (about $0.12 or less).
+  $10.80 (72 runs), $14.25 together, so a re-screen fits only if the
+  measured runs are well under the bar (about $0.10 or less).
 - Freeze: graders, controls and fixtures are frozen at the screened tree.
   Recorded reports may be regraded at $0. Any later change to the tree,
   under `evals/` or anywhere else, triggers a re-screen of the new tree
   before the gate, budgeted by the spend rule; a screen never stands for a
   tree it didn't run on.
 - Full gate, n=3 per case on the screened, reviewer-cleared tree: 57 fixture
-  and 12 real-repository runs.
+  and 15 real-repository runs. The fixture ceiling reserves 5 x $0.40 x runs
+  for the real repositories.
 - Bars: every expected finding above hit in 3 of 3 runs, with f17's
   scope-line graders and the f8, f11 and f13 Respected-line graders counting
   as those cases' planted items; 0 false findings

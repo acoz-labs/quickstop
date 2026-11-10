@@ -56,7 +56,12 @@ FENCE = re.compile(r'^\s*(```|~~~)')
 RUNNER = re.compile(r'((?:make|just) (?:test|check|lint|ci)\b|(?:npm|pnpm|yarn|bun)(?: run)? (?:test|lint|check|typecheck)\b[\w:-]*'
                     r'|go test\b(?: \./\.\.\.)?|cargo (?:test|clippy|check)\b|pytest\b'
                     r'|python3?(?:\.\d+)? -m (?:pytest|unittest)\b)')
-MUST = re.compile(r'\b(always|must|before (?:you )?(?:report|finish|commit|push|mark|say|claim|hand|open|merg|declar|complet))', re.I)
+# A must-run rule enforces a check at the end of the work, so it names that moment (#207 dev set: "always run the test
+# with the CI flags when updating snapshots" or "Python commands must run in the virtualenv" are not must-run rules).
+COMPLETION = re.compile(r"\bbefore (?:you (?:\w+ )?)?(?:report|finish|commit|push|mark|say|claim|hand|open|merg|declar|"
+                        r"complet|submit)|\bbefore (?:every|each|any|a|the) (?:commit|push|pull request|PR|merge|hand-?off)\b|"
+                        r"\bat the end of (?:a|the|each|every|your) (?:task|change|session|turn)\b|"
+                        r"\bwhen (?:you(?:['\u2019]re| are)? )?(?:done|finished)\b", re.I)
 MUST_NOT = re.compile(r"\b(must not|mustn't|never)\b", re.I)
 LINK = re.compile(r'\]\(\s*<?([^)\s>]+)>?(?:\s+[^)]*)?\)')
 LINK_DEF = re.compile(r'^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?')
@@ -448,7 +453,14 @@ def code_snippets(text):
                 and LIST_LEAD_END.match(line[span.end():])
             # "Execute `a`, invoke `b` or call `c`": a run word coordinated with a call is an instruction too.
             sentence = re.split(r'[.!?;:]\s', before[:run.start()])[-1] if run else ''
-            instructed = run and not DESCRIBING.search(sentence) and (IMPERATIVE.search(before[:run.start()]) or (
+            # A run inside a purpose ("To run the slow suite, use ... and run `y`") or limited by "only" is a situational
+            # call, not the routine check (#207 dev set). It is read over the whole sentence, not since the last span.
+            whole = re.split(r'[.!?;]\s', (wrapped.strip() + ' ' if start == 0 and wrapped.strip() else '')
+                             + line[:span.start()])[-1]
+            situational = run and (re.match(r'\s*(?:[-*+]\s+)?to\s+\w+\b', whole, re.I)
+                                   or re.search(r'\bonly\b', whole, re.I))
+            instructed = run and not DESCRIBING.search(sentence) and not situational and (
+                IMPERATIVE.search(before[:run.start()]) or (
                 called and re.fullmatch(r'\s*,?\s*(?:and|or)?\s*', before[:run.start()]))) \
                 and not NEGATED.search(before[:run.start()])
             if (lead or instructed or COMMAND_LABEL.search(before) or (called and CHAIN.fullmatch(before))) \
@@ -609,7 +621,18 @@ def data_path(rel, nested_instruction=False, eval_cases=(), plugin_roots=()):
 
 WORD = re.compile(r'\S+')
 # A command named only where it exists ("`bin/container bin/ci` where supported") is not a stale fact.
-CONDITIONAL = re.compile(r'\b(?:where|when|if)\s+(?:supported|available|present|installed|provided|it exists)\b', re.I)
+CONDITIONAL = re.compile(r'\b(?:where|when|if)\s+(?:supported|available|present|installed|provided|it exists|exists|any)\b',
+                         re.I)
+# A line that places what it names in another repository or package ("part of the `vercel/next.js` repository",
+# "inside that installed package", "In the Turborepo source repository"): its paths aren't this repository's.
+ELSEWHERE = re.compile(r'\b(?:in|inside|of|from|within)\s+(?:the|that|an?|its|their)\s+(?:\S+\s+){1,3}?'
+                       r'(?:repository|repo|package|project)\b', re.I)
+# Example names stand for any path or argument: `src/foo/bar.py`, `test/path/to/test.ts`, `tests/...`, `spec::test_name`.
+PLACEHOLDER = re.compile(r'(?:^|[/:._\s-])(?:foo|bar|baz|qux|xxx|test_name|your[_-]\w+|my[_-]\w+)(?=$|[/:._\s-])|'
+                         r'\bpath/to\b|\.\.\.', re.I)
+# On such a line an `owner/name` whose owner is no folder here is a repository name (`vercel/next.js`), not a path.
+REPO_WORDS = re.compile(r'\b(?:github|gitlab|fork|forks|repository|repo|pull requests?|PRs?|merge target)\b', re.I)
+SCRIPT_EXTENSIONS = ('', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.rb', '.pl')
 # A person must approve a gate verb: "Never merge to main without a human approving", "A release needs a go-ahead".
 GATE_VERBS = (('merge', re.compile(r'\bmerg(?:e|es|ed|ing)\b', re.I)),
               ('push to main', re.compile(r'\bpush(?:es|ed|ing)?\b[^.;]{0,40}\b(?:main|master)\b', re.I)),
@@ -965,6 +988,7 @@ class Scan:
 
     def check_commands(self, corpus, ci_text, loaded=()):
         """Check commands; sets self.exact to the exact, non-mutating calls of each to pre-approve."""
+        self.calls_documented = False
         detected, invocations, from_mention = [], {}, set()
 
         def add(command, source):
@@ -1022,12 +1046,21 @@ class Scan:
             pyproject = self.text('pyproject.toml') or ''
             configured = '[tool.pytest' in pyproject or 'pytest.ini' in self.fileset or 'conftest.py' in self.fileset \
                 or '[tool:pytest]' in (self.text('setup.cfg') or '')
-            add(mentioned or ('pytest' if configured else 'python -m unittest'), python_markers[0])
+            if mentioned or configured:  # never a guessed runner (#207 dev set)
+                add(mentioned or 'pytest', python_markers[0])
         # Commands documented in instruction files.
         for path, text in corpus.items():
             for snippet in code_snippets(text):
-                for part in split_commands(snippet):
-                    part = strip_dot(part)
+                for written in split_commands(snippet):
+                    # `./x` and `x` are one command, but a rule keeps the written form. A leading `VAR=1` still documents
+                    # the command it runs; no exact rule fits that call, so none is suggested for it.
+                    part = re.sub(r'^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+', '', strip_dot(written))
+                    if part != strip_dot(written):
+                        part = strip_dot(part)
+                        if part.split() and (RUNNER.match(part) or part.split()[0] in ('cargo', 'go', 'npm', 'pnpm',
+                                                                                     'yarn', 'bun', 'make', 'just')):
+                            self.calls_documented = True
+                        continue
                     base = next((c['command'] for c in detected if part == strip_dot(c['command'])
                                  or part.startswith(strip_dot(c['command']) + ' ')), None)
                     if base is None:
@@ -1043,24 +1076,48 @@ class Scan:
                         else:
                             continue
                         add(base, path)
-                    invocations.setdefault(base, []).append(part)
-        # Only exact calls are pre-approved: a wildcard such as `make test *` also allows `make test deploy`.
+                    invocations.setdefault(base, []).append(written)
+        # Commands a list item leads with, described rather than called ("- `x` runs the tests"). A command named
+        # mid-sentence ("only run `x` where file events arrive") is not named here (#207 dev set).
+        named = {}
+        for text in corpus.values():
+            for _, line in prose(text):
+                lead = re.match(r'\s*(?:[-*+]|[0-9]+[.)])\s+`([^`\n]+)`', line)
+                for written in split_commands(lead.group(1)) if lead else []:
+                    base = next((c['command'] for c in detected if strip_dot(written) == strip_dot(c['command'])
+                                 or strip_dot(written).startswith(strip_dot(c['command']) + ' ')), None)
+                    if base:
+                        named.setdefault(base, []).append(written)
+        # Only exact calls are pre-approved, as written: a rule matches the exact command text, and a wildcard such as
+        # `make test *` also allows `make test deploy`. A command the instructions document as a call gets rules for
+        # those calls only; one they only name gets the form they name it in; one they don't mention (it's found from
+        # package.json, a Makefile, bin/ or CI) gets its own form.
+        def safe(calls):
+            out = []
+            for p in calls:
+                # Go's `./...` is a package pattern, not a placeholder.
+                bare = p.replace('...', '') if p.startswith('go ') else p
+                if PLAIN_CALL.fullmatch(p) and not re.search(r'\b[A-Z][A-Z_]+\b', p) and not mutating(p) \
+                        and not PLACEHOLDER.search(bare) \
+                        and not re.search(r'(?:^|\s)(?:--help|-h|--version)(?:\s|$)', p) \
+                        and p not in out:
+                    out.append(p)
+            return out
+
         self.exact = {}
+        self.calls_documented = self.calls_documented or bool(invocations)  # check calls documented, usable or not
         for entry in list(detected):
             command = entry['command']
             seen = invocations.get(command, [])
-            entry['args'] = any(p != strip_dot(command) for p in seen)
-            calls = ([] if command in from_mention else [command]) + [
-                p for p in seen if command not in from_mention or checking(p)]
-            safe = []
-            for p in calls:
-                if PLAIN_CALL.fullmatch(p) and not re.search(r'\b[A-Z][A-Z_]+\b', p) and not mutating(p) \
-                        and p not in safe:
-                    safe.append(p)
-            if not safe:
+            entry['args'] = any(strip_dot(p) != strip_dot(command) for p in seen)
+            called = safe([p for p in seen if command not in from_mention or checking(p)])
+            entry['documented'] = bool(called)
+            entry['named'] = bool(named.get(command))
+            exact = called or ([] if command in from_mention else safe(named.get(command, [])) or safe([command]))
+            if not exact:
                 detected.remove(entry)
                 continue
-            self.exact[command] = safe
+            self.exact[command] = exact
         return detected
 
     def mentioned(self, command, corpus_text):
@@ -1185,8 +1242,8 @@ class Scan:
             base = os.path.dirname(item['abs'])
             candidates = []
             for number, line in prose(item['text']):
-                for token in path_tokens(line):
-                    if os.path.exists(os.path.join(self.root, token)) or os.path.exists(os.path.join(base, token)):
+                for token in self.checked_paths(line):
+                    if self.present(token, base):
                         continue
                     rel = os.path.relpath(os.path.normpath(os.path.join(self.root, token)), self.root)
                     if not rel.startswith('..'):
@@ -1195,6 +1252,54 @@ class Scan:
             for number, token, rel in candidates:
                 if rel not in ignored:
                     self.stale_path(path, number, token)
+
+    def checked_paths(self, line):
+        """The path tokens of a line worth checking: not on a conditional line or one placing them in another
+        repository or package, and neither a placeholder nor a module of a declared dependency (`react-dom/x`)."""
+        if CONDITIONAL.search(line) or ELSEWHERE.search(line):
+            return []
+        slugs = REPO_WORDS.search(line)
+        return [t for t in path_tokens(line) if not PLACEHOLDER.search(t) and t.split('/')[0] not in self.dependencies()
+                and not (slugs and t.count('/') == 1 and t.split('/')[0] not in self.known_paths())]
+
+    def present(self, token, base):
+        """True when a named path exists from the root or the naming file's folder, or any tracked file or folder ends
+        with it (`src/cli/next-dev.ts` in packages/next/, `generics/legacy/` deep in a crate)."""
+        if os.path.exists(os.path.join(self.root, token)) or os.path.exists(os.path.join(base, token)):
+            return True
+        bare = re.sub(r'^(?:\./)+', '', token).rstrip('/')
+        return any(p == bare or p.endswith('/' + bare) for p in self.known_paths())
+
+    def known_paths(self):
+        """Every tracked or untracked-but-not-ignored file and folder (git ls-files, complete however large the repo),
+        or the walked ones outside git."""
+        if getattr(self, '_known', None) is None:
+            files = None
+            if self.git:
+                proc = run(['git', '-C', self.root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+                           timeout=60)
+                if proc is not None and proc.returncode == 0:
+                    files = [f for f in proc.stdout.split('\0') if f]
+            files = files if files is not None else self.files
+            known = set(files)
+            for f in files:
+                parts = f.split('/')
+                known.update('/'.join(parts[:n]) for n in range(1, len(parts)))
+            self._known = known | self.dirs
+        return self._known
+
+    def dependencies(self):
+        """Package names declared in the repository's package.json files (two levels deep)."""
+        if getattr(self, '_dependencies', None) is None:
+            names = set()
+            for rel in [f for f in self.files if f.split('/')[-1] == 'package.json' and f.count('/') <= 2
+                        and not self.data(f)]:
+                state, data, _ = self.load_json(rel)
+                for key in ('dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'):
+                    if state == 'ok' and isinstance(data, dict) and isinstance(data.get(key), dict):
+                        names.update(name.split('/')[0] if not name.startswith('@') else name for name in data[key])
+            self._dependencies = names
+        return self._dependencies
 
     def stale_path(self, path, number, token):
         self.add('stale-ref:%s:%s' % (path, token), path, number, '`%s` does not exist; `%s:%d` names it.'
@@ -1330,7 +1435,8 @@ class Scan:
         paths = [i['path'] for i in instructions if i['kind'] in ('project', 'import', 'nested')] + \
             [x['path'] for x in skills + agents] + \
             [f for f in self.files if f.endswith('.md') and (f.startswith('docs/') or '/' not in f) and not self.data(f)] + \
-            [f for f in self.files if f.count('/') == 1 and f.split('/')[0] in ('bin', 'scripts', 'script')]
+            [f for f in self.files if f.count('/') == 1 and f.split('/')[0] in ('bin', 'scripts', 'script')
+             and os.path.splitext(f)[1] in SCRIPT_EXTENSIONS]  # a script's strings, never a lock or data file
         sources, seen = [], set()
         for path in paths:
             real = os.path.realpath(self.abs(path))
@@ -1402,9 +1508,11 @@ class Scan:
         previous = ''
         for number, line in prose(text):
             context, previous = previous + ' ' + line, line
-            if HISTORY.search(line) or CONDITIONAL.search(line):
+            if HISTORY.search(line) or CONDITIONAL.search(line) or ELSEWHERE.search(line):
                 continue
             for span in re.findall(r'`([^`\n]+)`', line):
+                if PLACEHOLDER.search(span):
+                    continue
                 if re.search(r'\b(?:no|not|never|without|lacks?)\b[^`.;]{0,25}`%s`' % re.escape(span), context, re.I):
                     continue  # the file says it isn't there ("this repository provides no `bin/container`")
                 for part in split_commands(span):
@@ -1575,9 +1683,8 @@ class Scan:
         for rel in [x['path'] for x in skill_docs + agent_docs] + commands:
             text, base = self.text(rel) or '', os.path.dirname(self.abs(rel))
             for number, line in prose(text):
-                for token in path_tokens(line):
-                    if not (os.path.exists(os.path.join(self.root, token)) or os.path.exists(os.path.join(base, token))
-                            or self.ignored([token])):
+                for token in self.checked_paths(line):
+                    if not (self.present(token, base) or self.ignored([token])):
                         self.stale_path(rel, number, token)
             self.stale_facts(rel, text, base)
             if not plugins_on:
@@ -1601,27 +1708,27 @@ class Scan:
         scope = self.scope(instructions)
         project_instr = [i for i in instructions if i['kind'] in ('project', 'nested', 'import')]
         corpus = {i['path']: i['text'] for i in project_instr}
-        corpus_text = '\n'.join(corpus.values())
         ci = [f for f in self.files if (f.startswith('.github/workflows/') and f.count('/') == 2
                                         and f.endswith(('.yml', '.yaml'))) or f == '.gitlab-ci.yml']
         ci_text = '\n'.join(self.text(f) or '' for f in ci)
         loaded = [i for i in project_instr if i['loaded'] and i['kind'] != 'nested']
         checks = self.check_commands(corpus, ci_text, {i['path'] for i in loaded})
-        documented = [c['command'] for c in checks if self.mentioned(c['command'], corpus_text)]
-        for c in checks:
-            c['documented'] = c['command'] in documented
+        documented = [c['command'] for c in checks if c['documented']]  # called in the instructions, not just named
         allow = [r for s in settings for r in rules_of(s['data'], 'allow')]
         hooks = {}
         for s in settings:
             for event, groups in (s['data'].get('hooks') or {}).items() if isinstance(s['data'].get('hooks'), dict) else []:
                 hooks.setdefault(event, []).extend(groups if isinstance(groups, list) else [])
 
-        targets = [c for c in checks if c['documented']] or checks
+        # The commands the instructions call; else, when they document no call at all (not even one no exact rule
+        # fits, such as `X=1 cargo test`), those they name; else every command found in the repository.
+        targets = [c for c in checks if c['documented']] or ([] if self.calls_documented else (
+            [c for c in checks if c['named']] or checks))
         uncovered = [c for c in targets if not all(any(bash_rule_matches(r, call) for r in allow)
                                                    for call in self.exact[c['command']])]
         if uncovered and not blind:
             calls = [call for c in uncovered for call in self.exact[c['command']]]
-            path, line = self.command_at(uncovered[0], corpus)
+            path, line = self.command_at(uncovered[0], self.exact[uncovered[0]['command']], corpus)
             self.add('allowlist', path, line, 'No `permissions.allow` rule in `.claude/settings.json` covers %s, so '
                      'every run of %s asks first.' % (joined('`%s`' % call for call in calls),
                                                        'it' if len(calls) == 1 else 'them'),
@@ -1630,12 +1737,10 @@ class Scan:
         must_rules = []
         for item in project_instr:
             for number, line in prose(item['text']):
-                if MUST.search(line) and not MUST_NOT.search(line) and (
-                        any(self.mentioned(c['command'], line) for c in checks)
+                if COMPLETION.search(line) and not MUST_NOT.search(line) and (
+                        any(self.mentioned(c['command'], line) for c in checks if c['documented'] or c['named'])
                         or (re.search(r'\brun\b', line, re.I) and any(checking(span) for span in re.findall(
-                            r'`([^`\n]+)`', line)))
-                        or (checks and re.search(r'\b(?:check|test|lint|verify)\b[^.]{0,30}\b(?:work|changes?|code)\b',
-                                                 line, re.I))):
+                            r'`([^`\n]+)`', line)))):
                     must_rules.append({'path': item['path'], 'line': number, 'text': LIST_ITEM.sub('', line.strip())[:160]})
         if must_rules and not any(hooks.get(e) for e in STOP_EVENTS) and not blind:
             rule = must_rules[0]
@@ -1709,11 +1814,13 @@ class Scan:
             out['truncated'] = t
         return redact(out)
 
-    def command_at(self, check, corpus):
-        """(path, line) where the instructions name a check command (code blocks included), or where it is defined."""
+    def command_at(self, check, calls, corpus):
+        """(path, line) of the first line holding one of a check command's suggested calls as written (code blocks
+        included), or where the command is defined when the instructions don't name it."""
         for path, text in corpus.items():
             for number, line in enumerate(text.splitlines(), 1):
-                if self.mentioned(check['command'], line):
+                # The whole call: nothing but its end, a closing backtick or a comment may follow it.
+                if any(re.search(r'(?<![\w./-])%s(?=\s*(?:$|`|#|;|&|\||\)))' % re.escape(call), line) for call in calls):
                     return path, number
         source = check['source']
         name = check['command'].split()[-1]

@@ -178,21 +178,39 @@ class Graders(unittest.TestCase):
                     self.assertEqual(cg.read_grader(folder / (name + '.md'))['pattern'], pattern)
 
     def test_every_case_has_its_planted_items(self):
+        """Each case's findings, pinned by hand from the fixture, not from the scan: kind, file, line and the exact rules
+        a fix suggests. A scan change that moves any of them fails here, not only in the rebuilt graders."""
+        unittest_call = 'Bash(python3 -m unittest discover -s tests)'
         expected = {
-            'f1-agent-run': {'allowlist', 'stop-hook'}, 'f2-plugin-repo': {'allowlist', 'stale-ref'},
-            'f3-misconfigured': {'oversized'}, 'f5-bare': {'allowlist'}, 'f6-agents-md': {'allowlist', 'stop-hook'},
-            'f10-stale-decline': {'allowlist', 'stop-hook'}, 'f12-unsafe-decline': {'allowlist'},
-            'f14-enforcement': {'gate-ask', 'stop-hook'},
-            'f15-context-economy': {'allowlist', 'stop-hook', 'visible-skill', 'duplicate'},
-            'f16-stale-facts': {'stale-ref', 'stale-dep', 'allowlist'}, 'f18-check-commands': {'allowlist'}}
-        for case, (scan, graders) in built().items():
+            'f1-agent-run': [('allowlist', 'CLAUDE.md', 3, ['Bash(bin/ci)']), ('stop-hook', 'CLAUDE.md', 3, [])],
+            'f2-plugin-repo': [('allowlist', 'CLAUDE.md', 6, [unittest_call]), ('stale-ref', 'CLAUDE.md', 10, [])],
+            'f3-misconfigured': [('oversized', 'CLAUDE.md', 1, [])],
+            'f5-bare': [('allowlist', 'go.mod', 1, ['Bash(go test ./...)'])],
+            'f6-agents-md': [('allowlist', 'AGENTS.md', 3, ['Bash(bin/check)']), ('stop-hook', 'AGENTS.md', 3, [])],
+            'f10-stale-decline': [('allowlist', 'CLAUDE.md', 5, ['Bash(bin/check-notes)']),
+                                  ('stop-hook', 'CLAUDE.md', 5, [])],
+            'f12-unsafe-decline': [('allowlist', 'CLAUDE.md', 7, ['Bash(bin/test)'])],
+            'f14-enforcement': [('stop-hook', 'CLAUDE.md', 13, []),
+                                ('gate-ask', 'CLAUDE.md', 14, ['Bash(gh pr merge *)', 'Bash(bin/deploy *)',
+                                                               'Bash(bin/release *)'])],
+            # bin/check is allowed, so the steps it runs need no rules: no allowlist finding on f15.
+            'f15-context-economy': [('visible-skill', '.claude/skills/schema-rules/SKILL.md', 3, []),
+                                    ('stop-hook', 'CLAUDE.md', 5, []), ('duplicate', 'CLAUDE.md', 6, [])],
+            'f16-stale-facts': [('stale-ref', 'CLAUDE.md', 8, []), ('stale-ref', 'CLAUDE.md', 9, []),
+                                ('stale-dep', 'CLAUDE.md', 10, []), ('allowlist', 'CLAUDE.md', 14, [unittest_call])],
+            # Nothing names a command, so the rules are package.json's own scripts, run the way CLAUDE.md says (bun run).
+            'f18-check-commands': [('allowlist', 'package.json', 9, ['Bash(bun run test)', 'Bash(bun run lint)',
+                                                                     'Bash(bun run check)', 'Bash(bun run typecheck)'])],
+        }
+        respected = {'f8-documented-decline': ['stop-hook'], 'f11-valid-decline': ['stop-hook'],
+                     'f13-no-reason-decline': ['stop-hook']}
+        for case, (scan, _) in built().items():
             with self.subTest(case):
-                self.assertEqual({f['kind'] for f in scan['findings']}, expected.get(case, set()))
-                respected = {r['id'] for r in scan['respected']}
-                self.assertEqual(respected, {'stop-hook'} if case in (
-                    'f8-documented-decline', 'f11-valid-decline', 'f13-no-reason-decline') else set())
+                got = [(f['kind'], f['path'], f['line'], re.findall(r'"(Bash\([^"]*\))"', f['fix']))
+                       for f in scan['findings']]
+                self.assertEqual(got, expected.get(case, []))
+                self.assertEqual([r['id'] for r in scan['respected']], respected.get(case, []))
         self.assertEqual(len(built()['f17-scope'][0]['scope']['lines']), 3)
-        self.assertEqual(len(built()['f16-stale-facts'][0]['findings']), 4)
 
     def checks(self):
         """[(label, pattern, text, expected)] for every case."""

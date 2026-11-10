@@ -48,7 +48,7 @@ HEADLESS_FLAGS = ('--setting-sources', 'project,local', '--strict-mcp-config', '
 DOCTOR_PROMPTS = ('/doctor', '/doctor prompt-audit .')
 DOCTOR_FLAGS = ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit',
                 '--strict-mcp-config', '--no-session-persistence', '--output-format', 'json')
-CALL_TIMEOUT = 1500  # seconds, as each case's timeout_seconds
+CALL_TIMEOUT = int(os.environ.get('CLAUDIT_EVAL_CALL_TIMEOUT', 1500))  # seconds, as each case's timeout_seconds; tests lower it
 DEFAULT_INVOKE = '/claudit:claudit --read-only'
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md')
 
@@ -886,8 +886,13 @@ def headless(args):
             command = ['claude', '-p', args.invoke, '--plugin-dir', str(plugin), *HEADLESS_FLAGS,
                        '--model', args.model, '--max-budget-usd', str(args.max_budget_usd)]
             started = dt.datetime.now(dt.timezone.utc)
-            proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                  env=claude_env())
+            try:
+                proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                      env=claude_env(), timeout=CALL_TIMEOUT)
+            except subprocess.TimeoutExpired as exc:  # a hung run is a failed run, recorded, and the batch goes on
+                out_, err_ = (x.decode(errors='replace') if isinstance(x, bytes) else (x or '')
+                              for x in (exc.stdout, exc.stderr))
+                proc = subprocess.CompletedProcess(command, -1, out_, err_ + f'\ntimed out after {CALL_TIMEOUT} s')
             wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
             run_dir = out / f'run{number}'
             run_dir.mkdir(exist_ok=True)

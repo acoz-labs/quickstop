@@ -62,7 +62,8 @@ adds one.
 - **Copies**: a rule copied word for word into three or more files.
 
 Not checked: user and managed settings, settings validity (invalid JSON, hook
-syntax, ignored values; `/doctor` reports those), server-side branch protection, and
+syntax, ignored values; `claude doctor` lists rejected entries, as the
+[settings docs](https://code.claude.com/docs/en/settings) say), server-side branch protection, and
 contradictions or wording (`/doctor prompt-audit`). One settings fact is used: a
 project `defaultMode` of `bypassPermissions`, which Claude Code ignores in project
 settings, doesn't count as a replacement for allow rules (see Decisions below).
@@ -142,11 +143,24 @@ repo"), so a report can be reproduced.
     to/don't run/never run/do not run.
   - Headings, and inline code anywhere else ("`bin/ci` finds the pinned Python",
     "use `x`", "CI runs `x`", "Running `x`").
+  - A run inside a purpose or limited by "only" ("To run the slow suite, use an
+    environment that ... and run `x`", "only run `x` locally"): a situational call,
+    not the routine check.
 
-  Mutating calls (`--write`, `apply`, `release`) and placeholder arguments
-  (`PRE_CHANGE_SHA`, `<sha>`) are never suggested, and no suggestion uses a
-  wildcard. An unlabelled fence counts as commands, so put output in a `text` or
-  `console` fence.
+  A rule matches the exact command text, so the suggestion is each call as written
+  (`./scripts/test` stays `./scripts/test`), never a bare form nothing documents and
+  never a step that an allowed command runs for you. Mutating calls (`--write`,
+  `apply`, `release`), `--help` and `--version`, placeholder arguments
+  (`PRE_CHANGE_SHA`, `<sha>`, `path/to`, `foo`, `tests/...`) and calls with a leading
+  `VAR=value` are never suggested, and no suggestion uses a wildcard. The commands
+  checked are the ones the instructions call; when they document no call at all,
+  the ones a list item leads with ("- `x` runs the tests"); when they name none,
+  every check command found in the repository (package.json scripts run the way the
+  instructions say, Makefile and justfile targets, `bin/` and `scripts/` checks, Go,
+  Rust and a named Python runner). A call no exact rule fits still counts as
+  documented, so nothing found elsewhere stands in for it. The finding cites the
+  line holding the call. An unlabelled fence counts as commands, so put output in a
+  `text` or `console` fence.
 - **Stale facts.** Paths, folders, scripts and commands named in the in-repo
   instruction files, skills, subagents and commands must exist: package.json
   scripts (`npm run x`, `bun run x`), Makefile and justfile targets, `bin/` and
@@ -154,8 +168,15 @@ repo"), so a report can be reproduced.
   (`pyproject.toml`, `package.json`, ...) must be declared there, and a skill or
   subagent named as "the `x` skill" must exist (not checked when the project enables a
   plugin, which can supply them). Each missing one is its own finding on its own line.
-  A name in a line that says it isn't there ("provides no `bin/container`") or is
-  conditional ("where supported") is not stale.
+  A path is present when it exists from the root or the naming file's folder, or when
+  any tracked file or folder ends with it (`src/cli/next-dev.ts` inside
+  `packages/next/`). A name in a line that says it isn't there ("provides no
+  `bin/container`"), is conditional ("where supported", "if exists") or places it in
+  another repository or package ("part of the `vercel/next.js` repository", "inside
+  that installed package") is not stale, and neither is a placeholder (`foo/bar.py`,
+  `path/to`), a module of a declared dependency (`react-dom/server.edge`) or, on a
+  line about GitHub, forks or pull requests, an `owner/name` whose owner is no
+  folder here.
 - **History lines.** A sentence in the instruction files, their imports, skills,
   subagents or the docs they say to read that tells what happened (a past run that
   passed, something that "has been retired", a dated event, a past version) is a
@@ -176,10 +197,12 @@ repo"), so a report can be reproduced.
   and a client-side rule can be got around. The command is the one the sentence or the
   instructions name, a `bin/` or `scripts/` file named for the verb, or `gh pr merge`
   and `git push`.
-- **Must-run rules.** A line in the instructions that says always or must run a check
-  command (or "before you report" it), with no Stop, SubagentStop or TaskCompleted
-  hook, gets a Stop hook that runs the exact documented call and blocks finishing
-  until it passes.
+- **Must-run rules.** A line in the instructions that runs a documented check command
+  at the end of the work ("before you report a change as done", "before every
+  commit", "at the end of a task"), with no Stop, SubagentStop or TaskCompleted hook,
+  gets a Stop hook that runs the exact documented call and blocks finishing until it
+  passes. A rule about how or when to run a command ("must run in the virtualenv",
+  "always run the test with the CI flags when updating snapshots") is not one.
 - **Documented limits only.** CLAUDE.md over 200 lines; a skill's `description` plus
   `when_to_use` over 1,536 characters; custom subagent descriptions over 15,000 tokens.
   A skill only a subagent reads (by path or `skills:`), named nowhere else as one to
@@ -189,7 +212,8 @@ repo"), so a report can be reproduced.
   files (instruction files, skills, subagents, docs, script strings) is one finding,
   cited at each copy's real line; two copies are left alone, and so is text shared
   only by subagent, skill or command prompts, which each load in their own context. A
-  script string is cited by the script's own line. A file is generated only when its
+  script string is cited by the script's own line, and only scripts count (no lock or
+  data files). A file is generated only when its
   first lines say so ("Generated from ...", "DO NOT EDIT") or `.gitattributes` marks it
   `linguist-generated`; text it shares with the script that writes it is one source.
   Paraphrases are not matched.

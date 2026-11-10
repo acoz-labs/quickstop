@@ -453,7 +453,7 @@ class Coverage(Project):
         self.assertEqual(rules, ['Bash(bin/ci)'])
         self.write('CLAUDE.md', 'Run `bin/ci --fast`; `bin/ci deploy` and `bin/ci --push` ship it.\n')
         rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
-        self.assertEqual(rules, ['Bash(bin/ci)', 'Bash(bin/ci --fast)'])
+        self.assertEqual(rules, ['Bash(bin/ci --fast)'])  # the bare `bin/ci` is never documented, so no rule
 
     def test_tool_commands_get_exact_non_mutating_rules(self):
         self.write('Makefile', 'test:\n\techo test\ndeploy:\n\techo deploy\n')
@@ -462,13 +462,13 @@ class Coverage(Project):
         self.write('CLAUDE.md', 'Run `make test V=1`, `npm run lint`, `npm run lint:fix` and `npm run test:deploy`.\n')
         rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
         # A wildcard would allow `make test deploy`; mutating scripts are never suggested.
-        self.assertEqual(sorted(rules), ['Bash(make test V=1)', 'Bash(make test)', 'Bash(npm run lint)'])
+        self.assertEqual(sorted(rules), ['Bash(make test V=1)', 'Bash(npm run lint)'])  # as documented, no bare form
 
     def test_mutating_words_ignore_path_arguments(self):
         self.write('bin/test', '#!/bin/sh\n', 0o755)
         self.write('CLAUDE.md', 'Run `bin/test tests/fix_parser.py`.\n')
         rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
-        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test tests/fix_parser.py)'])
+        self.assertEqual(rules, ['Bash(bin/test tests/fix_parser.py)'])
         self.assertTrue(cl.mutating('bin/fix-all') and cl.mutating('npm run lint:fix'))
         self.assertTrue(cl.mutating('bin/lint --fix=src/') and cl.mutating('make test "deploy"'))
         for call in ('bin/test --mode=publish', 'bin/sdlc check --mode=apply', 'make test --file=release.mk',
@@ -483,7 +483,7 @@ class Coverage(Project):
                                 'Run `bin/test --mode=publish` or `bin/test --mode=fast`.\n')
         result = self.scan()
         rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
-        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test --mode=fast)'])
+        self.assertEqual(rules, ['Bash(bin/test --mode=fast)'])
         hook = self.finding(result, 'stop-hook')['fix']
         self.assertNotIn('apply', hook)
         self.assertNotIn('publish', hook)
@@ -501,7 +501,7 @@ class Coverage(Project):
         result = self.scan()
         rules = json.loads(self.finding(result, 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
         # `a | b` and `a; b` are split into separate calls, so `bin/test a` is a call of its own.
-        self.assertEqual(rules, ['Bash(bin/test)', 'Bash(bin/test a)', 'Bash(bin/test --shard=1/2)'])
+        self.assertEqual(rules, ['Bash(bin/test a)', 'Bash(bin/test --shard=1/2)', 'Bash(bin/test)'])  # documented order
         for call in ('bin/test $HOME', 'bin/test *.py', 'bin/test a | b', 'bin/test a; b', 'bin/test {a,b}',
                      'bin/test (a)', 'bin/test `x`', 'bin/test a & b', 'bin/test "x"', "bin/test 'x'", 'bin/test > out'):
             self.assertIsNone(cl.PLAIN_CALL.fullmatch(call), call)
@@ -539,13 +539,14 @@ class Coverage(Project):
         result = self.scan()
         f = self.finding(result, 'allowlist')
         snippet = json.loads(f['fix'].split(': ', 1)[1])
-        # Exact calls only: `npm test` is already allowed, and `npm test -- <file>` holds a placeholder.
-        self.assertEqual(snippet, {'permissions': {'allow': ['Bash(bin/check-all --fast)']}})
+        # Exact calls only, as written: `npm test` is already allowed, and `npm test -- <file>` holds a placeholder.
+        self.assertEqual(snippet, {'permissions': {'allow': ['Bash(./bin/check-all --fast)']}})
+        # `npm test -- <file>` holds a placeholder, so no exact rule fits it, and nothing documents a bare `npm test`.
         self.assertEqual([c['command'] for c in result['inventory']['check_commands'] if c['documented']],
-                         ['npm test', 'bin/check-all'])
+                         ['bin/check-all'])
         self.assertEqual((f['path'], f['line']), ('CLAUDE.md', 1))
         self.write('.claude/settings.json', {'permissions': {'allow': []}})
-        self.assertIn('`npm test`', self.finding(self.scan(), 'allowlist')['problem'])
+        self.assertNotIn('`npm test`', self.finding(self.scan(), 'allowlist')['problem'])
         self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(npm test:*)']}})
         self.assertNotIn('`npm test`', self.finding(self.scan(), 'allowlist')['problem'])
 
@@ -564,6 +565,56 @@ class Coverage(Project):
         self.assertIn('`CLAUDE.md:1` says "Always run `bin/ci` before you report done."', f['problem'])
         self.write('.claude/settings.json', {'hooks': {'TaskCompleted': [{'hooks': [{'type': 'command', 'command': 'true'}]}]}})
         self.assertNotIn('stop-hook', self.ids(self.scan()))
+
+    def test_rules_are_the_documented_calls_as_written(self):
+        """#207 round 1: a rule matches the exact command text, so it must be the call the instructions document."""
+        self.write('tests/test_x.py', '')
+        self.write('pyproject.toml', '[project]\nname = "x"\n')
+        self.write('CLAUDE.md', '# x\n\n- Test: `python3 -m unittest discover -s tests`\n')
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(python3 -m unittest discover -s tests)'])  # never the bare `python3 -m unittest`
+        # Named but not phrased as a call: the named form, cited where it is named.
+        self.write('CLAUDE.md', '# x\n\n## Commands\n\n- `python3 -m unittest discover -s tests` runs the tests.\n')
+        found = self.finding(self.scan(), 'allowlist')
+        self.assertIn('"Bash(python3 -m unittest discover -s tests)"', found['fix'])
+        self.assertEqual((found['path'], found['line']), ('CLAUDE.md', 5))
+        # `./x` as documented stays `./x`, and the citation is the line that calls it, not a prose mention.
+        self.write('scripts/test', '#!/bin/sh\n', 0o755)
+        self.write('CLAUDE.md', '# x\n\nCI and `scripts/test` run pytest with warnings as errors.\n\n- Full check: `./scripts/test`\n')
+        found = self.finding(self.scan(), 'allowlist')
+        self.assertEqual(json.loads(found['fix'].split(': ', 1)[1])['permissions']['allow'], ['Bash(./scripts/test)'])
+        self.assertEqual(found['line'], 5)
+
+    def test_steps_of_an_allowed_check_are_not_findings(self):
+        """f15: `bin/check` is allowed; the steps it runs, named in prose, need no rules of their own."""
+        self.write('bin/check', '#!/bin/sh\nbin/lint\npython3 -m unittest discover -s tests -q\n', 0o755)
+        self.write('bin/lint', '#!/bin/sh\n', 0o755)
+        self.write('tests/test_x.py', '')
+        self.write('CLAUDE.md', '# x\n\nRun `bin/check` before you report any change as done: it runs `bin/lint`, then the '
+                                'unit tests with `python -m unittest`.\n')
+        self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(bin/check)']}})
+        result = self.scan()
+        self.assertNotIn('allowlist', self.ids(result))
+        self.assertEqual([c['command'] for c in result['inventory']['check_commands'] if c['documented']], ['bin/check'])
+
+    def test_targets_step_down_from_called_to_named_to_found(self):
+        self.write('bin/ci', '#!/bin/sh\n', 0o755)
+        self.write('tests/test_x.py', '')
+        self.write('pyproject.toml', '[project]\nname = "x"\n')
+        self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(bin/ci)']}})
+        self.write('CLAUDE.md', '# x\n\n## Commands\n\n- `bin/ci` runs the unit tests.\n')  # named, allowed
+        self.assertNotIn('allowlist', self.ids(self.scan()))  # the found `python -m unittest` is not a target
+        os.remove(os.path.join(self.root, 'CLAUDE.md'))
+        self.write('.claude/settings.json', {})
+        rules = json.loads(self.finding(self.scan(), 'allowlist')['fix'].split(': ', 1)[1])['permissions']['allow']
+        self.assertEqual(rules, ['Bash(bin/ci)'])  # nothing named: what the repo has, never a guessed Python runner
+
+    def test_env_prefixed_calls_are_documented_but_get_no_rule(self):
+        """#207 dev set (ruff): `X=1 cargo nextest run` documents the routine run; no exact rule fits it, and the
+        bare `cargo test` found from Cargo.toml must not stand in for it."""
+        self.write('Cargo.toml', '[package]\nname = "x"\n')
+        self.write('CLAUDE.md', '# x\n\nRun the tests:\n\n```sh\nINSTA_UPDATE=always cargo nextest run --workspace\n```\n')
+        self.assertNotIn('allowlist', self.ids(self.scan()))
 
     def test_stop_hook_runs_the_exact_documented_call(self):
         self.write('bin/sdlc', '#!/bin/sh\n', 0o755)

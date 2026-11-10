@@ -18,7 +18,8 @@ respected unless a fact contradicts their stated reason. Dismissals keep working
 Removed: the Correctness, Alignment and Coverage grades and the ranked plan; the
 procedure detector and every "add a skill or feature" recommendation; the feature
 catalog and its Coverage baseline and profiles; the settings-validity checks, which
-`/doctor` reports; paraphrase matching; the Intent paragraph; `--deep`, `--user` and
+`claude doctor` lists
+([settings](https://code.claude.com/docs/en/settings)); paraphrase matching; the Intent paragraph; `--deep`, `--user` and
 the docs fetch; the `auditor` subagent.
 
 Why: the 4.3.0 and 4.3.1 gates showed the script checks held up on every real

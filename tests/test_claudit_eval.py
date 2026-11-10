@@ -617,6 +617,9 @@ import json, os, sys
 if sys.argv[1:] == ['--version']:
     print('2.1.316 (Claude Code)')
     sys.exit(0)
+if os.environ.get('FAKE_SLEEP'):
+    import time
+    time.sleep(float(os.environ['FAKE_SLEEP']))
 sys.path.insert(0, os.environ['FAKE_TESTS'])
 from test_claudit_eval import conforming, scan_of
 with open(os.environ['FAKE_ARGS'], 'a') as handle:
@@ -662,6 +665,31 @@ class HeadlessTests(GradeTests):
                 *ce.HEADLESS_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.5'])
             self.assertTrue((out / f'run{number}/report.md').read_text().startswith('# Claudit'))
             self.assertFalse(Path(clone).exists())
+        self.assertEqual(list(tmp.iterdir()), [])
+
+    @unittest.skipUnless(shutil.which('git'), 'git not installed')
+    def test_a_hung_run_times_out_and_is_recorded_as_failed(self):
+        repo = self.repo()
+        sha = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+        fake = self.base / 'fake-bin'
+        fake.mkdir()
+        (fake / 'claude').write_text(FAKE_HEADLESS.replace('#!/usr/bin/env python3', '#!' + sys.executable, 1))
+        (fake / 'claude').chmod(0o755)
+        tmp = self.base / 'tmp'
+        tmp.mkdir()
+        env = dict(os.environ, PATH=f'{fake}{os.pathsep}{os.environ.get("PATH", "")}', TMPDIR=str(tmp),
+                   FAKE_TESTS=str(Path(__file__).resolve().parent), FAKE_ARGS=str(self.base / 'calls.jsonl'),
+                   FAKE_SLEEP='5', CLAUDIT_EVAL_CALL_TIMEOUT='1', PYTHONDONTWRITEBYTECODE='1',
+                   GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        out = self.base / 'out'
+        proc = subprocess.run([sys.executable, str(RUNNER), 'headless', '--repo', str(repo), '--sha', sha,
+                               '--plugin', str(ROOT / 'plugins/claudit'), '--model', 'm', '--max-budget-usd', '0.5',
+                               '--runs', '1', '--output-dir', str(out)],
+                              capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=120)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        meta = json.loads((out / 'run1/meta.json').read_text())
+        self.assertEqual((meta['exit'], meta['passed']), (-1, False))
+        self.assertIn('timed out after 1 s', (out / 'run1/stderr.txt').read_text())
         self.assertEqual(list(tmp.iterdir()), [])
 
     def test_refuses_an_instruction_file_above_the_clone(self):
