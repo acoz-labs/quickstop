@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f2-plugin-repo
-description: Repo shipping a Claude Code plugin whose CI and docs run only unit tests (no plugin validate, no plugin eval) and whose CLAUDE.md points at a missing docs/architecture.md.
+description: Repo shipping a Claude Code plugin whose CLAUDE.md points at a missing docs/architecture.md and whose check command has no allow rule; plugin validate and eval advice are gone in Claudit 5.
 tags: [claudit, coverage, correctness]
 runs: 1
 context:

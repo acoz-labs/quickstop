@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f5-bare
-description: Go module with tests and no Claude Code configuration at all; plants Coverage holes for missing instructions and test allowlist.
+description: Go module with tests and no Claude Code configuration; the one finding is the missing allow rule for go test.
 tags: [claudit, coverage]
 runs: 1
 context:

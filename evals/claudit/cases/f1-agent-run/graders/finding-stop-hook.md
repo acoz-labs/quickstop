@@ -1,9 +1,10 @@
 ---
-type: llm
+type: regex
+pattern: '(?=[\s\S]*\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:3`(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S])*?(?:exit 2))'
 weight: 1
 ---
-The fixture's CLAUDE.md requires agents to run `bin/ci` before reporting a change as done, but nothing enforces it: there is no `.claude/settings.json` and no hooks.
+A numbered item cites `CLAUDE.md:3` and holds `exit 2`: the scan's `stop-hook` finding ("`CLAUDE.md:3` says "Agents run this repository end to end. Run `bin/ci` before you report any change as done.", but no Stop hook runs `bin/ci`, so nothing makes Claude run it before finishing.").
 
-PASS only if the report (1) identifies that nothing automatically runs the checks when the agent finishes (no Stop hook, or no hook at all, enforcing `bin/ci`), and (2) recommends adding a `Stop` hook in `.claude/settings.json` that runs `bin/ci` (or the lint and tests it wraps) and blocks or reports when it fails. Equivalent enforcement that runs the checks automatically at the end of a turn or task, such as a `SubagentStop`/`TaskCompleted` hook or a prompt/agent-type Stop hook that requires the checks, is acceptable. A `PostToolUse` hook that runs tests after edits is acceptable only if the report presents it as the way to enforce the checks before the agent finishes.
-
-FAIL if the report only recommends "adding hooks" in general, only repeats the CLAUDE.md instruction, or suggests running CI manually or in GitHub Actions without a Claude Code hook.
+Script-graded and built from the scan of the scaffolded fixture by `tests/claudit_graders.py` (rebuild with
+`python3 tests/claudit_graders.py --write`); the pattern is `finding_pattern` in `bin/claudit-eval`, which also checks
+real-repository reports.

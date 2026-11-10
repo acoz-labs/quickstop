@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f16-stale-facts
-description: Python CLI whose CLAUDE.md names a folder, a file and a dependency that do not exist (issue 192 F12).
+description: Python CLI whose CLAUDE.md names a folder, a file and a dependency that do not exist, each its own finding on its own line, plus the allow rule.
 tags: [claudit, issue-192]
 runs: 1
 context:

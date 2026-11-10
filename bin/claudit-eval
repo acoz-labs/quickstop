@@ -2,7 +2,8 @@
 """Run the Claudit `claude plugin eval` suite on one arm, summarize a result, or run and grade headless audits.
 
 The doctor-combined arm (#192) runs headless outside `claude plugin eval`: `/doctor` and `/doctor prompt-audit .`
-in each scaffolded fixture, graded as one report by the same graders and the same judge prompt."""
+in each scaffolded fixture, graded as one report by the same script graders. `headless` audits a real repository
+from fresh clones and script-checks each report against the scan of the same clone."""
 import sys
 
 if sys.version_info < (3, 11):
@@ -12,8 +13,6 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import fnmatch
-import importlib.machinery
-import importlib.util
 import json
 import math
 import os
@@ -36,12 +35,9 @@ WEB_FETCH_RULE = 'WebFetch(domain:code.claude.com)'
 CANONICAL_PROMPT = PROMPT_KEY + "Review this project's Claude Code setup and tell me what to improve."
 STUB_MANIFEST = {'name': 'claudit-eval-no-plugin', 'version': '0.0.0',
                  'description': 'Empty plugin for the no-plugin eval arms.'}
-ARMS = ('plain', 'doctor', 'claudit', 'doctor-combined', 'claudit-deep')
-PLUGIN_ARMS = ('claudit', 'claudit-deep')
-HEADLESS_ARMS = ('doctor-combined', 'claudit-deep')  # run outside claude plugin eval
+ARMS = ('plain', 'doctor', 'claudit', 'doctor-combined')
+HEADLESS_ARMS = ('doctor-combined',)  # run outside claude plugin eval
 DEFAULT_JUDGE = 'claude-haiku-5-5'
-STRUCTURE = ('structure-alignment', 'structure-correctness', 'structure-coverage', 'structure-intent',
-             'structure-plan-length')
 # Tests set this to avoid copying the ~80 MB interpreter; real runs always copy it.
 NO_PYTHON_COPY = 'CLAUDIT_EVAL_NO_PYTHON_COPY'
 HELPER = 'skills/claudit/scripts/claudit.py'
@@ -53,124 +49,8 @@ DOCTOR_PROMPTS = ('/doctor', '/doctor prompt-audit .')
 DOCTOR_FLAGS = ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit',
                 '--strict-mcp-config', '--no-session-persistence', '--output-format', 'json')
 CALL_TIMEOUT = 1500  # seconds, as each case's timeout_seconds
-# The claudit-deep arm (#193): Claudit's --deep mode, headless as the accepted `headless` method runs Claudit, in the
-# same throwaway scaffolds as doctor-combined. Its nested `/doctor prompt-audit .` runs with doctor-combined's flags
-# (untrusted folder, Bash denied); `claude plugin eval`'s sandbox has no network, so a nested `claude -p` can't run
-# there. The helper appends the nested call's cost and time to this file.
 DEFAULT_INVOKE = '/claudit:claudit --read-only'
-DEEP_INVOKE = DEFAULT_INVOKE + ' --deep'
-DEEP_RECORD = 'CLAUDIT_DEEP_RECORD'
-DEEP_MODEL = 'CLAUDIT_DEEP_MODEL'  # pins the nested prompt-audit to the arm's model
-NESTED_FIELDS = ('status', 'model', 'max_budget_usd', 'cost_usd', 'seconds', 'permission_denials')
-# The judge `claude plugin eval` 2.1.317 uses for an llm grader: this system prompt, this user prompt (the focus is the
-# final message, `last_message`), three votes, PASS by majority; a vote passes when it says PASS and not FAIL.
-JUDGE_SYSTEM = 'You are a strict, terse evaluation judge for coding-agent traces.'
-JUDGE_PROMPT = ('You are grading the output of a coding agent against a criterion.\n\nCriterion:\n{criteria}\n\n\n'
-                'Agent output (last_message):\n{output}\n\n\nRespond with exactly one word: PASS or FAIL.')
-JUDGE_VOTES = 3
-JUDGE_FLAGS = ('--system-prompt', JUDGE_SYSTEM, '--tools', '', '--setting-sources', 'project', '--strict-mcp-config',
-               '--no-session-persistence', '--disable-slash-commands', '--output-format', 'json')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md')
-
-# Script graders built from a scan (Claudit 4.1): the report must carry the scan's plan, grades and footer.
-TOP = r'(?:^|\n)#{2,3}[ \t]+(?:The )?Top(?: [0-9]+)? changes[^\n]*'
-SECTION_END = r'(?=\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S]))|\n?(?![\s\S]))'
-NOT_ITEM = r'(?:(?!\n(?:#{3,4}[ \t]+)?(?:\*\*)?[0-9]+[.)][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*'
-GRADE_RAISE = (r'(?:^|\n)[ \t]*[-*][ \t]+\*\*(?:Correctness|Alignment|Coverage): [B-F]\*\*'
-               r'(?![^\n]*\bitems?[ \t]+#?[0-9])')
-
-
-def title_pattern(title):
-    """A plan title, word for word; a word with a dot or slash (a path) may be backticked."""
-    words = []
-    for word in title.split(' '):
-        escaped = re.escape(word).replace('\\-', '-')
-        words.append('\\x60?%s\\x60?' % escaped if re.search(r'[./]', word) else escaped)
-    return '[ \\t]+'.join(words)
-
-
-def plan_items_pattern(titles):
-    """Top changes holds exactly these items, numbered 1 to N in this order, or the no-changes line."""
-    if not titles:
-        return TOP + r'\n(?:[ \t]*\n)*[ \t]*(?:>[ \t]*)?(?:\*\*|\*|_)?No changes worth making' + NOT_ITEM + SECTION_END
-    items = ''.join(r'\n(?:#{3,4}[ \t]+)?(?:\*\*)?%d[.)][ \t]+(?:\*\*)?%s(?:\*\*|[ \t]*(?=\(|\n|(?![\s\S])))'
-                    % (n, title_pattern(t)) + NOT_ITEM for n, t in enumerate(titles, 1))
-    return TOP + NOT_ITEM + items + SECTION_END
-
-
-def footer_pattern(version):
-    return (r'(?:^|\n)[-*_]{3,}[ \t]*\n(?:[^\n]*\n)*?[^\n]*\bClaudit ' + re.escape(version)
-            + r'; audited commit \x60?[0-9a-f]{40}\b')
-
-
-def declined_pattern(refs):
-    body = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
-    return r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*' + ''.join(
-        r'(?=%s\x60?%s\b)' % (body, re.escape(ref)) for ref in refs)
-
-
-# Claudit 4.2: each declined entry's reason, its Worth reconsidering note when the scan gives one and never
-# otherwise, and the decline cited in a plan item it left behind. A Source: line never satisfies a cue.
-DECLINED_TOP = r'(?:^|\n)#{2,3}[ \t]+Declined by the project[^\n]*'
-DECLINED_BODY = r'(?:(?!\n#{1,2}[ \t])[\s\S])*?'
-ENTRY = r'(?:(?!\n[-*][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*?'
-# Any reconsider or revisit fails, wherever it is, unless a plain negation directly governs it ("not worth
-# reconsidering", "do not revisit", "no need to revisit", "nothing to reconsider"); a negation elsewhere on the line
-# doesn't count. A line that asks ("Why not reconsider ...", "Is it not worth revisiting ...?") always fails.
-RECONSIDER_WORD = r'\b(?:reconsider|revisit)\w*'
-RECONSIDER_FREE = (r'(?:^|\n)(?:[^\n]*\bwhy not\b[^\n]*%s|[^\n]*%s[^\n]*\?[ \t]*(?=\n|(?![\s\S]))'
-                   r'|[^\n]*?(?<!not worth )(?<!do not )(?<!does not )(?<!should not )(?<!no need to )(?<!nothing to )'
-                   r'(?<!nothing is worth )(?<!nothing here is worth )%s)' % (RECONSIDER_WORD, RECONSIDER_WORD,
-                                                                              RECONSIDER_WORD))
-
-
-def words_pattern(text, limit=6):
-    """The first words of a quoted text, with any quotes, backticks, emphasis or wrapping between them."""
-    words = re.findall(r"[\w'\u2019./-]+", text.split(' \u2026 ')[0])[:limit]
-    return r'[\s\x60"\u201c\u201d*_]+'.join(
-        re.escape(w.replace('\u2019', "'")).replace("'", "['\\u2019]") for w in words)
-
-
-def entry_cue(entry, cue):
-    """Lookahead: a declined entry (from its path:line to the next bullet or section) that holds the cue."""
-    ref = '%s:%d' % (entry['path'], entry['line'])
-    return r'(?=%s\x60?%s\b%s%s)' % (DECLINED_BODY, re.escape(ref), ENTRY, cue)
-
-
-def reason_cue(entry):
-    lead = r'\bReason(?:\*\*)?:(?:\*\*)?[ \t]*["\u201c\x60*_]*'
-    if entry['reason'] == 'no reason given':
-        return entry_cue(entry, lead + 'no reason given')
-    return entry_cue(entry, lead + words_pattern(entry['reason']))
-
-
-def reconsider_cue(entry):
-    evidence = entry['reconsider']['evidence']
-    cue = (re.escape(evidence['url']) if 'url' in evidence
-           else r'\x60?%s\b' % re.escape('%s:%d' % (evidence['path'], evidence['line'])))
-    return entry_cue(entry, r'\bWorth reconsidering\b' + ENTRY + cue)
-
-
-def evidence_text(reconsider):
-    evidence = reconsider['evidence']
-    return evidence['url'] if 'url' in evidence else '`%s:%d`' % (evidence['path'], evidence['line'])
-
-
-def no_reconsider_cue(entry):
-    return entry_cue(entry, r'\b(?:reconsider\w*|revisit\w*)')
-
-
-def declined_cues(cues):
-    """The Declined by the project section, holding every cue."""
-    return DECLINED_TOP + ''.join(cues)
-
-
-def defect_cited_pattern(number, item):
-    ref = '%s:%d' % (item['declined']['path'], item['declined']['line'])
-    return (TOP + NOT_ITEM + r'\n(?:#{3,4}[ \t]+)?(?:\*\*)?%d[.)][ \t]+(?:\*\*)?%s' % (number, title_pattern(item['title']))
-            + r'(?:(?!\n(?:#{3,4}[ \t]+)?(?:\*\*)?[0-9]+[.)][ \t]|\n#{1,2}[ \t]|\n[-*_]{3,})[\s\S])*?'
-            + r'\n(?![ \t]*(?:[-*][ \t]+)?(?:\*\*)?Source\b)[^\n]*\x60?%s\b' % re.escape(ref))
-
 
 class Failure(Exception):
     pass
@@ -275,13 +155,12 @@ def eval_command(plugin, args, out):
 
 
 def run(args):
-    if args.arm not in PLUGIN_ARMS and args.plugin:
-        raise Failure('--plugin applies only to the claudit and claudit-deep arms')
+    if args.arm != 'claudit' and args.plugin:
+        raise Failure('--plugin applies only to the claudit arm')
     if args.arm in HEADLESS_ARMS:
         return run_combined(args)
     if args.max_budget_usd is not None:
-        raise Failure('--max-budget-usd applies only to the doctor-combined and claudit-deep arms (claude plugin eval '
-                      'has no per-run cap)')
+        raise Failure('--max-budget-usd applies only to the doctor-combined arm (claude plugin eval has no per-run cap)')
     suite = SUITE.resolve()
     out = Path(args.output_dir).resolve() if args.output_dir else default_output(args.arm)
     scratch = Path(tempfile.mkdtemp(prefix='claudit-eval-')).resolve()
@@ -325,6 +204,12 @@ def run(args):
             (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
             print(markdown(summary))
             print(f'Summary: {out / "summary.json"}')
+            if not args.case:
+                try:
+                    check_suite(data, args.runs)
+                except Failure as exc:
+                    print(f'NOT A WHOLE-SUITE RESULT: {exc}', file=sys.stderr)
+                    code = code or 1
         else:
             print(f'No result.json was written to {out}', file=sys.stderr)
             code = code or 1
@@ -436,6 +321,10 @@ def summarize(result, arm=None, model=None, judge_model=None, web_fetch=None):
                 'skipped_paid_graders'):
         totals[key] = sum(row[key] for row in rows)
     totals = finish(totals)
+    items = [item for case in result.get('cases', []) or [] for item in case.get('arms', {}).get('with', []) or []]
+    for key, field in (('agent_cost_usd_median', 'costUsd'), ('wall_seconds_median', 'durationSeconds')):
+        values = [number(item.get(field)) for item in items]
+        totals[key] = round(statistics.median(values), 6) if values else None
     return {'arm': arm, **ident,
             'total_cost_usd': result.get('costUsd'),
             'agent_plus_judge_cost_usd': round(totals['agent_cost_usd'] + totals['judge_cost_usd'], 6),
@@ -478,8 +367,31 @@ def merge_results(results):
     return merged
 
 
-def summarize_files(paths, arm=None, model=None, judge_model=None, web_fetch=None):
-    return summarize(merge_results([load_result(path) for path in paths]), arm, model, judge_model, web_fetch)
+def summarize_files(paths, arm=None, model=None, judge_model=None, web_fetch=None, expect_runs=None):
+    result = merge_results([load_result(path) for path in paths])
+    if expect_runs:
+        check_suite(result, expect_runs)
+    return summarize(result, arm, model, judge_model, web_fetch)
+
+
+def check_suite(result, runs):
+    """Refuse a result that isn't the whole suite: every case, `runs` runs each, every grader in every run. A partial
+    or mislabelled run must never read as a pass."""
+    suite = {path.parent.name: {grader.stem for grader in (path.parent / 'graders').glob('*.md')}
+             for path in SUITE.glob('cases/*/case.yaml')}
+    found = {case.get('name'): case for case in result.get('cases', []) or []}
+    problems = ['missing case %s' % name for name in sorted(set(suite) - set(found))]
+    problems += ['case %s is not in the suite' % name for name in sorted(set(found) - set(suite))]
+    for name in sorted(set(suite) & set(found)):
+        items = found[name].get('arms', {}).get('with', []) or []
+        if len(items) != runs:
+            problems.append('%s has %d runs, not %d' % (name, len(items), runs))
+        for number, item in enumerate(items, 1):
+            graded = {str(grader.get('name', '')) for grader in item.get('graders') or []}
+            if graded != suite[name]:
+                problems.append('%s run %d graded %s, not %s' % (name, number, sorted(graded), sorted(suite[name])))
+    if problems:
+        raise Failure('not the whole suite: ' + '; '.join(problems))
 
 
 def markdown(summary):
@@ -502,179 +414,159 @@ def markdown(summary):
                      f"| {cost(row['judge_cost_usd'])} ({cost(row['judge_cost_usd_mean'])}) "
                      f"| {row['wall_seconds']:.1f} ({row['wall_seconds_mean']:.1f}) | {row['errors']} "
                      f"| {row['skipped_paid_graders']} |")
+    totals = summary['totals']
+    if totals.get('agent_cost_usd_median') is not None:
+        lines.append(f"\nMedian per run: agent ${totals['agent_cost_usd_median']:.4f}, "
+                     f"{totals['wall_seconds_median']:.1f} s")
     for prompt, part in summary['totals'].get('parts', {}).items():
         lines.append(f"\n`{prompt}`: agent ${cost(part['cost_usd'])}, {part['wall_seconds']:.1f} s in total")
     return '\n'.join(lines)
 
 
-def load_helper(plugin):
-    """The candidate's scan helper as a module, for its test-data rule."""
-    path = Path(plugin) / HELPER
-    loader = importlib.machinery.SourceFileLoader('claudit_helper', str(path))
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader('claudit_helper', loader))
-    sys.dont_write_bytecode = True  # never leave a cache in the plugin bytes
-    loader.exec_module(module)
-    return module
+# Claudit 5 report graders (#207). One definition serves the fixture graders (`claude plugin eval` runs them as
+# JavaScript regexes; tests/claudit_graders.py writes them from each case's scan) and the headless checks of real
+# repositories. They match the report's structure and the scan's citations and fix tokens, never phrasing. The
+# patterns use only what Python's re and JavaScript share: no lookbehind, no inline flags.
+ITEM_START = r'\n[0-9]+\.[ \t]'
+ITEM_END = r'(?=\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---|(?![\s\S]))'
+IN_ITEM = r'(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S])'
+FENCE = r'[ \t]*```[^\n]*\n(?:(?![ \t]*```)[^\n]*\n)*[ \t]*```[ \t]*(?:\n|(?![\s\S]))'
+BLANK = r'[ \t]*\n'
+FOOTER_FORMS = (r'Outside the repo, not checked: [^\n]*', r'Because `[^`\n]+` above the repo loads[^\n]*',
+                r'`[^`\n]+` is a symlink to `[^`\n]+`; the audit reads [^\n]*', r'Not checked: [^\n]*',
+                r'Run `/doctor prompt-audit` for contradictions and wording\.', r'Claudit [0-9.]+; [^\n]*',
+                r'Claude Code version unknown[^\n]*', r'Not a git repository[^\n]*',
+                r'`[^`\n]+` is not valid; nothing dismissed from it\.')
+KIND_TOKENS = {'stop-hook': [r'exit 2'], 'oversized': [r'200'], 'long-description': [r'1,?536'],
+               'agent-descriptions': [r'15,?000'], 'agents-md-not-loaded': [r'AGENTS\.md'],
+               'visible-skill': [r'disable-model-invocation|subagent.s prompt'],
+               'history': [r'changelog|decision record']}
 
 
-def grade_report(text, scan, helper):
-    """Script checks of one report against the scan of the same tree: {check: passed}."""
-    def letter(name):
-        match = re.search(r'\*\*%s: ([A-F])\*\*' % name, text)
-        return match.group(1) if match else None
-
-    titles = [item['title'] for item in scan['plan']['items']]
-    checks = {'plan_items': re.search(plan_items_pattern(titles), text, re.I) is not None,
-              'grades': all(letter(name.capitalize()) == grade['letter'] for name, grade in scan['grades'].items()),
-              'grade_raise': re.search(GRADE_RAISE, text, re.I) is None,
-              'footer': scan['footer'] in text,
-              # A self-check of the scan, not of the report: it raised nothing on test data.
-              'scan_no_test_data_findings': not any(helper.data_path(f['path']) for f in scan['findings'])}
-    top = re.search(TOP + r'((?:(?!\n#{1,2}[ \t]|\n[-*_]{3,}[ \t]*(?:\n|(?![\s\S])))[\s\S])*)', text, re.I)
-    checks['optional_not_planned'] = bool(top) and not any(
-        entry['path'] in top.group(1) for entry in scan.get('optional', []))
-    if scan.get('declined'):
-        refs = ['%s:%d' % (entry['path'], entry['line']) for entry in scan['declined']]
-        checks['declined_listed'] = re.search(declined_pattern(refs), text) is not None
-        checks['declined_reasons'] = re.search(declined_cues(reason_cue(e) for e in scan['declined']), text,
-                                               re.I) is not None
-        checks['reconsider_notes'] = all(
-            re.search(declined_cues([reconsider_cue(e)]), text, re.I) if e.get('reconsider')
-            else not re.search(declined_cues([no_reconsider_cue(e)]), text, re.I) for e in scan['declined'])
-        if not any(e.get('reconsider') for e in scan['declined']):
-            checks['reconsider_notes'] = checks['reconsider_notes'] and not re.search(RECONSIDER_FREE, text, re.I)
-        cited = [(n, item) for n, item in enumerate(scan['plan']['items'], 1) if item.get('declined')]
-        if cited:
-            checks['declined_defects_cited'] = all(re.search(defect_cited_pattern(n, item), text, re.I)
-                                                   for n, item in cited)
-    if scan.get('stale_candidates'):
-        checks['stale_candidates_listed'] = all(stale_listed(text, c) for c in scan['stale_candidates'])
-    checks['generated_labels'] = not mislabelled_generated(text, scan)
-    return checks
+def cited(path, line):
+    return re.escape('`%s:%d`' % (path, line))
 
 
-# 4.3.1 script checks, both fail closed.
-#
-# stale_listed: a stale candidate is listed when one clause of one sentence cites its `path:line` with a stale or
-# history cue, and nothing takes it back: no negation in that clause, and no dismissal anywhere in the sentence or
-# its bullet ("Not kept", "dropped", "accurate", "on purpose", "needs no change", "fine"). A clause ends at ; or at
-# "but", "though", "although", "however", "yet", "while", "whereas" or a spaced dash. A `--deep` report that drops the
-# line with a reason is a separate outcome (`stale_outcome`), never "listed".
-#
-# mislabelled_generated: a sentence with an unnegated "generated" labels every file it names (backticked, bold or
-# bare), and, when it names none or refers back ("they", "it", "both", "all", "these", "those", "each", "either"),
-# every file the sentence before it names (in its bullet, or else the bullet before). Each labelled file must be in
-# the scan's `generated` list. The one exception is the object list of "generated from/by/with/using `<file>`" in a
-# sentence with a single "generated" and no back-reference: those files are the source or the generator.
-STALE_CUE = re.compile(r'\b(?:stale|histor(?:y|ical|ically)|outdated|out[ -]of[ -]date)\b', re.I)
-STALE_LABEL = re.compile(r'^\W*(?:Possibly\s+stale|Stale(?:\s+candidates?)?)(?:\s*\([^)]*\))?\s*:\s*', re.I)
-NEGATION = re.compile(r"\b(?:not|no|none|nothing|never|neither|nor|without|isn|aren|wasn|weren|doesn|don|didn)\b|"
-                      r"n['’]t\b", re.I)
-HEDGE = re.compile(r'\b(?:may|might|could|perhaps|maybe|possibly|probably|arguably|seems?|looks?|appears?|if)\b', re.I)
-DISMISSAL = re.compile(r"\bnot[ \t]+kept\b|\bdrop(?:s|ped|ping)?\b|\b(?:accurate|correct|current|intentional|valid|"
-                       r"true|fine|harmless|deliberate(?:ly)?)\b|\bon[ \t]+purpose\b|\bas[ \t]+is\b|\b(?:keep|leave)[ \t]+"
-                       r"(?:it|them|this|that)\b|\b(?:no|nothing)[ \t]+(?:change|action|fix)\w*\b|\bneeds?[ \t]+no\b|"
-                       r"\bfalse[ \t]+positive\b|\bnot[ \t]+a[ \t]+(?:defect|problem|finding)\b", re.I)
-CLAUSE_END = re.compile(r'\s*;\s*|,?\s+(?:but|though|although|however|yet|while|whereas)\b|\s+[—–-]\s+', re.I)
-QUOTED = re.compile(r'"[^"\n]*"|\u201c[^\u201d\n]*\u201d')
-SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z`*"(\[])')
-GENERATED_WORD = re.compile(r'\b(?:auto-?|machine-)?generated\b', re.I)
-GENERATED_NEGATED = re.compile(r"(?:\b(?:not|never)|n['’]t)[ \t]+(?:been[ \t]+)?$", re.I)
-NEGATION_UNDONE = re.compile(r'\b(?:but|only|just|merely|also|either|rather)\b', re.I)
-BACK_REFERENCE = re.compile(r'\b(?:they|them|it|its|both|all|these|those|each|either)\b', re.I)
-FILE = (r'(?:`[^`\s]*[/.][^`\s]*`|\*\*[^*\s]*[/.][^*\s]*\*\*|(?<![\w/.`*@-])(?:\.{0,2}/)?(?:[\w.-]+/)+[\w.-]*[\w-]|'
-        r'(?<![\w/.`*@-])[\w-][\w.-]*\.(?:md|json|ya?ml|toml|txt|py|sh|lock|cfg|ini|js|ts|go|rs)\b)')
-FILE_TOKEN = re.compile(FILE)
-URL = re.compile(r'(?:https?://|www\.)\S+|\]\([^)\s]*\)')
-SOURCE_OBJECTS = re.compile(r'\b(?:auto-?|machine-)?generated[ \t]+(?:(?:from|by|with|using)[ \t]+(?:the[ \t]+)?%s'
-                            r'(?:[ \t]*(?:,|and|or)[ \t]+(?:the[ \t]+)?%s)*[ \t]*)+' % (FILE, FILE), re.I)
+def finding_tokens(finding):
+    """Regexes a numbered item for this finding must hold: the exact rules of its fix, or the name it is about."""
+    kind = finding['kind']
+    if kind in ('allowlist', 'gate-ask'):
+        rules = [re.escape(rule) for rule in re.findall(r'"(Bash\([^"]+\))"', finding['fix'])]
+        return rules + ([r'[Bb]ranch protection|deploy or release system'] if kind == 'gate-ask' else [])
+    if kind == 'duplicate':
+        return [re.escape(c.split(':')[0]) for c in re.findall(r'`([^`]+:[0-9]+)`', finding['problem'])
+                if c != '%s:%d' % (finding['path'], finding['line'])]
+    if kind in KIND_TOKENS:
+        return KIND_TOKENS[kind]
+    return [re.escape(finding['id'].split(':', 2)[-1])]  # stale-ref, stale-command, stale-dep, missing-name, broken-import
 
 
-def file_paths(sentence):
-    """[(start, end, path)] for the files a sentence names, outside URLs and link targets."""
-    masked = URL.sub(lambda m: ' ' * len(m.group()), sentence)
-    out = []
-    for m in FILE_TOKEN.finditer(masked):
-        path = m.group().strip('`*').rstrip('.,;:)')
-        path = re.sub(r':[0-9]+(?:[-–][0-9]+)?$', '', path)
-        path = path[2:] if path.startswith('./') else path
-        if path and not re.fullmatch(r'[\d.]+|v?\d+(?:\.\d+)+', path):  # a version number isn't a file
-            out.append((m.start(), m.end(), path))
-    return out
+def finding_pattern(finding):
+    """`finding-*`: a numbered item that starts with the finding's citation and holds each of its tokens."""
+    item = ITEM_START + r'[ \t]*' + cited(finding['path'], finding['line'])
+    return ''.join(r'(?=[\s\S]*%s%s*?(?:%s))' % (item, IN_ITEM, token) for token in finding_tokens(finding))
 
 
-def report_sentences(text):
-    """(unit index, sentence) for each sentence of each bullet or paragraph line; a heading is its own unit."""
-    for n, unit in enumerate(label_units(text)):
-        for sentence in SENTENCE_END.split(unit):
-            yield n, sentence
+def findings_pattern(findings):
+    return '^' + ''.join(findings_parts(findings))
 
 
-def stale_outcome(text, candidate):
-    """'listed', 'dropped with a reason' (a line citing it under "Not kept:" with more than the citation), or
-    'missing'."""
-    ref = re.compile(r'%s:%d(?![0-9])' % (re.escape(candidate['path']), candidate['line']))
-    declined, dropped = False, False
-    for unit in label_units(text):
-        if unit.startswith('#'):
-            declined = DECLINE_HEAD.match(unit) is not None
-            continue
-        unit = QUOTED.sub('""', unit)  # a quote is the file's text, not the report's judgement
-        if declined or not ref.search(unit):
-            continue
-        if re.match(r'^\W*Not[ \t]+kept\b', unit, re.I) and len(ref.sub('', unit).split()) > 4:
-            dropped = True
-        if DISMISSAL.search(unit):
-            continue
-        for sentence in SENTENCE_END.split(unit):
-            if '?' in sentence:  # a question asserts nothing
-                continue
-            labelled = STALE_LABEL.match(sentence)
-            body = sentence[labelled.end():] if labelled else sentence
-            for clause in CLAUSE_END.split(body):
-                if not ref.search(clause) or NEGATION.search(clause) or HEDGE.search(clause):
-                    continue
-                if labelled or STALE_CUE.search(clause):
-                    return 'listed'
-    return 'dropped with a reason' if dropped else 'missing'
+def findings_parts(findings):
+    """The parts of `no-invented-findings`, exactly the scan's findings as numbered items, one to one: every item
+    starts with one of the scan's citations, each citation has as many items as the scan has findings there, and each
+    item holds a token of its citation's findings. So an invented item, an item with no citation, a second item at an
+    expected citation and a dropped item all fail. The parts are lookaheads from the start of the report."""
+    if not findings:
+        return [r'(?![\s\S]*%s)' % ITEM_START]
+    allowed = '|'.join(dict.fromkeys(cited(f['path'], f['line']) for f in findings))
+    parts = [r'(?![\s\S]*%s[ \t]*(?!%s))' % (ITEM_START, allowed)]
+    by_place = {}
+    for f in findings:
+        by_place.setdefault((f['path'], f['line']), []).append(f)
+    for (path, line), group in by_place.items():
+        start = ITEM_START + r'[ \t]*' + cited(path, line)
+        rest = r'(?:(?!%s)[\s\S])*' % start
+        parts.append(r'(?=%s(?:%s%s){%d}(?![\s\S]))' % (rest, start, rest, len(group)))
+        tokens = '|'.join('(?:%s)' % finding_tokens(f)[0] for f in group)
+        parts.append(r'(?![\s\S]*%s(?:(?!%s)%s)*%s)' % (start, tokens, IN_ITEM, ITEM_END))
+    return parts
 
 
-def stale_listed(text, candidate):
-    return stale_outcome(text, candidate) == 'listed'
+def summary_pattern(count):
+    """`structure-summary`: the line after the title is the scan's count ("Nothing found." for none)."""
+    line = 'Nothing found\\.' if not count else '%d findings?\\.' % count
+    return r'^[ \t\n]*# Claudit: [^\n]+\n(?:[ \t]*\n)*%s[ \t]*(?:\n|(?![\s\S]))' % line
 
 
-def label_units(text):
-    """A bullet or paragraph line with the indented lines that continue it."""
-    units = []
-    for line in text.splitlines():
-        if units and line[:1] in (' ', '\t') and line.strip() and not re.match(r'\s*(?:[-*+]|[0-9]+[.)])\s', line):
-            units[-1] += ' ' + line.strip()
-        elif line.strip():
-            units.append(line)
-    return units
+def template_pattern():
+    """`no-invented-prose`: the report holds only the template's parts, each in its own shape. Items may hold
+    indented lines and fenced blocks; "Not reported" holds bullets; "Always loaded" holds the table; the footer holds
+    the scan's footer lines. Any other prose, such as advice under the table or in the footer, fails."""
+    # Each line has one reading (an indented line holds text and opens no fence), so a failed match stays linear.
+    item = r'[0-9]+\.[ \t][^\n]*\n(?:%s|[ \t]+(?!```)\S[^\n]*\n|%s)*' % (FENCE, BLANK)
+    footer = '(?:%s)' % '|'.join(FOOTER_FORMS)
+    return (r'^[ \t\n]*# Claudit: [^\n]+\n(?:%s)+(?:Nothing found\.|[0-9]+ findings?\.)[ \t]*\n(?:%s)*' % (BLANK, BLANK)
+            + r'(?:%s)*' % item
+            + r'(?:## Not reported[ \t]*\n(?:%s)*(?:- [^\n]*\n(?:[ \t]+\S[^\n]*\n)*(?:%s)*)+)?' % (BLANK, BLANK)
+            + r'## Always loaded[ \t]*\n(?:%s)*(?:\|[^\n]*\n)+(?:%s)*' % (BLANK, BLANK)
+            + r'---[ \t]*\n%s[ \t]*(?:\n%s[ \t]*)*[ \t\n]*(?![\s\S])' % (footer, footer))
 
 
-def mislabelled_generated(text, scan):
-    """(sentence, path) pairs where a report calls a file generated that the scan doesn't list as generated."""
-    made = {entry['path'] for entry in scan.get('generated', []) or []}
-    found, previous = [], []
-    for _, sentence in report_sentences(text):
-        if sentence.startswith('#'):
-            previous = []
-            continue
-        paths = file_paths(sentence)
-        said = [m for m in GENERATED_WORD.finditer(sentence)
-                if not (GENERATED_NEGATED.search(sentence[:m.start()]) and not NEGATION_UNDONE.search(sentence))]
-        if said:
-            back = BACK_REFERENCE.search(sentence) is not None
-            labelled = [p for _, _, p in paths] + ([p for _, _, p in previous] if back or not paths else [])
-            excused = set()
-            if len(said) == 1 and not back:
-                for m in SOURCE_OBJECTS.finditer(sentence):
-                    excused |= {p for start, end, p in paths if m.start() <= start and end <= m.end()}
-            found += [(sentence, p) for p in dict.fromkeys(labelled) if p not in made and p not in excused]
-        previous = paths or previous
-    return found
+def footer_pattern(version):
+    """`structure-footer`: after the rule, the not-checked line, the /doctor prompt-audit line and the version line."""
+    lines = ('Not checked: user and managed settings, settings validity, server-side branch protection\\.',
+             'Run `/doctor prompt-audit` for contradictions and wording\\.',
+             'Claudit %s; (?:audited commit [0-9a-f]{40}|not a git repo)' % re.escape(version))
+    return ''.join(r'(?=[\s\S]*\n---[ \t]*\n[\s\S]*%s)' % line for line in lines)
+
+
+def lines_pattern(lines, section):
+    """Each line, verbatim up to quote marks, under a heading or after the footer rule (`section` is its regex)."""
+    def loose(text):
+        return re.escape(text).replace('"', '["“”]')
+    return ''.join(r'(?=[\s\S]*%s[\s\S]*%s)' % (section, loose(line)) for line in lines)
+
+
+NOT_REPORTED = r'\n## Not reported[ \t]*\n'
+FOOTER_RULE = r'\n---[ \t]*\n'
+
+
+def report_items(text):
+    """[(citation or None, body)] for each numbered item of a report's findings list."""
+    items = []
+    for match in re.finditer(ITEM_START + r'([\s\S]*?)' + ITEM_END, '\n' + text):
+        body = match.group(1)
+        found = re.match(r'[ \t]*`([^`\n]+):([0-9]+)`', body)
+        items.append(((found.group(1), int(found.group(2))) if found else None, body))
+    return items
+
+
+def grade_report(text, scan):
+    """Script checks of one real-repository report against the scan of the same clone: {check: passed}."""
+    items = report_items(text)
+    expected = {}
+    for f in scan['findings']:
+        expected[(f['path'], f['line'])] = expected.get((f['path'], f['line']), 0) + 1
+    at = {}
+    for place, _ in items:
+        if place:
+            at[place] = at.get(place, 0) + 1
+    section = re.search(NOT_REPORTED + r'([\s\S]*?)(?=\n#{1,6}[ \t]|\n---|(?![\s\S]))', '\n' + text)
+    bullets = re.findall(r'(?:^|\n)- ([^\n]*)', section.group(1)) if section else []
+    dropped = [b for b in bullets if not b.startswith('Respected:')]
+    dropped_at = {(m.group(1), int(m.group(2))) for b in dropped for m in [re.match(r'`([^`\n]+):([0-9]+)`', b)] if m}
+    return {
+        'items_cited': all(place for place, _ in items),
+        'items_from_scan': all(count <= expected.get(place, 0) for place, count in at.items()),
+        'scan_accounted': all(at.get(place, 0) + (place in dropped_at) >= count for place, count in expected.items()),
+        'drops_cite_the_repository': all(re.match(r'`[^`\n]+:[0-9]+`', b) and len(re.findall(r'`[^`\n]+:[0-9]+`', b)) >= 2
+                                         for b in dropped),
+        'respected_listed': re.search(lines_pattern([r['text'] for r in scan['respected']], NOT_REPORTED),
+                                      '\n' + text) is not None,
+        'summary': re.search(summary_pattern(len(items)), text) is not None,
+        'footer': re.search(lines_pattern(scan['footer'], FOOTER_RULE), '\n' + text) is not None,
+        'template': re.search(template_pattern(), text) is not None,
+    }
 
 
 def final_reply(trace):
@@ -754,16 +646,13 @@ def refuse_instructions_above(path, what):
             raise Failure(f'{parent / found[0]} is above {what} and would load; set TMPDIR elsewhere')
 
 
-def claude_call(prompt, cwd, flags, model, budget, stdin_prompt=False, env=None):
+def claude_call(prompt, cwd, flags, model, budget):
     """One `claude -p` call: (command, parsed JSON or {}, stdout, stderr, exit status, wall seconds)."""
-    command = ['claude', '-p', *([] if stdin_prompt else [prompt]), *flags, '--model', model,
-               '--max-budget-usd', str(budget)]
+    command = ['claude', '-p', prompt, *flags, '--model', model, '--max-budget-usd', str(budget)]
     started = time.monotonic()
     try:
-        proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True, env=dict(claude_env(), **(env or {})),
-                              timeout=CALL_TIMEOUT,
-                              input=prompt if stdin_prompt else None,
-                              stdin=None if stdin_prompt else subprocess.DEVNULL)
+        proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True, env=claude_env(), timeout=CALL_TIMEOUT,
+                              stdin=subprocess.DEVNULL)
         stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
     except subprocess.TimeoutExpired as exc:
         stdout, stderr, code = exc.stdout or '', (exc.stderr or '') + f'\ntimed out after {CALL_TIMEOUT} s', -1
@@ -793,60 +682,8 @@ def doctor_combined(workspace, model, budget, record):
     return '\n'.join(texts), parts
 
 
-def nested_calls(path):
-    """The nested prompt-audit calls the helper recorded: [{status, cost_usd, seconds, permission_denials}]."""
-    try:
-        lines = Path(path).read_text().splitlines()
-    except OSError:
-        return []
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            continue
-    return [c for c in out if isinstance(c, dict)]
-
-
-def keep_nested(log, stem):
-    """Keep what the nested prompt-audit said (#193 4.3.1): the helper's records as <stem>.jsonl and each call's raw
-    report text in <stem>-audit.md (numbered when there is more than one call)."""
-    calls = nested_calls(log)
-    if not calls:
-        return
-    Path(f'{stem}.jsonl').write_text(''.join(json.dumps(c) + '\n' for c in calls))
-    for n, call in enumerate(calls, 1):
-        name = f'{stem}-audit.md' if len(calls) == 1 else f'{stem}-audit-{n}.md'
-        Path(name).write_text(f"<!-- status: {call.get('status')} -->\n{call.get('report') or ''}\n")
-
-
-def deep_flags(plugin):
-    return ('--plugin-dir', str(plugin), *HEADLESS_FLAGS)
-
-
-def claudit_deep(workspace, args, record, log):
-    """Claudit --deep in a workspace, headless: (report, parts). The one part's cost and time include the nested
-    prompt-audit call the helper recorded in `log`."""
-    prompt = args.invoke if args.invoke != DEFAULT_INVOKE else DEEP_INVOKE
-    plugin = Path(args.plugin or DEFAULT_PLUGIN).resolve()
-    command, raw, stdout, stderr, code, wall = claude_call(prompt, workspace, deep_flags(plugin), args.model,
-                                                           args.max_budget_usd,
-                                                           env={DEEP_RECORD: str(log), DEEP_MODEL: args.model})
-    record('claudit-deep', stdout, stderr)
-    nested = nested_calls(log)
-    text = raw.get('result') if isinstance(raw.get('result'), str) else ''
-    denials = raw.get('permission_denials')
-    outer = number(raw.get('total_cost_usd'))
-    part = {'prompt': prompt, 'command': shlex.join(command), 'exit': code,
-            'costUsd': round(outer + sum(number(c.get('cost_usd')) for c in nested), 6), 'agentCostUsd': outer,
-            'durationSeconds': round(wall, 1), 'isError': bool(raw.get('is_error')) or code != 0 or not text.strip(),
-            'permissionDenials': len(denials) if isinstance(denials, list) else 0,
-            'nested': [{k: c.get(k) for k in NESTED_FIELDS} for c in nested]}
-    return text, [part]
-
-
 def read_grader(path):
-    """A grader file's frontmatter fields and its body (the criterion an llm grader sends the judge)."""
+    """A grader file's frontmatter fields and its body."""
     text = Path(path).read_text()
     if not text.startswith('---\n') or '\n---\n' not in text[3:]:
         raise Failure(f'{path}: no frontmatter')
@@ -862,46 +699,21 @@ def read_grader(path):
     return fields
 
 
-def judge_output(text):
-    """The judge sees at most 100,000 characters: the first 80,000 and the last 20,000, as the eval host elides."""
-    head, tail = 80000, 20000
-    if len(text) <= head + tail:
-        return text
-    return text[:head] + f'\n[…{len(text) - head - tail} chars elided…]\n' + text[-tail:]
-
-
-def grade_with_graders(text, graders, judge, workdir):
-    """Grade a report with a case's graders: regex graders in Python's re (the suite's patterns behave the same in
-    JavaScript, which tests check), llm graders with the eval host's judge prompt. Returns (results, judge cost)."""
-    results, cost = [], 0.0
+def grade_with_graders(text, graders):
+    """Grade a report with a case's graders in Python's re (the suite's patterns behave the same in JavaScript, which
+    tests check). The suite has only script graders; any other type is recorded unscored, a miss."""
+    results = []
     for grader in graders:
         if grader.get('type') == 'regex':
             found = re.search(grader['pattern'], text, re.I if 'i' in grader.get('flags', '') else 0) is not None
             passed = found != (grader.get('match') == 'not_contains')
             results.append({'name': grader['name'], 'type': 'regex', 'passed': passed, 'scored': True})
-        elif grader.get('type') == 'llm':
-            prompt = JUDGE_PROMPT.format(criteria=grader['criteria'], output=judge_output(text))
-            votes, replies = [], []
-            for _ in range(JUDGE_VOTES):
-                _, raw, stdout, stderr, code, _ = claude_call(prompt, workdir, JUDGE_FLAGS, judge['model'],
-                                                              judge['budget'], stdin_prompt=True)
-                cost += number(raw.get('total_cost_usd'))
-                reply = raw.get('result') if isinstance(raw.get('result'), str) and code == 0 else ''
-                votes.append(bool(re.search(r'\bPASS\b', reply, re.I)) and not re.search(r'\bFAIL\b', reply, re.I))
-                # Every reply is evidence (#193 4.3.1): the text, or why there was none.
-                replies.append({'reply': raw.get('result') if isinstance(raw.get('result'), str) else None,
-                                'exit': code, 'isError': bool(raw.get('is_error')),
-                                'costUsd': number(raw.get('total_cost_usd')),
-                                'stderr': None if code == 0 else (stderr or stdout or '')[-2000:]})
-            results.append({'name': grader['name'], 'type': 'llm', 'passed': sum(votes) > len(votes) / 2,
-                            'scored': True, 'judgeVotes': votes, 'judgeReplies': replies,
-                            'explanation': 'judge votes: ' + ' '.join('PASS' if v else 'FAIL' for v in votes)})
         else:
             results.append({'name': grader['name'], 'type': grader.get('type'), 'passed': False, 'scored': False})
-    return results, round(cost, 6)
+    return results
 
 
-def combined_case_run(case, number, args, out, judge):
+def combined_case_run(case, number, args, out):
     """One doctor-combined run of one case in a fresh scaffolded workspace: the run record for result.json."""
     graders = [read_grader(path) for path in sorted((case / 'graders').glob('*.md'))]
     scratch = Path(tempfile.mkdtemp(prefix='claudit-combined-')).resolve()
@@ -923,29 +735,22 @@ def combined_case_run(case, number, args, out, judge):
             (calls / f'{case.name}-run{number}-{stem}.json').write_text(stdout)
             (calls / f'{case.name}-run{number}-{stem}.stderr.txt').write_text(stderr)
 
-        if args.arm == 'claudit-deep':
-            report, parts = claudit_deep(workspace, args, record, scratch / 'deep-record.jsonl')
-            keep_nested(scratch / 'deep-record.jsonl', calls / f'{case.name}-run{number}-nested')
-        else:
-            report, parts = doctor_combined(workspace, args.model, args.max_budget_usd, record)
-        judge_dir = scratch / 'judge'
-        judge_dir.mkdir()
-        results, judge_cost = grade_with_graders(report, graders, judge, judge_dir)
+        report, parts = doctor_combined(workspace, args.model, args.max_budget_usd, record)
+        results = grade_with_graders(report, graders)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     reports = out / 'reports'
     reports.mkdir(exist_ok=True)
     (reports / f'{case.name}-run{number}.md').write_text(report)
     failed = [part['prompt'] for part in parts if part['isError']]
-    return {'costUsd': round(sum(part['costUsd'] for part in parts), 6), 'judgeCostUsd': judge_cost,
+    return {'costUsd': round(sum(part['costUsd'] for part in parts), 6), 'judgeCostUsd': 0,
             'durationSeconds': round(sum(part['durationSeconds'] for part in parts), 1),
             'error': f'no usable reply from {", ".join(failed)}' if failed else None,
             'graders': results, 'parts': [{k: v for k, v in part.items() if k != 'command'} for part in parts]}
 
 
 def run_combined(args):
-    """A headless arm (doctor-combined or claudit-deep) over the suite: a result.json in the shape `claude plugin
-    eval` writes."""
+    """The doctor-combined arm over the suite: a result.json in the shape `claude plugin eval` writes."""
     cases = sorted(path.parent for path in SUITE.glob('cases/*/case.yaml'))
     if args.case:
         cases = [case for case in cases if fnmatch.fnmatchcase(case.name, args.case)]
@@ -955,14 +760,7 @@ def run_combined(args):
         raise Failure('--max-budget-usd (per headless call) is required for the %s arm' % args.arm)
     out = Path(args.output_dir).resolve() if args.output_dir else default_output(args.arm)
     jobs = [(case, n) for case in cases for n in range(1, args.runs + 1)]
-    judge = {'model': args.judge_model, 'budget': args.judge_budget_usd}
-    if args.arm == 'claudit-deep':
-        plugin = Path(args.plugin or DEFAULT_PLUGIN).resolve()
-        if not (plugin / '.claude-plugin/plugin.json').is_file():
-            raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {plugin}')
-        calls = [(args.invoke if args.invoke != DEFAULT_INVOKE else DEEP_INVOKE, deep_flags(plugin))]
-    else:
-        calls = [(prompt, DOCTOR_FLAGS) for prompt in DOCTOR_PROMPTS]
+    calls = [(prompt, DOCTOR_FLAGS) for prompt in DOCTOR_PROMPTS]
     lines = [shlex.join(['claude', '-p', prompt, *flags, '--model', args.model, '--max-budget-usd',
                          str(args.max_budget_usd)]) for prompt, flags in calls]
     print(f'Cases: {", ".join(case.name for case in cases)} x {args.runs} run(s)')
@@ -973,12 +771,7 @@ def run_combined(args):
     (out / 'command.txt').write_text(
         f'runner: {shlex.join([sys.argv[0], *sys.argv[1:]])}\ncwd: {Path.cwd()}\n' + ''.join(
             'headless: ' + line + '\n' for line in lines)
-        + 'judge: ' + shlex.join(['claude', '-p', *JUDGE_FLAGS, '--model', args.judge_model, '--max-budget-usd',
-                                  str(args.judge_budget_usd)]) + ' < prompt\n'
-        + 'headless cwd: <tmp>/claudit-combined-XXXX/home/cwd (a fresh scaffold per run)\n'
-        + ('nested: claudit.py deep runs claude -p "/doctor prompt-audit ." with the doctor-combined flags plus Bash and '
-           'Skill(claudit:claudit) denied, --model %s (%s=%s) and --max-budget-usd 0.5 (SKILL.md step 1)\n'
-           % (args.model, DEEP_MODEL, args.model) if args.arm == 'claudit-deep' else ''))
+        + 'headless cwd: <tmp>/claudit-combined-XXXX/home/cwd (a fresh scaffold per run)\n')
     version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
     lock, spent, partial, runs = threading.Lock(), [0.0], [False], {}
     started = time.monotonic()
@@ -988,7 +781,7 @@ def run_combined(args):
             if spent[0] >= args.max_cost_usd:
                 partial[0] = True
                 return job, None
-        item = combined_case_run(*job, args, out, judge)
+        item = combined_case_run(*job, args, out)
         with lock:
             spent[0] += item['costUsd'] + item['judgeCostUsd']
             print(f"{job[0].name} run{job[1]}: ${item['costUsd'] + item['judgeCostUsd']:.4f} "
@@ -1077,7 +870,6 @@ def headless(args):
     plugin = Path(args.plugin).resolve()
     if not (plugin / '.claude-plugin/plugin.json').is_file():
         raise Failure(f'not a plugin (missing .claude-plugin/plugin.json): {plugin}')
-    helper = load_helper(plugin)
     out = Path(args.output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     version = subprocess.run(['claude', '--version'], capture_output=True, text=True, env=claude_env()).stdout.strip()
@@ -1094,16 +886,19 @@ def headless(args):
             command = ['claude', '-p', args.invoke, '--plugin-dir', str(plugin), *HEADLESS_FLAGS,
                        '--model', args.model, '--max-budget-usd', str(args.max_budget_usd)]
             started = dt.datetime.now(dt.timezone.utc)
-            log = work / 'deep-record.jsonl'  # what a --deep run's nested prompt-audit cost
             proc = subprocess.run(command, cwd=clone, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                  env=dict(claude_env(), **{DEEP_RECORD: str(log), DEEP_MODEL: args.model}))
+                                  env=claude_env())
             wall = (dt.datetime.now(dt.timezone.utc) - started).total_seconds()
             run_dir = out / f'run{number}'
             run_dir.mkdir(exist_ok=True)
-            keep_nested(log, run_dir / 'nested')
-            nested = [{k: c.get(k) for k in NESTED_FIELDS} for c in nested_calls(log)]
             scan = subprocess.run([sys.executable, str(plugin / HELPER), 'scan', '--root', str(clone)],
                                   capture_output=True, text=True)
+            parsed = json.loads(scan.stdout) if scan.returncode == 0 else None
+            # Every line the scan cites exists in the clone (the report may cite only these).
+            lines_real = parsed is not None and all(
+                (clone / f['path']).is_file() and 1 <= f['line'] <= len(
+                    (clone / f['path']).read_text(errors='replace').splitlines() or [''])
+                for f in parsed['findings'])
         finally:
             shutil.rmtree(work, ignore_errors=True)
         (run_dir / 'raw.json').write_text(proc.stdout)
@@ -1115,18 +910,14 @@ def headless(args):
             raw = {}
         text = raw.get('result') if isinstance(raw.get('result'), str) else ''
         (run_dir / 'report.md').write_text(text)
-        checks = grade_report(text, json.loads(scan.stdout), helper) if scan.returncode == 0 and text else {}
+        checks = dict(grade_report(text, parsed), scan_lines_real=lines_real) if parsed and text else {}
         meta = {'command': shlex.join(command), 'cwd': 'fresh clone of the repository', 'repo': args.repo,
                 'sha': args.sha, 'head': head, 'plugin': str(plugin), 'claude': version, 'model': args.model,
                 'started': started.strftime('%Y-%m-%dT%H:%M:%SZ'), 'wall_seconds': round(wall, 1),
-                'exit': proc.returncode, 'agent_cost_usd': raw.get('total_cost_usd'),
-                'cost_usd': round(raw['total_cost_usd'] + sum(c.get('cost_usd') or 0 for c in nested), 6)
-                if isinstance(raw.get('total_cost_usd'), (int, float)) else None,
-                'nested': nested, 'checks': checks,
-                # Each stale candidate: listed, dropped with a reason (hand-read against nested-audit.md) or missing.
-                'stale_outcomes': {'%s:%d' % (c['path'], c['line']): stale_outcome(text, c)
-                                   for c in json.loads(scan.stdout).get('stale_candidates', [])}
-                if scan.returncode == 0 and text else {},
+                'exit': proc.returncode,
+                'cost_usd': raw['total_cost_usd'] if isinstance(raw.get('total_cost_usd'), (int, float)) else None,
+                'checks': checks, 'cited': ['%s:%d' % place for place, _ in report_items(text) if place],
+                'scan_findings': ['%s:%d' % (f['path'], f['line']) for f in parsed['findings']] if parsed else [],
                 'passed': bool(checks) and all(checks.values())}
         (run_dir / 'meta.json').write_text(json.dumps(meta, indent=2) + '\n')
         runs.append(meta)
@@ -1142,419 +933,11 @@ def headless(args):
     return 0 if summary['passed'] == len(runs) else 1
 
 
-def recorded_verdicts(folder):
-    """{(case, run, grader): passed} from a results folder's result.json, as `claude plugin eval` or this runner wrote
-    it; {} when there is none."""
-    try:
-        result = json.loads((folder / 'result.json').read_text())
-    except (OSError, ValueError):
-        return {}
-    out = {}
-    for case in result.get('cases', []) or []:
-        for number, item in enumerate(case.get('arms', {}).get('with', []) or [], 1):
-            for grader in item.get('graders', []) or []:
-                out[(case.get('name'), number, grader.get('name'))] = grader.get('passed')
-    return out
-
-
-def judge(args):
-    """Grade the saved reports of a results folder (any arm) with this runner's judge, so both modes' llm graders are
-    judged the same way (#193 4.3.1). Keeps every reply; records the folder's own verdict beside each one."""
-    folder = Path(args.results).resolve()
-    reports = sorted((folder / 'reports').glob('*-run*.md'))
-    if not reports:
-        raise Failure(f'no reports in {folder / "reports"}')
-    cases = {path.parent.name: path.parent for path in SUITE.glob('cases/*/case.yaml')}
-    recorded = recorded_verdicts(folder)
-    out = folder / 'judge'
-    out.mkdir(exist_ok=True)
-    judge_setup = {'model': args.judge_model, 'budget': args.judge_budget_usd}
-    spent, rows = 0.0, []
-    for path in reports:
-        match = re.fullmatch(r'(.+)-run([0-9]+)', path.stem)
-        if not match or match.group(1) not in cases:
-            raise Failure(f'{path.name}: not <case>-run<N>.md for a suite case')
-        case, number = match.group(1), int(match.group(2))
-        graders = [g for g in (read_grader(p) for p in sorted((cases[case] / 'graders').glob('*.md')))
-                   if g.get('type') == 'llm']
-        if not graders:
-            continue
-        if spent >= args.max_cost_usd:
-            print(f'Cost ceiling reached at {path.name}: the rest are not judged (PARTIAL).', file=sys.stderr)
-            return 2
-        work = Path(tempfile.mkdtemp(prefix='claudit-judge-')).resolve()
-        try:
-            refuse_instructions_above(work, 'the judge folder')
-            results, cost = grade_with_graders(path.read_text(), graders, judge_setup, work)
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
-        spent += cost
-        for item in results:
-            item['recorded'] = recorded.get((case, number, item['name']))
-            rows.append({'case': case, 'run': number, 'grader': item['name'], 'passed': item['passed'],
-                         'recorded': item['recorded'], 'votes': item['judgeVotes']})
-        (out / f'{path.stem}.json').write_text(json.dumps(results, indent=2) + '\n')
-        verdicts = [r['name'] + (' PASS' if r['passed'] else ' FAIL') + (
-            '' if r['recorded'] in (None, r['passed']) else ' (recorded %s)' % ('PASS' if r['recorded'] else 'FAIL'))
-            for r in results]
-        print(f"{path.name}: {', '.join(verdicts)}, ${cost:.4f}, cumulative ${spent:.4f}", flush=True)
-    command = shlex.join(['claude', '-p', *JUDGE_FLAGS, '--model', args.judge_model, '--max-budget-usd',
-                          str(args.judge_budget_usd)]) + ' < prompt'
-    summary = {'results': str(folder), 'judge': command,
-               'votes': JUDGE_VOTES, 'cost_usd': round(spent, 6), 'graded': len(rows),
-               'differs_from_recorded': [r for r in rows if r['recorded'] is not None and r['recorded'] != r['passed']],
-               'rows': rows}
-    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
-    print(f"Judged {len(rows)} llm verdicts, ${spent:.4f}; {len(summary['differs_from_recorded'])} differ from the "
-          f"folder's recorded verdicts. Summary: {out / 'summary.json'}")
-    return 0
-
-
 def grade(args):
     scan = json.loads(Path(args.scan).read_text())
-    checks = grade_report(Path(args.report).read_text(), scan, load_helper(args.plugin or DEFAULT_PLUGIN))
+    checks = grade_report(Path(args.report).read_text(), scan)
     print(json.dumps(checks, indent=2))
     return 0 if all(checks.values()) else 1
-
-
-# Gate graders for #193's fixed rules, run on saved reports at $0 (`gate`). They live outside the case folders so the
-# frozen #192 suite and its grader counts don't change. Each matches structure and co-occurrence, not a phrasing.
-
-# Rule 6: no principles skill anywhere in an f19 report, Optional notes and Also worth knowing included.
-#
-# The unit is one clause of one sentence of a report item. A clause proposes a principles skill when it holds all
-# three: (a) a creation act, (b) a target that is a skill, slash command or command, and (c) the principles as its
-# source or subject (named, or "it", "them", "that", "the list" after the principles were named earlier in the same
-# item). A rejection exempts only its own clause. A later clause with a creation act and "it", "one" or "them" (or an
-# act with no object, "worth adding later") proposes when an earlier clause of the item raised a principles skill.
-# f19 has no skills, so a named skill counts like any other target; a clause that runs or uses a skill has no
-# creation act and proposes nothing.
-PRINCIPLES = re.compile(r'\bprinciples?\b|principles\.md', re.I)
-TARGET = re.compile(r'\bskills?\b|\bslash[ \t]+commands?\b|\bcommands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|'
-                    r'(?:^|[\s`(])/[a-z][\w-]*\b', re.I)
-SKILL_WORD = re.compile(r'\bskills?\b|\bslash[ \t]+commands?\b|\.claude/(?:skills|commands)/|\bSKILL\.md\b|'
-                        r'(?:^|[\s`(])/principles\b', re.I)  # doc-skills: what names a skill
-_VERB = (r'add|create|write|make|turn|convert|package|wrap|capture|extract|move|put|build|give|introduce|define|'
-         r'ship|split|promote|extend|bundle|codify|encode|expose|register|recommend|suggest|propose|consider|try|'
-         r'set[ \t]+up|spin[ \t]+up|break[ \t]+out')
-ACT = re.compile(
-    r"\b(?:%s)\b" % '|'.join(v[:-1] + '(?:e|es|ed|ing)' if v.endswith('e') else v + '(?:s|es|ed|ing)?'
-                              for v in _VERB.split('|'))
-    + r"|\b(?:deserves?|warrants?)\b|\bits[ \t]+own\b|\bnew[ \t]+(?:\S+[ \t]+){0,2}?(?:skills?|(?:slash[ \t]+)?commands?)\b"
-    r"|\bworth[ \t]+(?:adding|having|creating|making|writing|turning)\b|\bwhy[ \t]+not\b|\b(?:how|what)[ \t]+about\b"
-    r"|\bas[ \t]+an?[ \t]+(?:\S+[ \t]+){0,2}?(?:skills?|(?:slash[ \t]+)?commands?)\b"
-    r"|\b(?:would|could|might|should|will|can)(?:n[’']t)?\b[^.;,]{0,60}?\b(?:help|work|cut|load|fit|benefit|save|"
-    r"become|be[ \t]+(?:an?[ \t]+)?(?:good|great|useful|better|natural|nice|ideal))\b"
-    r"|\bhelps?\b|\bon[ \t]+demand\b"
-    r"|(?:\bnot|n[’']t)[ \t]+(?:hesitate|skip|avoid|rule[ \t]+out|leave[ \t]+out|pass[ \t]+on)\b"  # double negation
-    r"|(?:\bnot|n[’']t)[ \t]+(?:\w+[ \t]+)?(?:overkill|unnecessary|pointless|redundant|premature)\b", re.I)
-NEGATOR = re.compile(r"\b(?:no|none|not|never|nothing|without|avoid|skip|rather than|instead of|against)\b|"
-                     r"n[’']t\b", re.I)
-# A negation reaches the act or the target when no comma, semicolon, colon or conjunction (and, or, but, then, so)
-# and at most eight words sit between them: "No skill is needed", "There is no need to turn the principles into a
-# skill". A negation that urges ("Don't hesitate", "wouldn't skip") negates nothing.
-SCOPE_BREAK = re.compile(r'[,;:]|\b(?:and|or|but|then|so|yet)\b', re.I)
-CANCELS = re.compile(r"[ \t]+(?:\w+[ \t]+)?(?:hesitate|wait|forget|delay|overlook|miss|skip|avoid|rule[ \t]+out|"
-                     r"leave[ \t]+out|pass[ \t]+on|overkill|unnecessary|pointless|redundant|premature)\b", re.I)
-WHY_NOT = re.compile(r"\bwhy (?:not|don[’']t (?:we|you))\b", re.I)  # a rhetorical proposal, never a negation
-# A judgement in the same clause that rejects the skill, unless itself negated: "a skill would be overkill".
-REJECTS = re.compile(r"\b(?:overkill|unnecessary|unneeded|pointless|redundant|premature|wrong (?:fit|tool|choice)|"
-                     r"(?:poor|bad) fit|no value|add(?:s)? nothing|not (?:needed|worth|necessary|a (?:good )?fit)|"
-                     r"(?:is|are)n[’']t (?:needed|worth|necessary|a (?:good )?fit)|decided against|ruled (?:it )?out|"
-                     r"rejected|declined|left (?:it )?out|chose not to|would duplicate|duplicates? (?:it|the doc)|"
-                     r"(?:leave|keep) (?:it|them) as (?:a |the )?(?:doc|text|prose|is))\b", re.I)
-# "Skills are for procedures": a statement of what skills fit, about something other than the principles.
-SKILLS_FIT = re.compile(r'\bskills?[ \t]+(?:are[ \t]+for|suit|fit|belong[ \t]+to|work[ \t]+best[ \t]+for)[ \t]+'
-                        r'(?:\w+[ \t]+){0,2}(?:procedures?|steps|workflows?|tasks)\b', re.I)
-# A clause that runs or uses an existing skill: "Run the `review` skill", "Use the `review` skill when …".
-USES = re.compile(r'\b(?:run|use|invoke|call|start|launch)(?:s|es|ed|ing)?\b[ \t]+(?:the[ \t]+)?`?/?[\w:-]+`?[ \t]+'
-                  r'(?:skill|slash command)\b', re.I)
-REJECT_NEGATED = re.compile(r"\b(?:not|never|n[’']t|hardly)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
-# A line that records a decline or a dropped finding, not a proposal: "Declined: a skill for docs/principles.md".
-SET_ASIDE = re.compile(r'^\W*(?:Declined|Rejected|Not proposed|Not counted|Dropped|Left out)\b[^:\n]{0,40}:', re.I)
-BACK_REFERENCE = re.compile(r'\b(?:it|them|this|that|these|those|the (?:list|doc|file|page))\b', re.I)
-POINTS_BACK = re.compile(r"[ \t]*(?:(?:it|one|them|that)\b|(?:(?:later|eventually|someday|today|now|then|again|"
-                         r"too|as well|in (?:the )?future)\b[ \t]*)*[.!?]?$)", re.I)
-CLAUSE_SPLIT = re.compile(r'[;:]\s+|,\s+(?=(?:but|so|and|then|which|though|although|while|whereas|however|yet)\b)|'
-                          r'\s+(?:but|so|then|which|though|although|while|whereas|however)\s+|\s[—–-]\s')
-OTHER_MD = re.compile(r'`?([\w./-]+\.md)`?')
-
-
-def report_units(text):
-    """Paragraphs, list items and table rows of a report, each as (first line number, text); a fenced block is
-    part of the unit it sits in."""
-    units, current, start, fence = [], [], 0, False
-    for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith(('```', '~~~')):
-            fence = not fence
-            current.append(line)
-            continue
-        new = not fence and (not stripped or stripped.startswith(('#', '|')) or re.match(r'\s*(?:[-*+]|\d+[.)])\s',
-                                                                                         line)
-                             or re.match(r'\*\*\d+[.)]', stripped))
-        if new and current:
-            units.append((start, '\n'.join(current)))
-            current = []
-        if stripped:
-            if not current:
-                start = number
-            current.append(line)
-            if stripped.startswith(('#', '|')) and not fence:
-                units.append((start, '\n'.join(current)))
-                current = []
-    if current:
-        units.append((start, '\n'.join(current)))
-    return units
-
-
-def unit_sentences(unit):
-    return [s.strip() for s in re.split(r'(?<=[.!?])\s+(?=[A-Z`*_(\[])', re.sub(r'\s*\n\s*', ' ', unit)) if s.strip()]
-
-
-def clauses_of(sentence):
-    """A sentence's clauses. What follows a colon stays with the clause before it when it has no act of its own
-    ("Convert to a skill: `docs/principles.md`")."""
-    out = []
-    for part in re.split(r'(?<=:)\s+', sentence):
-        pieces = [c for c in CLAUSE_SPLIT.split(part) if c and c.strip()]
-        if out and out[-1].endswith(':') and pieces and not ACT.search(pieces[0]):
-            out[-1] += ' ' + pieces.pop(0)
-        out += pieces
-    return out
-
-
-def negated(before, question=False):
-    """True when a negation's scope reaches the end of `before` (the text up to an act or a target). In a question a
-    leading negative ("Wouldn't a skill help?") asks for the thing, so it negates nothing."""
-    before = WHY_NOT.sub('why', before)
-    if question:
-        before = re.sub(r"^\W*\w+n[’']t\b", '', before)
-    for match in reversed(list(NEGATOR.finditer(before))):
-        if CANCELS.match(before, match.end()) or re.search(r"(?:\bnot|n[’']t)[ \t]+$", before[:match.start()]):
-            continue  # "don't hesitate to", "wouldn't skip", "not overkill": a negation that urges
-        gap = re.sub(r'\b(?:skills?|(?:slash[ \t]+)?commands?)[ \t]+or\b', ' ', before[match.end():], flags=re.I)
-        return not SCOPE_BREAK.search(gap) and len(gap.split()) <= 8  # "no skill or slash command" stays one list
-    return False
-
-
-def clause_act(clause):
-    """The first creation act in a clause that no negation reaches, or None."""
-    for act in ACT.finditer(clause):
-        if not negated(clause[:act.start()], clause.rstrip().endswith('?')):
-            return act
-    return None
-
-
-def rejected(clause):
-    """A judgement that rejects the skill, from the skill (or target) on: "a skill would be overkill", "… and decided
-    against it". A rejection word before it ("Rejected alternatives aside, turn …") judges something else."""
-    target = TARGET.search(clause)
-    start = target.start() if target else 0
-    reject = REJECTS.search(clause, start)
-    return bool(reject) and not REJECT_NEGATED.search(clause[:reject.start()])
-
-
-def clause_target(clause):
-    """The first skill, slash command or command a clause names that no negation reaches, or None."""
-    for target in TARGET.finditer(clause):
-        if not negated(clause[:target.start()], clause.rstrip().endswith('?')):
-            return target
-    return None
-
-
-def set_aside(clause, sentence):
-    """True when a skill named in this clause is rejected, negated, a statement of what skills are for, an existing
-    skill being run or used, or a skill for another document, so it can't stand for a principles skill."""
-    if SET_ASIDE.match(sentence) or rejected(clause) or SKILLS_FIT.search(clause):
-        return True
-    if USES.search(clause) and not clause_act(clause):
-        return True
-    if [m for m in OTHER_MD.findall(clause) if 'principles' not in m.lower()] and not PRINCIPLES.search(clause):
-        return True
-    return all(negated(clause[:m.start()], clause.rstrip().endswith('?')) for m in SKILL_WORD.finditer(clause))
-
-
-def fails_closed(unit):
-    """The fallback (review round 3, M7): a unit (list item, table row or paragraph) that names the principles and
-    a skill or slash command fails unless every clause naming a skill sets it aside (see set_aside). Bare "command"
-    doesn't count here: reports name check commands next to the principles in their intent paragraph."""
-    if not PRINCIPLES.search(unit):
-        return False
-    for sentence in unit_sentences(unit):
-        for clause in clauses_of(sentence):
-            if SKILL_WORD.search(clause) and not set_aside(clause, sentence):
-                return True
-    return False
-
-
-def principles_skill_units(text):
-    """The units (line, text) of a report with a clause that proposes a skill for the principles (see above), or that
-    fail closed: the principles and a skill in one unit with nothing setting the skill aside."""
-    found = []
-    for line, unit in report_units(text):
-        if fails_closed(unit):
-            found.append((line, unit))
-            continue
-        named, raised = False, False
-        for sentence in unit_sentences(unit):
-            if SET_ASIDE.match(sentence):
-                named = named or PRINCIPLES.search(sentence) is not None
-                continue
-            hit = False
-            for clause in clauses_of(sentence):
-                here = PRINCIPLES.search(clause) is not None
-                others = [m for m in OTHER_MD.findall(clause) if 'principles' not in m.lower()]
-                source = here or (named and BACK_REFERENCE.search(clause) is not None and not others)
-                target = TARGET.search(clause)
-                act = clause_act(clause)
-                if act and not rejected(clause):
-                    if clause_target(clause) and source:
-                        hit = True
-                    elif raised and not target and POINTS_BACK.match(clause, act.end()) and not others:
-                        hit = True  # "…, but worth adding later", "add one when the list grows"
-                if target and (here or named):
-                    raised = True  # a skill came up with the principles named, proposed or not
-                named = named or here
-            if hit:
-                found.append((line, unit))
-                break
-    return found
-
-
-# Rule 4: real repositories.
-NOT_PROCEDURE_PAGE = re.compile(r'(?:^|/)(?:i18n|l10n|locales?|translations|reference|references|api)/', re.I)
-PAGE = re.compile(r'(?<![\w./-])`?((?:[\w.-]+/)*[\w.-]+\.md)`?', re.I)
-# Not documentation pages: instruction files, skill files and anything under .claude/.
-NOT_A_PAGE = re.compile(r'(?:^|/)(?:CLAUDE|AGENTS|CLAUDE\.local|SKILL)\.md$|^\.claude/', re.I)
-REASON = re.compile(r'\b(?:because|since|as it|so that|reason|why:)', re.I)
-
-
-def top_changes(text):
-    match = re.search(TOP + r'([\s\S]*?)' + SECTION_END, text)
-    return match.group(1) if match else ''
-
-
-def change_items(section):
-    """The numbered items of a Top changes section: each column-0 numbered line (or ###/#### numbered heading) with
-    the lines under it, up to the next one."""
-    items = []
-    for line in section.splitlines():
-        if re.match(r'(?:#{3,4}[ \t]+)?(?:\*\*)?\d+[.)][ \t]', line):
-            items.append(line)
-        elif items:
-            items[-1] += '\n' + line
-    return items
-
-
-CREATES_SKILL = re.compile(r'\b(?:create|add|write|make|move)\b[^.]{0,60}\.claude/(?:skills|commands)/', re.I)
-SKILL_PATH = re.compile(r'`?[\w./-]*(?:\.claude/[\w./-]*|SKILL\.md)`?', re.I)
-SKILL_TITLE = re.compile(r'^\W*(?:\d+[.)])?\W*skills?\b\W*:', re.I)  # "**Skill: docs/testing.md**"
-
-
-def doc_skill_items(text):
-    """(page, translation or reference page, a reason given) for each documentation page a numbered Top changes item
-    proposes a skill for. An item proposes one when a clause of it (not a Source line) holds a creation act and a
-    skill or slash command that no negation reaches and no judgement rejects, as rule 6 reads a clause (skill files'
-    paths set aside), when it creates a `.claude/skills/` file, or when its title is "Skill: <page>". Then each page
-    the item names counts, outside instruction files, skill files and `.claude/`."""
-    found = []
-    for item in change_items(top_changes(text)):
-        body = '\n'.join(l for l in item.splitlines() if not re.match(r'\s*Source:', l))
-        proposal = SKILL_TITLE.match(re.sub(r'^(?:#{3,4}[ \t]+)?\d+[.)][ \t]+', '', item.splitlines()[0])) is not None
-        for sentence in unit_sentences(body):
-            if proposal:
-                break
-            if CREATES_SKILL.search(sentence):
-                proposal = True
-            for clause in clauses_of(SKILL_PATH.sub(' ', sentence)):
-                skill = any(not negated(clause[:m.start()]) for m in SKILL_WORD.finditer(clause))
-                if skill and clause_act(clause) and not rejected(clause):
-                    proposal = True
-        if not proposal:
-            continue
-        pages = []
-        for page in PAGE.findall(body):
-            if not NOT_A_PAGE.search(page) and page not in pages:
-                pages.append(page)
-        reasoned = REASON.search(item) is not None
-        found += [(page, bool(NOT_PROCEDURE_PAGE.search(page)), reasoned) for page in pages]
-    return found
-
-
-def doc_skills_pass(items):
-    """Rule 4 on python-sdk: at most one documentation-page skill, never a translation or reference page, and the
-    one allowed item states a reason."""
-    return len(items) <= 1 and not any(page for _, page, _ in items) and all(reason for _, _, reason in items)
-
-
-HISTORY_LINES = (('compatibility-run', re.compile(r'repository\.md:4[0-9]\b|initial compatibility run|3\.9\.6', re.I)),
-                 ('retired-hooks', re.compile(r'repository\.md:6[0-9]\b|(?:push|shell-match) hooks?[^.]{0,80}retired|'
-                                              r'have been retired', re.I)))
-
-
-STALE_WORD = re.compile(r"\b(?:histor\w*|past (?:events?|setups?)|narrat\w*|obsolete|stale|outdated|out of date|"
-                        r"archaeolog\w*|migration-relative|records? (?:a|one) past|describes? (?:a )?past|"
-                        r"no longer (?:needed|true|relevant|applies))", re.I)
-STALE_DENIED = re.compile(r"\b(?:not|never|n[’']t|no)\b[ \t]+(?:\w+[ \t]+){0,2}$", re.I)
-DECLINE_HEAD = re.compile(r'#+[ \t]+(?:Declined|Not counted)\b', re.I)
-# A line kept deliberately: "kept on purpose", "keep them as is". "Fix it on purpose" is not a keep.
-KEPT = re.compile(r'\b(?:kept|keep(?:s|ing)?|leave|left)\b[^.]{0,40}?\b(?:on purpose|deliberately|as is)\b', re.I)
-
-
-def finding_blocks(text):
-    """A heading or column-0 numbered item with the bullets and paragraphs under it, up to the next one; a finding
-    is often a numbered title with Location and Evidence bullets below it. Units that record a decline ("Declined:",
-    "Not counted:", or anything under a Declined heading) are left out."""
-    blocks, declined = [], False
-    for _, unit in report_units(text):
-        if unit.startswith('#'):
-            declined = DECLINE_HEAD.match(unit) is not None
-        if declined or SET_ASIDE.match(re.sub(r'^\s*(?:[-*+]|\d+[.)])\s+', '', unit)) or KEPT.search(unit):
-            continue
-        if not blocks or re.match(r'#|(?:\*\*)?\d+[.)]\s', unit):
-            blocks.append(unit)
-        else:
-            blocks[-1] += '\n' + unit
-    return blocks
-
-
-def history_lines(text):
-    """Which of the two stale history lines of quickstop's docs/repository.md (#192) a report surfaces: a unit that
-    names docs/repository.md, the line (by number or by its words) and calls it history or stale, unnegated. Listing
-    the hooks line as a decline doesn't count."""
-    hits = set()
-    for unit in finding_blocks(text):
-        stale = [m for m in STALE_WORD.finditer(unit) if not STALE_DENIED.search(unit[:m.start()])]
-        if 'repository.md' not in unit or not stale:
-            continue
-        for name, pattern in HISTORY_LINES:
-            if pattern.search(unit):
-                hits.add(name)
-    return sorted(hits)
-
-
-def gate(args):
-    """Grade saved reports with the #193 gate graders; prints one JSON line per report."""
-    paths = []
-    for given in args.reports:
-        path = Path(given)
-        paths += sorted(path.rglob('*.md')) if path.is_dir() else [path]
-    failed = 0
-    for path in paths:
-        text = path.read_text()
-        if args.rule == 'principles-skill':
-            units = principles_skill_units(text)
-            row = {'report': str(path), 'passed': not units, 'units': [line for line, _ in units]}
-        elif args.rule == 'doc-skills':
-            items = doc_skill_items(text)
-            row = {'report': str(path), 'passed': doc_skills_pass(items), 'items': items}
-        else:
-            hits = history_lines(text)
-            row = {'report': str(path), 'passed': len(hits) == len(HISTORY_LINES), 'lines': hits}
-        failed += not row['passed']
-        print(json.dumps(row))
-    return 1 if failed else 0
 
 
 def main():
@@ -1568,11 +951,10 @@ def main():
     p.add_argument('--runs', type=positive_int, default=1)
     p.add_argument('--case', help='case name glob passed to claude plugin eval (exact names are safest)')
     p.add_argument('--max-budget-usd', type=positive_cost,
-                   help='doctor-combined and claudit-deep: cap per headless call (the nested prompt-audit has its own)')
-    p.add_argument('--judge-budget-usd', type=positive_cost, default=0.05, help='doctor-combined: cap per judge vote')
+                   help='doctor-combined: cap per headless call')
     p.add_argument('--concurrency', type=positive_int, default=1, help='doctor-combined: case runs at once')
     p.add_argument('--plugin', help='plugin under test (claudit arm only; default plugins/claudit)')
-    p.add_argument('--invoke', default=DEFAULT_INVOKE, help='claudit arm prompt (claudit-deep: %s)' % DEEP_INVOKE)
+    p.add_argument('--invoke', default=DEFAULT_INVOKE, help='claudit arm prompt')
     p.add_argument('--web-fetch', action='store_true',
                    help='also grant WebFetch to code.claude.com (--allow-tools and each case allowed_tools)')
     p.add_argument('--output-dir', help='default evals/claudit/results/<UTC timestamp>-<arm>')
@@ -1584,6 +966,8 @@ def main():
     p.add_argument('--arm')
     p.add_argument('--web-fetch', action='store_true', default=None,
                    help='label results that do not record whether WebFetch was granted')
+    p.add_argument('--expect-runs', type=positive_int,
+                   help='refuse unless every suite case is present with exactly this many runs of all its graders')
     p = sub.add_parser('headless', help='fresh-clone read-only audits of a repository at a commit, graded by script')
     p.add_argument('--repo', required=True, help='clone URL or path')
     p.add_argument('--sha', required=True)
@@ -1594,19 +978,9 @@ def main():
     p.add_argument('--runs', type=positive_int, default=3)
     p.add_argument('--invoke', default=DEFAULT_INVOKE)
     p.add_argument('--output-dir', required=True)
-    p = sub.add_parser('gate', help='grade saved reports with a #193 gate grader ($0)')
-    p.add_argument('--rule', required=True, choices=('principles-skill', 'doc-skills', 'history-lines'),
-                   help='principles-skill: f19 rule 6; doc-skills: python-sdk rule 4; history-lines: quickstop rule 4')
-    p.add_argument('reports', nargs='+', help='report files, or folders searched for *.md')
-    p = sub.add_parser('judge', help="judge a results folder's saved reports with this runner's llm judge (paid)")
-    p.add_argument('--results', required=True, help='a results folder with reports/<case>-run<N>.md (any arm)')
-    p.add_argument('--max-cost-usd', type=positive_cost, required=True, help='stop judging once this is spent')
-    p.add_argument('--judge-model', default=DEFAULT_JUDGE)
-    p.add_argument('--judge-budget-usd', type=positive_cost, default=0.05, help='cap per judge vote')
     p = sub.add_parser('grade', help="script-check a report against the scan of the same tree")
     p.add_argument('--report', required=True)
     p.add_argument('--scan', required=True)
-    p.add_argument('--plugin', help='plugin whose test-data rule applies (default plugins/claudit)')
     args = parser.parse_args()
     try:
         if args.command == 'run':
@@ -1615,11 +989,7 @@ def main():
             return headless(args)
         if args.command == 'grade':
             return grade(args)
-        if args.command == 'gate':
-            return gate(args)
-        if args.command == 'judge':
-            return judge(args)
-        summary = summarize_files(args.result, args.arm, web_fetch=args.web_fetch)
+        summary = summarize_files(args.result, args.arm, web_fetch=args.web_fetch, expect_runs=args.expect_runs)
         print(json.dumps(summary, indent=2))
         print(markdown(summary))
         return 0

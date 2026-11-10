@@ -1,7 +1,7 @@
 {
   "name": "claudit",
-  "version": "4.3.1",
-  "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
+  "version": "5.0.0",
+  "description": "List what's wrong in your Claude Code setup that /doctor won't tell you: stale paths, commands and history lines, unenforced gates and must-run rules, the check command's allow rule, scope and missing skill names, each with its file, real line and exact fix.",
   "author": {
     "name": "quickstop",
     "url": "https://github.com/acoz-labs/quickstop"
@@ -10,8 +10,8 @@
   "keywords": [
     "audit",
     "configuration",
-    "optimization",
-    "best-practices",
-    "grading"
+    "claude-md",
+    "permissions",
+    "hooks"
   ]
 }

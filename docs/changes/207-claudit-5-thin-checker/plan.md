@@ -13,7 +13,7 @@ auditor subagent go. This PR is the plugin PR; the pointer PR follows after
 acceptance and the `claudit-v5.0.0` tag.
 
 The branch starts from PR #197's head `1ece301e` (closed unmerged), as triage
-says, so #197's seven reviewed 4.3.1 commits sit under this plan commit. The
+says, so #197's nine reviewed 4.3.0 and 4.3.1 commits sit under this plan commit. The
 first code step rebases the branch onto current `main`; a trial rebase is clean.
 After that the plan's commit ID changes but its blob doesn't, so plan review is
 named by blob.
@@ -128,21 +128,28 @@ Eval suite and runner (repository only, not plugin bytes):
   fixtures the way `headless` grades real repositories:
   - `finding-*`: a numbered item that cites the expected `path:line` and
     whose fix holds the exact token (for example `Bash(bin/check-notes)`).
-  - `no-unraised-findings`, on every case: the count line and the number of
-    numbered items both equal the case's expected count; each item maps
-    one-to-one to an expected finding by location plus kind or fix token, so
-    a second, invented item at an expected location fails; an item with no
-    `path:line` fails.
-  - `structure-template`, on every case: the report holds only the
-    template's parts (title, count line, numbered items, "Not reported",
-    "Always loaded", the footer), each in its own shape: "Not reported"
-    lines are a citation and a reason, "Always loaded" is the table, and the
-    footer is the scope, "Not checked", `/doctor prompt-audit` and version
-    lines. Any other prose (advice under the table or in the footer, an
-    extra section) fails.
-  - `structure-footer` (version, commit, the `/doctor prompt-audit` line) on
-    every case, and `structure-nothing-found` on clean cases.
+  - `finding-respected-<kind>`: the respected decision's line under "Not
+    reported" (f8, f11, f13); `finding-scope-<n>`: each scope line after the
+    footer rule (f17).
+  - `no-invented-findings`, on every case: every numbered item starts with one
+    of the scan's citations, each citation has as many items as the scan has
+    findings there, and each item holds a token of its findings; so an
+    invented item (a second one at an expected location included), an item
+    with no `path:line` and a dropped item all fail. A total-count part was
+    dropped in the code: the mutation check showed the per-citation counts
+    and the allowed-citation part already imply it.
+  - `no-invented-prose`, on every case: the report holds only the template's
+    parts (title, count line, numbered items, "Not reported" bullets, the
+    always-loaded table, the footer lines). Any other prose (advice under the
+    table or in the footer, an extra section) fails.
+  - `structure-summary` (the count line, "Nothing found." on clean cases) and
+    `structure-footer` (version, commit, not-checked and `/doctor
+    prompt-audit` lines) on every case.
 
+  The names follow the runner's counting: `finding-*` graders are the hit
+  rate and a failed `no-invented-*` grader is a false finding. The patterns
+  live in `bin/claudit-eval`, so `headless` checks real repositories with the
+  same definitions.
   The grade, intent, plan, declined and reconsider graders and all 15 llm
   graders go.
 - Expected findings per case (the successors the issue allows), pinned by the
@@ -173,31 +180,52 @@ Eval suite and runner (repository only, not plugin bytes):
     findings lists of f8, f11, f13 and f17.
   - Case descriptions (`case.yaml`) follow; prompts, budgets and fixtures are
     otherwise unchanged apart from the f11 and f13 lines.
-- Grader builder and controls (`tests/test_claudit_fixture_graders.py`):
-  rewritten around the citation-anchored form. Each grader has passing
-  controls (at least six phrasings of the item, several adapted from the
-  4.3.1 recorded reports under `~/factory/retained/quickstop-193/`) and
-  failing ones: wrong line, missing fix token, the item under "Not
-  reported", a negated or hypothetical sentence, an invented second item at
-  an expected location, an item with no citation, and advice in prose under
-  "Always loaded" and in the footer. Plus a mutation check per named part.
-  Graders and controls are frozen before the screen (see Proof).
+- Grader builder and controls: `tests/claudit_graders.py` builds every
+  grader from the scan of its scaffolded fixture (`--write`), and
+  `tests/test_claudit_graders.py` holds the controls. Each case's correct
+  report is rendered six ways (phrasings adapted from the 4.3.1 recorded
+  reports under `~/factory/retained/quickstop-193/`: labelled lines, bold
+  leads, an inline fix, an unindented fence body, wrapped lines, no Source)
+  and must pass every grader. Failing controls change one thing each: a
+  dropped item, a wrong line, a missing fix token, the item under "Not
+  reported", the token only in a negated note, the same item twice, an
+  invented second item at an expected location, an item with no citation,
+  advice under "Always loaded" and in the footer, a wrong count, a missing
+  footer, respected or scope line. All run in Python and node, plus a
+  mutation check of each `no-invented-findings` part and each token. As the
+  graders are structural, a hypothetical sentence inside a correctly cited
+  item still passes; that wording is the reviewer's to judge. Graders and
+  controls are frozen before the screen (see Proof).
 - Runner (`bin/claudit-eval`): the `claudit-deep` arm and `--deep` plumbing
   go, and the two-docs-path (`--web-fetch`) requirement for Claudit goes,
-  since Claudit no longer fetches docs. `headless` script-checks a real-repo
-  report against the scan of the same clone: every numbered item's
-  `path:line` exists, the cited line holds the quoted text, every item maps
-  to a scan finding, and every scan finding is reported, dropped under "Not
-  reported" with a `path:line` reason, or dismissed. `summarize` validates
-  against the expected suite (cases, grader stems, run counts) so a partial
-  run can't read as PASS.
-- Old suite tests (`tests/test_claudit_plan.py`, `tests/test_claudit_43.py`,
-  `tests/test_claudit_gate_graders.py`, parts of `tests/test_claudit.py`,
-  `tests/test_claudit_eval*.py`, `tests/test_claudit_case_graders.py`,
-  `tests/claudit_render.py`): removed or rewritten to match; no test of a
+  since Claudit no longer fetches docs. With no llm graders left, the
+  runner's own judge (the `judge` subcommand and the llm branch for the
+  doctor-combined arm) goes too, and so do the #193 `gate` graders.
+  `headless` script-checks a real-repo report against the scan of the same
+  clone: every line the scan cites exists in the clone, every numbered item
+  starts with a citation that is one of the scan's findings, every scan
+  finding is reported or dropped under "Not reported" with a reason citing
+  the repository, and the respected, count and footer lines and the template
+  hold. Whether the cited line says what the item claims is the reviewer's
+  read. `summarize --expect-runs` (and every full-suite `run`) refuses a
+  result that isn't the whole suite (cases, grader names, run counts), so a
+  partial run can't read as PASS; the summary gives median cost and time.
+- Old suite tests: `tests/test_claudit_plan.py` becomes
+  `tests/test_claudit_decisions.py`; it, `tests/test_claudit_43.py`,
+  `tests/test_claudit.py` and `tests/test_claudit_eval.py` are rewritten to
+  the new output; `tests/test_claudit_fixture_graders.py`,
+  `tests/test_claudit_case_graders.py`, `tests/test_claudit_eval_graders.py`,
+  `tests/test_claudit_gate_graders.py`, `tests/claudit_render.py` and the
+  4.0.1 reports in `tests/claudit_gate_reports/` are removed. No test of a
   kept check is weakened.
-- Marketplace and structure tests (`tests/test_marketplace.py` and
-  neighbours): the Claudit inventory is one skill, no agent.
+- Package structure test (`tests/test_claudit.py`, new): the package holds
+  one skill and no agent or catalog, the manifest and changelog carry the
+  scan's version, and the skill allows only the scan and dismiss calls.
+- Scan fixes found by the $0 real-repository scan (step 3), each with a unit
+  test: a test runner keeps its wrapper (`uv run --frozen pytest`, not
+  `pytest`), the allow-rule finding cites the line that names the command
+  (code blocks included), and text shared only by subagent, skill or command
+  prompts, which each load in their own context, is not a duplicate.
 
 Docs: `evals/claudit/README.md` (cases table, graders), the acceptance doc
 (`docs/acceptance/claudit.md`: required scenarios for the findings list, no
@@ -298,9 +326,12 @@ Local, at every head:
 Paid gate (Claude Sonnet as pinned by the runner; list price; $15 cap; no run
 without the lead's go):
 
-- Per-run caps: fixture runs through `claude plugin eval`, which has no
-  per-run cap, get `--max-cost-usd 0.40` per case at n=1 and `1.20` per
-  case at n=3; real-repository runs through `bin/claudit-eval headless` get
+- Caps: `claude plugin eval`'s `--max-cost-usd` is a ceiling for the whole
+  invocation, checked before each run starts, not a per-case cap. Fixture
+  invocations get 19 cases times $0.40 per case per run ($7.60 at n=1,
+  $22.80 at n=3), or, if lower, what is left of the $15 cap after the
+  projected real-repository runs; the spend rule below keeps the total
+  under $15. Real-repository runs through `bin/claudit-eval headless` get
   `--max-budget-usd 0.40` per run.
 - Screen, n=1 per case: the 19 fixtures, and quickstop `main` (commit
   pinned), python-sdk `af4c6f4` and claude-code-action `c0949c50` through
@@ -326,7 +357,7 @@ without the lead's go):
 - Bars: every expected finding above hit in 3 of 3 runs, with f17's
   scope-line graders and the f8, f11 and f13 Respected-line graders counting
   as those cases' planted items; 0 false findings
-  (`no-unraised-findings` and the clean-case graders) on f4, f15, f19 and
+  (`no-invented-findings` and `no-invented-prose`) on f4, f15, f19 and
   every clean case; at most two hand-read corrections in total; on all four
   real repositories the headless script checks pass (real lines, no
   unraised finding, every scan finding accounted for), the reviewer judges 0

@@ -3,6 +3,15 @@
 Baselines for the [Claudit eval suite](../../evals/claudit/README.md), recorded
 for issue #155 on 2026-10-29. Claudit 4.0 (#156) is gated against these numbers.
 
+## Claudit 5.0.0 (#207)
+
+Claudit 5.0.0 reports a findings list, not grades, and the suite's graders were
+rebuilt as script graders from each fixture's scan, so the tables below (4.x,
+graded reports, partly model-judged) don't compare with it. Its gate has fixed bars
+instead of a baseline: every expected finding hit in every run, no false finding on
+any case, medians at or under $0.15 and 60 s per run, and the real repositories
+judged right by the reviewer. Results are posted on issue #207, not committed.
+
 ## Conditions
 
 - Claude Code 2.1.312, `claude plugin eval` through `bin/claudit-eval run`.

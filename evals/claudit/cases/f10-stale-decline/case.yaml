@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f10-stale-decline
-description: Notes app whose docs retire hooks because hooks can't block Claude from finishing (current docs say a Stop hook can) and decline pre-approved commands because there is no check command (CLAUDE.md now documents one); both are listed with their reason and a Worth reconsidering note citing the evidence, outside the plan, with grades unchanged.
+description: Notes app whose decisions rest on reasons that no longer hold (hooks cannot block finishing; there is no check command); the Stop hook and allow rule findings stay, citing the decision and the evidence.
 tags: [claudit, coverage]
 runs: 1
 context:

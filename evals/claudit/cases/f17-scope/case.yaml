@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f17-scope
-description: Rust tool checked out inside a parent folder that has its own CLAUDE.md and AGENTS.md, whose own CLAUDE.md is a symlink to its AGENTS.md (issue 192 F13).
+description: Rust tool inside a parent folder with its own CLAUDE.md and AGENTS.md, whose CLAUDE.md is a symlink to its AGENTS.md; the footer names both parent files, the AGENTS.md they stop loading and the symlink, with no finding.
 tags: [claudit, issue-192]
 runs: 1
 context:

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f4-well-configured
-description: JavaScript repo with a concise, current, correct Claude Code setup; checks that the reviewer does not invent defects.
+description: JavaScript repo with a concise, current, correct Claude Code setup; the report says Nothing found and invents no defect.
 tags: [claudit, false-positive]
 runs: 1
 context:

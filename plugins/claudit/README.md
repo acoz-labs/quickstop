@@ -1,7 +1,12 @@
 # Claudit
 
-Claudit grades a project's Claude Code setup against what the project is for, then
-recommends the few changes that would improve it most and can apply the ones you pick.
+Claudit lists what is wrong in a project's Claude Code setup that `/doctor` won't
+tell you, each finding with its file, real line and exact fix, and can apply the
+fixes you pick. A clean project gets "Nothing found".
+
+**Run `/doctor prompt-audit` first.** It checks instruction files for
+contradictions and wording, which Claudit doesn't. Claudit checks the facts those
+files state against the repository.
 
 ## Installation
 
@@ -18,76 +23,91 @@ only the accepted release; a development checkout can contain a newer candidate.
 ## Use
 
 ```text
-/claudit:claudit                  # audit this project, then offer to apply changes
-/claudit:claudit hooks            # same, with a deeper look at hooks
-/claudit:claudit --read-only      # report only
-/claudit:claudit --user           # also check your ~/.claude settings and CLAUDE.md
-/claudit:claudit --deep           # also run /doctor prompt-audit and weigh its findings
+/claudit:claudit                  # list the findings, then offer to apply fixes
+/claudit:claudit --read-only      # list the findings only
 ```
 
-`--deep` runs Claude Code's own instruction audit, `/doctor prompt-audit .`, headless
-and read-only in the project (project settings only, no edits, Bash denied, Claudit
-not loaded again), and `claude doctor` for invalid settings, user level included. It
-costs one more model call and up to three minutes. Every prompt-audit finding gets a
-disposition with its reason: kept (in a change or a note), merged with what the scan
-already found, or not kept. If the nested run can't happen
-(no login, a sandbox, no permission) the footer says so and the report is still graded.
+Asking Claude to audit or check the Claude Code setup also invokes it.
 
-Asking Claude to audit or improve the Claude Code setup also invokes it.
+## What it checks
 
-## What you get
+Every finding comes from Claudit's scan script, so the same tree gives the same
+findings. The model only words each finding, and may leave one out when the
+repository's own text explains it, quoting that text under "Not reported". It never
+adds one.
 
-1. **Intent**: what the project builds, how work gets done (check and CI commands,
-   procedure docs, release flow) and who drives it. Interactive runs ask you to
-   confirm or correct it once; headless runs state the assumption.
-2. **Three grades**, each a letter with a confidence:
-   - **Correctness**: does what's configured work?
-   - **Alignment**: does it serve the project's intent?
-   - **Coverage**: what's missing that a project like this should have? Graded
-     against a baseline every project should meet (a short CLAUDE.md, a check Claude
-     can run, routine commands pre-approved, secret paths denied, must-always rules
-     enforced by hooks or permissions) plus profiles picked from project signals:
-     agent-run repository, plugin or marketplace repository, typed codebase,
-     repository with procedure docs.
-   A grade below A names the changes that would raise it.
-3. **The top changes**, ranked by impact across the three grades, up to seven. Each
-   has the reason, the exact diff or command, the doc URL and heading it rests on,
-   and the effort. When nothing is worth changing, the report says "No changes worth
-   making", which is a valid result with Coverage A.
-4. **Declined by the project**: features the project documents a deliberate choice
-   against, quoted with their file and line and the reason the project gives (or "no
-   reason given"). Claudit doesn't recommend them or count them against Coverage. A
-   declined item gets a "Worth reconsidering" note only when Claudit can cite evidence
-   that the stated reason no longer holds.
-5. **Always loaded**: a table of what loads into every session, in words and estimated
-   tokens: instruction files, `@` imports, and the skill and subagent descriptions
-   Claude sees. A file a plain link points at isn't loaded; one an unconditional "see
-   X" points at is listed as "likely read".
-6. **An offer to apply** the changes you select, in place or on a branch in an
-   isolated worktree with a pull request through `gh`.
+- **Stale references**: paths, files, folders, scripts and commands named in the
+  repository's instruction files, imports, skills, subagents and commands that don't
+  exist (package.json scripts, Makefile and justfile targets, `bin/` and `scripts/`
+  files), undeclared dependencies, and `@` imports that don't resolve.
+- **History lines**: sentences that tell what happened (a past run, "has been
+  retired", a dated event, a past version) instead of what holds now. The fix keeps
+  the current fact and moves only the dated detail to a changelog or decision record.
+- **Gates nothing enforces**: a merge, deploy, release, publish or push to main the
+  instructions say needs a person, with no ask or deny rule. The fix is an exact ask
+  rule, with the note that branch protection (or the deploy system's approval) is the
+  real gate.
+- **Must-run rules with no hook**: "always run `bin/ci` before you finish" with no
+  Stop hook gets a hook script, unless the project documents a decision against hooks.
+- **The check command**: detected from `package.json`, a Makefile or justfile, `bin/`
+  and `scripts/`, Python, Go and Rust markers and CI, with an exact allow rule when no
+  rule covers it.
+- **Scope**: only files inside the git root are checked, by their real paths through
+  symlinks. Files loaded from above get one line, and a `CLAUDE.md` above that stops
+  the repository's `AGENTS.md` loading is flagged.
+- **Always loaded**: a table of what loads into every session, in words and estimated
+  tokens. It is a finding only past a limit the docs state.
+- **Skills and subagents**: names referenced as skills or subagents that don't exist,
+  and a skill only a subagent reads that is still in the skill listing.
+- **Copies**: a rule copied word for word into three or more files.
 
-Process detail stays in a short footer. Its first line gives the Claudit version and
-the audited commit (or "not a git repo"), so a report can be reproduced; it also
-lists Claude Code documentation pages that are newer than Claudit's feature catalog.
+Not checked: user and managed settings, settings validity (invalid JSON, hook
+syntax, ignored values; `/doctor` reports those), server-side branch protection, and
+contradictions or wording (`/doctor prompt-audit`). One settings fact is used: a
+project `defaultMode` of `bypassPermissions`, which Claude Code ignores in project
+settings, doesn't count as a replacement for allow rules (see Decisions below).
 
-## Same tree, same result
+Claudit 5 doesn't grade, rank or recommend features, skills or procedures.
 
-The scan, not the model, decides the grade letters, which findings become changes,
-their order and how many there are. The model writes the intent, the explanations
-and the diffs. The rules:
+## The report
 
-- **Plan.** Findings of one kind on one file are one change. Changes are ranked by
-  severity (high, medium, low), then grade (Correctness, Alignment, Coverage), then
-  finding id. The first seven are the plan; any more go under Also worth knowing.
-  Fewer than three come with the reason; the plan is never padded.
-- **Grades.** Correctness and Alignment: F for configuration that doesn't load
-  (invalid JSON or a hook matcher that isn't a string; Correctness only), D for a high finding or several mediums, C for one medium, B
-  for lows only, A for none; a project with no instruction file gets an Alignment
-  medium. Coverage: A, B, C or D for 0, 1, 2 or 3 or more gaps, and F with no setup
-  at all.
+````markdown
+# Claudit: shop
+
+2 findings.
+
+1. `CLAUDE.md:5` No allow rule in `.claude/settings.json` covers `bin/ci`, so every
+   run of it asks first.
+   Fix:
+   ```json
+   {"permissions": {"allow": ["Bash(bin/ci)"]}}
+   ```
+   Source: [Permission rule syntax](https://code.claude.com/docs/en/permissions)
+2. `docs/repository.md:44` ...
+
+## Not reported
+
+- Respected: `CLAUDE.md:7` has no Stop hook; `docs/decisions.md:3` decided against hooks ("CI is the gate").
+
+## Always loaded
+
+| File | What | Loads | Words | Tokens (est.) |
+...
+
+---
+Not checked: user and managed settings, settings validity, server-side branch protection.
+Run `/doctor prompt-audit` for contradictions and wording.
+Claudit 5.0.0; audited commit <sha>
+````
+
+The footer's last line gives the version and the audited commit (or "not a git
+repo"), so a report can be reproduced.
+
+## Rules
+
 - **Only commands written as calls are pre-approved.** Which test runner or check a
-  project uses is read from every mention. Which exact calls the allowlist suggests,
-  and whether a gap is counted, come only from these forms, and nothing else:
+  project uses is read from every mention. Which exact calls the allow rule suggests
+  come only from these forms, and nothing else:
   1. **Code blocks.** Each line of a fenced block with no language or a shell one
      (sh, bash, zsh, shell, powershell, …). In a `console`, `shell-session` or
      `terminal` block, only its prompt lines. Each line of an indented code block
@@ -131,57 +151,48 @@ and the diffs. The rules:
   instruction files, skills, subagents and commands must exist: package.json
   scripts (`npm run x`, `bun run x`), Makefile and justfile targets, `bin/` and
   `scripts/` files. A backticked dependency in a sentence that names a manifest
-  (`pyproject.toml`, `package.json`, …) must be declared there, and a skill or
+  (`pyproject.toml`, `package.json`, ...) must be declared there, and a skill or
   subagent named as "the `x` skill" must exist (not checked when the project enables a
-  plugin, which can supply them). Each missing one is a Correctness finding, all of a
-  file's are one change, and Alignment can't be A while one stands. A name in a line
-  that says it isn't there ("provides no `bin/container`") or is conditional ("where
-  supported") is not stale.
-- **History narrative.** A sentence in the instruction files, their imports, skills,
+  plugin, which can supply them). Each missing one is its own finding on its own line.
+  A name in a line that says it isn't there ("provides no `bin/container`") or is
+  conditional ("where supported") is not stale.
+- **History lines.** A sentence in the instruction files, their imports, skills,
   subagents or the docs they say to read that tells what happened (a past run that
-  passed, something that "has been retired", a dated event, a past version) is listed
-  under Also worth knowing as possibly stale, with its line. It changes no grade. A
-  past verb in a relative clause or a condition ("the last release that passed", "if
-  the build failed") and a date used as a name ("a 2026-07-28 server") are not history.
-  Decision records are skipped, and so are docs pages that are history pages by name
-  or first heading (changelogs, release notes, migration and upgrade guides, what's-new,
-  deprecations and breaking-changes pages); instruction files, imports, skills,
-  subagents and commands never are. A retirement told this way is never
-  read as a decline: only a decision record (`decisions.md`, `docs/adr/`) declines a
-  feature.
+  passed, something that "has been retired", a dated event, a past version) is a
+  finding on its line. A past verb in a relative clause or a condition ("the last
+  release that passed", "if the build failed") and a date used as a name ("a
+  2026-07-28 server") are not history. Decision records are skipped, and so are docs
+  pages that are history pages by name or first heading (changelogs, release notes,
+  migration and upgrade guides, what's-new, deprecations and breaking-changes pages);
+  instruction files, imports, skills, subagents and commands never are. The fix keeps
+  what holds now, restating a retirement in the present tense ("Shipshape is
+  retired") with any status the sentence gives ("is kept for reference only"), and
+  moves only the date or the account of the run to a changelog or decision record.
+  A history line is never read as a decision: only a decision record does that.
 - **Human gates.** A sentence in the loaded instructions where a person must approve
   a merge, deploy, release, publish or push to main, with no ask or deny rule for its
-  command, is a Coverage change: the exact `Bash(<command> *)` ask rule, plus the plain
+  command, is a finding: the exact `Bash(<command> *)` ask rule, plus the plain
   statement that branch protection (or the deploy system's approval) is the real gate
   and a client-side rule can be got around. The command is the one the sentence or the
   instructions name, a `bin/` or `scripts/` file named for the verb, or `gh pr merge`
   and `git push`.
-- **Opt-in git hooks.** `core.hooksPath`, husky, lefthook or pre-commit set up in the
-  repo with no SessionStart hook enabling them for agent and cloud sessions is a
-  Coverage low, unless the project documents a decision against hooks.
-- **Context, against documented limits only.** CLAUDE.md over 200 lines; a skill's
-  `description` plus `when_to_use` over 1,536 characters; custom subagent descriptions
-  over 15,000 tokens. A skill only a subagent reads (by path or `skills:`), named
-  nowhere else as one to run, without `disable-model-invocation: true` is an Alignment
-  low. A sentence of 8 or more words copied word for word into three or more files
-  (instruction files, skills, subagents, docs, script strings) is one Alignment low,
-  listed with its paraphrase candidates (5 or more shared content words); two copies
-  are left alone. A script string is cited by the script's own line. A file is called
-  generated only when its first lines say so ("Generated from …", "DO NOT EDIT") or
-  `.gitattributes` marks it `linguist-generated`; text it shares with the script that
-  writes it is one source, not a copy. Sizes are in words
-  and estimated tokens.
-- **Procedures already reachable are optional.** A procedure doc that loaded team
-  instructions (CLAUDE.md, AGENTS.md or their imports, not the personal
-  CLAUDE.local.md) already link, as a Markdown link or a bare or backticked path, is
-  reachable, so a skill for it is optional rather than a change. It becomes a change
-  when the doc, or the line linking it, says it should be invoked on demand: "on
-  demand" together with "skill", "slash command" or "invoke" on the same line. A doc
-  a plugin's skill links (a `SKILL.md` under `skills/` beside `.claude-plugin/` or
-  `.codex-plugin/`, or in a skill directory the manifest names) is that skill's
-  reference material, not a team procedure. A skill elsewhere (`.cursor/skills/`,
-  `.agents/skills/`) doesn't count, so the doc is still a procedure with no project
-  skill.
+- **Must-run rules.** A line in the instructions that says always or must run a check
+  command (or "before you report" it), with no Stop, SubagentStop or TaskCompleted
+  hook, gets a Stop hook that runs the exact documented call and blocks finishing
+  until it passes.
+- **Documented limits only.** CLAUDE.md over 200 lines; a skill's `description` plus
+  `when_to_use` over 1,536 characters; custom subagent descriptions over 15,000 tokens.
+  A skill only a subagent reads (by path or `skills:`), named nowhere else as one to
+  run, without `disable-model-invocation: true` is a finding. Sizes are in words and
+  estimated tokens.
+- **Copies.** A sentence of 8 or more words copied word for word into three or more
+  files (instruction files, skills, subagents, docs, script strings) is one finding,
+  cited at each copy's real line; two copies are left alone, and so is text shared
+  only by subagent, skill or command prompts, which each load in their own context. A
+  script string is cited by the script's own line. A file is generated only when its
+  first lines say so ("Generated from ...", "DO NOT EDIT") or `.gitattributes` marks it
+  `linguist-generated`; text it shares with the script that writes it is one source.
+  Paraphrases are not matched.
 - **Test data isn't configuration.** A directory name is split into words at
   punctuation and case changes, compared case-insensitively, with trailing digits
   dropped. A name with test or tests as a whole word is a test directory (`tests`,
@@ -191,21 +202,17 @@ and the diffs. The rules:
   (`testimonials`, `attest`, `latest`), and reports, results or data alone aren't
   data (`docs/reports` is scanned). Files below a test or data directory, or inside an
   eval case (a directory with `case.yaml`), are data. They are never read as
-  procedures, plugin manifests, typed-code markers or secrets. A plugin root (a
+  instructions, check commands or decision records. A plugin root (a
   directory holding `.claude-plugin/` or `.codex-plugin/`) is never data because of its
   own name, so `plugins/test-runner` is scanned. Symlinks are judged by their target
   too, and a test directory's own `CLAUDE.md` is still an instruction file. Anything
   else the tests load can be dismissed.
-- **Declarative lists aren't procedures.** A numbered list counts as procedure steps
-  only when at least half its items open with a verb ("Run", "Tag", "Push") or order
-  the steps (then, next, first, finally); standing principles or facts ("1. The public
-  API is stable") never are. Translations (`i18n/`, `locales/`, …) and reference
-  pages (`reference/`, `api/`) aren't either.
-- **Documented declines.** Claudit reads the loaded team instructions, the Markdown
-  files they link and the README. A sentence declines a feature (hooks, plugin evals,
-  plugin validation, pre-approved commands, procedure skills, code intelligence) only
-  when the feature itself is declined, named as a bare noun with at most an article,
-  owner or kind ("Claude Code hooks", "the allowlist", "Stop hooks"):
+- **Decisions.** A documented decision against hooks or pre-approved commands holds
+  back the matching finding, listed under "Not reported" as respected with its file,
+  line and reason. Claudit reads the loaded team instructions, the Markdown files they
+  link and the README. A sentence decides against hooks or pre-approved commands only
+  when the feature itself is named as a bare noun with at most an article, owner or
+  kind ("Claude Code hooks", "the allowlist", "Stop hooks"):
   - as the subject of retired, removed, dropped, declined, abandoned, phased out or
     disabled ("Claude Code hooks were retired", "Hooks: retired");
   - as the object of the same verbs, decided against, chose not to use or add, or
@@ -231,79 +238,49 @@ and the diffs. The rules:
   is advisory, so it deliberately has no evals", "Because …, we deliberately …"). A
   reason in another sentence isn't read, and a sentence with neither says "no reason
   given".
-- **Worth reconsidering, only on evidence.** A declined item gets a note only when one
-  of its reason clauses (the clause after the decline, from because, since or so or after
-  `;` or `:`, or the clause leading a deliberate absence) is one of these as a whole,
-  word for word up to case, quotes and backticks, and the evidence exists:
+- **A contradicted decision doesn't hold a finding back.** The finding stays, citing
+  both the decision and the evidence, only when one of the decision's reason clauses
+  is one of these as a whole, word for word up to case, quotes and backticks, and the
+  evidence exists:
 
-  | Declined | Stated reason | Evidence |
+  | Decided against | Stated reason | Evidence |
   |---|---|---|
   | Hooks | hooks (or Claude Code hooks, Stop hooks, a hook, they, it) can't, cannot or are unable to block, stop or prevent Claude from stopping or finishing | [Stop](https://code.claude.com/docs/en/hooks): exit code 2 keeps Claude working |
-  | Plugin evals | Claude Code has, offers or provides no (or there is no) way to run evals, or no built-in eval runner | [Test plugins with evals](https://code.claude.com/docs/en/plugin-evals) |
-  | Plugin validation | Claude Code has no (or there is no) way to validate plugins, or no built-in plugin validator | [plugin validate](https://code.claude.com/docs/en/plugins/cli-reference) |
-  | Code-intelligence plugins | Claude Code has no, doesn't or does not support LSP, language servers or code intelligence | [Code intelligence plugins](https://code.claude.com/docs/en/plugins/code-intelligence) |
-  | Procedure skills | skills (or they) can't be shared with the team or through the repository | [Choose where skills load](https://code.claude.com/docs/en/skills) |
   | Hooks, pre-approved commands | there is or are no (or the project has no) check, check command or script, tests or test suite (to run), or there is nothing to check or run | the `path:line` of a documented check command, or the check script |
-  | Code-intelligence plugins | the project, repository, code or codebase is untyped, is not typed or has no typed code, or there is no typed code | the typed-code marker (`tsconfig.json:1`, the `[tool.mypy]` line of `pyproject.toml`) |
+  | Pre-approved commands | any reason, while project settings set `defaultMode` to `bypassPermissions` or `auto` | [A value you set is ignored](https://code.claude.com/docs/en/settings): Claude Code 2.1.257 and later ignore it in project settings |
 
-  A doc row gives no note when the scan's Claude Code is older than the feature's
-  minimum version. Any other wording gets no note, including the same reason with a
-  limit or aside ("can't block Claude from finishing in CI"), and so does a reason that
-  only rests on best practice. The note is advice on the declined item: it is not in
-  the plan and changes no grade.
-- **Defects a decline left behind stay in the plan.** A decline removes only its own
-  Coverage gap. A correctness defect in the declined feature's own configuration (hook
-  matchers, hook scripts and hooks files for hooks; `defaultMode`, `autoMode` and
-  `Write(...)` rules for pre-approved commands; skill files for procedure skills) is
-  planned and graded like any other and cites the decline.
+  Any other wording holds the finding back, including the same reason with a limit or
+  aside ("can't block Claude from finishing in CI"), and so does a reason that rests
+  only on best practice.
 
 ## How it works
 
-- `skills/claudit/scripts/claudit.py` scans the project: inventory, project signals,
-  and the misconfigurations the docs name (for example `Write(...)` path rules,
-  `.claudeignore`, flat skill files, project `bypassPermissions`, array hook
-  matchers, oversized CLAUDE.md, broken `@` imports and stale paths). It also
-  reports which instruction files load (`CLAUDE.md`, `AGENTS.md` or both), and the
-  report takes that from the scan rather than stating it from memory. It is
-  read-only and needs only the standard library of Python 3.9 or later.
-- `skills/claudit/catalog.json` is the versioned feature catalog: each feature, the
-  intent it fits, how to tell it's in use, its doc URL and heading, and its minimum
-  Claude Code version. It carries every check and recommendation, so an audit works
-  with the docs unreachable.
-- Each audit reads `https://code.claude.com/docs/llms.txt` and at most a couple of
-  pages live with WebFetch (pre-approved for `code.claude.com` while the skill runs),
-  cites the URL and heading for each claim, and lists index pages the catalog
-  doesn't know yet.
-- One read-only Sonnet `auditor` agent handles cross-file review on large setups;
-  small repositories don't use it. The skill itself runs on Sonnet.
-- Hand-offs appear only when a finding calls for them: `/skill-doctor` (many or long
-  skill descriptions), `/fewer-permission-prompts` (to confirm an allowlist from real
-  use), `/run-skill-generator` and `/verify` (no check command), `/context` (a large
-  always-loaded context).
-- Files above the repository get one line each and are never graded, with a flag
-  when they change how the repo's own files load (a `CLAUDE.md` above means the repo's
-  `AGENTS.md` isn't read on its own). Symlinked instruction files are named with their
-  real paths.
+- `skills/claudit/scripts/claudit.py` scans the project. It is read-only and needs
+  only the standard library of Python 3.9 or later. It also reports which
+  instruction files load (`CLAUDE.md`, `AGENTS.md` or both).
+- Each finding cites a docs page by URL and heading from a short map in the script,
+  checked against the live docs when a release is built. Nothing is downloaded or
+  fetched during an audit.
+- The skill runs on Sonnet: one scan, then the report.
 
 ## State and writes
 
 Claudit keeps no cache. An audit writes nothing at all. It writes only when you apply
-changes, or when you ask it not to repeat a suggestion: that is stored for you alone
-in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/dismissed/<repository key>.json`),
-or with `--shared` in `.claude/claudit-dismissed.json` for the whole team. The audit
+fixes, or when you ask it not to repeat a finding: that is stored for you alone in
+the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/dismissed/<repository key>.json`), or
+with `--shared` in `.claude/claudit-dismissed.json` for the whole team. The audit
 reads both, and the footer says where its dismissals came from.
 
 ## Requirements
 
-Tested with Claude Code 2.1.317; `--deep` needs `/doctor prompt-audit` (2.1.283 or
-later) and a login for the nested run. `python3` 3.9 or later; without it Claudit reads the
-files itself at lower confidence. Git for branch delivery and `gh` for pull requests.
+Tested with Claude Code 2.1.318. `python3` 3.9 or later. Git for branch delivery and
+`gh` for pull requests.
 
-## Upgrading from 3.x
+## Upgrading from 4.x
 
-4.0 removes the `knowledge`, `refresh` and `status` skills, the three research and
-three audit agents, the docs cache and the decision store. Old files under
-`~/.cache/claudit` (or `CLAUDIT_CACHE_DIR`) are no longer read; delete them when you
-no longer need them. Project `.claude/claudit-decisions*.json` files are ignored.
+5.0.0 is a breaking change to the report; see the [changelog](CHANGELOG.md). The
+grades, the ranked plan, feature and skill recommendations, the Intent paragraph,
+`--deep`, `--user`, the docs fetch and the `auditor` subagent are gone. Dismissals of
+the checks that remain keep working, because their ids haven't changed.
 
 MIT licensed; see [LICENSE](LICENSE).

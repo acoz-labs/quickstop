@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f19-declarative-list
-description: Go library with a healthy setup whose docs page lists numbered standing principles with no imperative verbs or sequence words; no procedure needs a skill (issue 192 F15).
+description: Go library with a healthy setup and a numbered list of standing principles; the report says Nothing found.
 tags: [claudit, issue-192]
 runs: 1
 context:

@@ -1,19 +1,20 @@
 # Applying selected changes
 
-Apply only the changes the user selected, exactly as shown in the report. Don't
-widen a permission, delete a file or touch anything else without asking.
+Apply only the findings the user selected, using each fix exactly as shown in the
+report. Don't widen a permission, delete a file or touch anything else without
+asking.
 
 ## In place
 
 1. Check `git status --short`. If a file you'll change has uncommitted edits, show
    them and ask before editing it.
-2. Make each change with the Edit or Write tool. For JSON settings, keep the
+2. Make each fix with the Edit or Write tool. For JSON settings, keep the
    existing keys and formatting; merge into the existing `permissions` and `hooks`
    objects rather than replacing them.
 3. Validate what you changed: parse each JSON file you edited, run
    `claude plugin validate .` on a plugin you edited, and run the project's check
    if a change affects it.
-4. Show the resulting `git diff` and say which changes need a restart or `/hooks`
+4. Show the resulting `git diff` and say which fixes need a restart or `/hooks`
    reload to take effect.
 
 ## On a branch with a pull request
@@ -24,10 +25,10 @@ widen a permission, delete a file or touch anything else without asking.
    and index stay untouched: `git worktree add -b claudit/<short-slug>
    <temporary path outside the repo> origin/<default branch>` (fetch first). If the
    branch name exists, pick another; never reuse or reset it.
-3. Apply the selected changes inside the worktree only, validate as above, and
-   commit just those paths with a message naming the changes.
-4. Push the branch and open the PR with `gh pr create`, listing each change, its
-   reason and its source. Report the PR URL.
+3. Apply the selected fixes inside the worktree only, validate as above, and
+   commit just those paths with a message naming the findings fixed.
+4. Push the branch and open the PR with `gh pr create`, listing each finding, its
+   fix and its source. Report the PR URL.
 5. Remove the worktree with `git worktree remove <path>`; keep the branch.
 
 If anything fails after the branch exists, stop, report what was done (branch,

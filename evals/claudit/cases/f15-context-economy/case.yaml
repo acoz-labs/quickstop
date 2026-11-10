@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f15-context-economy
-description: Inventory service whose 10-line CLAUDE.md runs to about 610 words and imports a long architecture doc, with a subagent-only skill left model-invocable, a skill description that retells its body, one rule copied word for word into 3 files and paraphrased in 2, and prose restating the lint script's exempt list (issue 192 F11).
+description: Inventory service with a subagent-only skill left model-invocable, one rule copied word for word into three files and paraphrased in two, and a lint exempt list in prose; only the verbatim copies, the visible skill, the allow rule and the Stop hook are findings.
 tags: [claudit, issue-192]
 runs: 1
 context:

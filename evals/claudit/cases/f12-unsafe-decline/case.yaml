@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f12-unsafe-decline
-description: Project that dropped pre-approved commands in favour of bypassPermissions in its project settings, which Claude Code ignores there; the defaultMode defect is in the plan, graded as a defect, and cites the decline.
+description: Project that dropped pre-approved commands in favour of project bypassPermissions, which Claude Code ignores there; the bin/test allow rule finding stays, citing the decision and the ignored setting.
 tags: [claudit, coverage]
 runs: 1
 context:

@@ -5,3 +5,5 @@ Setup decisions are in @docs/decisions.md.
 ## Commands
 
 - `npm test` builds and runs the tests.
+
+Always run `npm test` before you report a change as done.

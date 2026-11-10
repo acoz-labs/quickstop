@@ -1,0 +1,10 @@
+---
+type: regex
+pattern: '^(?![\s\S]*\n[0-9]+\.[ \t][ \t]*(?!`CLAUDE\.md:8`|`CLAUDE\.md:9`|`CLAUDE\.md:10`|`CLAUDE\.md:14`))(?=(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:8`)[\s\S])*(?:\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:8`(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:8`)[\s\S])*){1}(?![\s\S]))(?![\s\S]*\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:8`(?:(?!(?:src/labelmaker/carriers/))(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S]))*(?=\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---|(?![\s\S])))(?=(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:9`)[\s\S])*(?:\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:9`(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:9`)[\s\S])*){1}(?![\s\S]))(?![\s\S]*\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:9`(?:(?!(?:config/rates\.toml))(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S]))*(?=\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---|(?![\s\S])))(?=(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:10`)[\s\S])*(?:\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:10`(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:10`)[\s\S])*){1}(?![\s\S]))(?![\s\S]*\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:10`(?:(?!(?:reportlab))(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S]))*(?=\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---|(?![\s\S])))(?=(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:14`)[\s\S])*(?:\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:14`(?:(?!\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:14`)[\s\S])*){1}(?![\s\S]))(?![\s\S]*\n[0-9]+\.[ \t][ \t]*`CLAUDE\.md:14`(?:(?!(?:Bash\(python3\ \-m\ unittest\)))(?:(?!\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---)[\s\S]))*(?=\n[0-9]+\.[ \t]|\n#{1,6}[ \t]|\n---|(?![\s\S])))'
+weight: 1
+---
+The numbered items are exactly the scan's findings, one to one: `CLAUDE.md:8` (stale-ref), `CLAUDE.md:9` (stale-ref), `CLAUDE.md:10` (stale-dep), `CLAUDE.md:14` (allowlist). An invented item, an item with no citation or a second item at an expected citation fails.
+
+Script-graded and built from the scan of the scaffolded fixture by `tests/claudit_graders.py` (rebuild with
+`python3 tests/claudit_graders.py --write`); the pattern is `findings_pattern` in `bin/claudit-eval`, which also checks
+real-repository reports.

@@ -377,6 +377,41 @@ def identified(model, plugin_version='4.0.0', web_fetch=None):
                                'plugins': [{'name': 'claudit', 'version': plugin_version, 'path': '/abs/claudit'}]})
 
 
+class WholeSuiteTests(unittest.TestCase):
+    """A partial or mislabelled result never reads as a pass: summarize --expect-runs refuses it."""
+
+    def full(self, runs=1):
+        cases = []
+        for case in sorted((ROOT / 'evals/claudit/cases').glob('*/case.yaml')):
+            names = sorted(g.stem for g in (case.parent / 'graders').glob('*.md'))
+            cases.append({'name': case.parent.name, 'graders': [{'name': n} for n in names], 'arms': {'with': [
+                {'graders': [{'name': n, 'passed': True} for n in names]} for _ in range(runs)]}})
+        return {'cases': cases}
+
+    def test_the_whole_suite_passes_and_each_gap_is_refused(self):
+        ce.check_suite(self.full(3), 3)
+        missing = self.full()
+        missing['cases'].pop()
+        lacking = self.full()
+        lacking['cases'][0]['arms']['with'][0]['graders'].pop()
+        extra = self.full()
+        extra['cases'].append({'name': 'f99-extra', 'arms': {'with': [{}]}})
+        for result, runs, why in ((missing, 1, 'missing case'), (lacking, 1, 'graded'), (self.full(2), 3, 'has 2 runs'),
+                                  (extra, 1, 'not in the suite')):
+            with self.subTest(why=why):
+                with self.assertRaisesRegex(ce.Failure, why):
+                    ce.check_suite(result, runs)
+
+    def test_summary_reports_median_cost_and_time(self):
+        result = self.full()
+        for n, case in enumerate(result['cases']):
+            case['arms']['with'][0].update(costUsd=0.01 * (n + 1), durationSeconds=10 * (n + 1))
+        totals = ce.summarize(result)['totals']
+        middle = (len(result['cases']) + 1) / 2
+        self.assertEqual((totals['agent_cost_usd_median'], totals['wall_seconds_median']),
+                         (round(0.01 * middle, 6), 10 * middle))
+
+
 class PoolingTests(unittest.TestCase):
     def test_pooled_summary_carries_model_judge_and_plugin(self):
         summary = ce.summarize(ce.merge_results([identified('sonnet'), identified('sonnet')]), 'claudit', 'sonnet')
@@ -452,7 +487,9 @@ class ReportRetentionTests(RunTests):
         for keep in (False, True):
             with self.subTest(keep_temp=keep):
                 out = self.base / f'out-{keep}'
-                args = ['run', '--arm', 'plain', '--model', 'm', '--max-cost-usd', '1', '--output-dir', str(out)]
+                # One case: the fake result holds only alpha, so the whole-suite check doesn't apply.
+                args = ['run', '--arm', 'plain', '--model', 'm', '--max-cost-usd', '1', '--case', 'alpha', '--output-dir',
+                        str(out)]
                 result = subprocess.run([sys.executable, str(self.repo / 'bin/claudit-eval'), *args,
                                          *(['--keep-temp'] if keep else [])],
                                         env=self.fake(FAKE_EVAL), capture_output=True, text=True,
@@ -516,31 +553,20 @@ def scan_of(root):
 
 
 def conforming(scan):
-    """A report that follows the scan exactly."""
-    items = ''.join('%d. **%s** (Coverage, effort S)\n   Problem: x.\n   Change: y.\n   Source: [h](u)\n%s\n'
-                    % (i['n'], i['title'], '   Declined: %s (`%s:%d`)\n' % (
-                        i['declined']['label'], i['declined']['path'], i['declined']['line'])
-                       if i.get('declined') else '') for i in scan['plan']['items'])
-    grades = '\n'.join('- **%s: %s** (confidence: high). %s' % (
-        name.capitalize(), g['letter'], 'Fine.' if g['letter'] == 'A' else 'Items %s would raise it.' % ', '.join(
-            str(n) for n in g['items'])) for name, g in scan['grades'].items())
-    declined = ''.join('- **%s** (`%s:%d`): "%s"\n  Reason: %s\n' % (
-        d['label'], d['path'], d['line'], d['quote'],
-        'no reason given.' if d['reason'] == 'no reason given' else '"%s"' % d['reason'])
-        + ('  Worth reconsidering: %s. Evidence: %s\n' % (d['reconsider']['claim'], ce.evidence_text(d['reconsider']))
-           if d['reconsider'] else '') for d in scan['declined'])
-    return ('# Claudit: x\n\n**Intent:** x.\n\n## Grades\n\n%s\n\n## Top changes\n\n%s\n\n%s%s'
-            '## Also worth knowing\n\n- Optional.\n\n---\n%s\nClaude Code 2.1.316.\n' % (
-                grades, scan['plan']['summary'], items,
-                '## Declined by the project\n\n%s\n' % declined if declined else '', scan['footer']))
+    """A report that follows the scan exactly, in the skill's shape."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_claudit_graders import render
+    return render(scan)
 
 
 class GradeTests(Temp):
+    """A real repository's report, script-checked against the scan of the same clone."""
+
     def repo(self):
         root = self.base / 'repo'
         (root / 'bin').mkdir(parents=True)
         (root / 'CLAUDE.md').write_text('# r\n\n@docs/decisions.md\n\nAlways run `bin/ci` before you finish.\n'
-                                        'Follow `docs/operations/sdlc.md`.\n')
+                                        'Follow `docs/operations/sdlc.md`.\nSee `docs/gone.md`.\n')
         (root / 'docs/operations').mkdir(parents=True)
         (root / 'docs/decisions.md').write_text('Claude Code hooks were retired; CI is the gate.\n')
         (root / 'docs/operations/sdlc.md').write_text('# Delivery\n' + ''.join('%d. Run step %d\n' % (n, n) for n in range(1, 6)))
@@ -556,76 +582,27 @@ class GradeTests(Temp):
         return root
 
     @unittest.skipUnless(shutil.which('git'), 'git not installed')
-    def test_reconsider_and_defect_controls(self):
-        root = self.repo()
-        (root / 'docs/decisions.md').write_text(
-            "Claude Code hooks were retired because hooks can't block Claude from finishing.\n"
-            'We dropped the allowlist in favour of bypassPermissions in the project settings.\n')
-        (root / '.claude').mkdir()
-        (root / '.claude/settings.json').write_text('{"permissions": {"defaultMode": "bypassPermissions"}}\n')
-        scan = scan_of(root)
-        self.assertEqual([bool(d['reconsider']) for d in scan['declined']], [True, False])
-        helper = ce.load_helper(ROOT / 'plugins/claudit')
-        good = conforming(scan)
-        checks = ce.grade_report(good, scan, helper)
-        self.assertTrue(checks['reconsider_notes'] and checks['declined_reasons'] and checks['declined_defects_cited'],
-                        checks)
-        url = 'https://code.claude.com/docs/en/hooks'
-        bad = {'reconsider_notes': [good.replace('  Worth reconsidering:', '  Note:'),
-                                    good.replace(url, 'https://code.claude.com/docs/en/other'),
-                                    good.replace('Evidence: ' + url, 'Evidence: [Stop](see below)').replace(
-                                        '## Also worth knowing', '## Also worth knowing\n\nSource: ' + url),
-                                    good.replace('  Reason: "in favour of', '  Worth reconsidering: x.\n'
-                                                 '  Reason: "in favour of')],
-               'declined_defects_cited': [good.replace('   Declined: ', '   Source: declined '),
-                                          good.replace('   Declined: Pre-approved commands (`docs/decisions.md:2`)\n',
-                                                       '')]}
-        for check, texts in bad.items():
-            for text in texts:
-                with self.subTest(check=check, text=text[-200:]):
-                    self.assertNotEqual(text, good)
-                    self.assertFalse(ce.grade_report(text, scan, helper)[check])
-
-    @unittest.skipUnless(shutil.which('git'), 'git not installed')
     def test_grade_controls(self):
         scan = scan_of(self.repo())
-        self.assertEqual([i['title'] for i in scan['plan']['items']],
-                         ['Pre-approve the check commands', 'Add a skill for docs/release.md'])
-        helper = ce.load_helper(ROOT / 'plugins/claudit')
+        self.assertEqual([(f['id'], f['line']) for f in scan['findings']],
+                         [('allowlist', 5), ('stale-ref:CLAUDE.md:docs/gone.md', 7)])
+        self.assertEqual([r['id'] for r in scan['respected']], ['stop-hook'])
         good = conforming(scan)
-        checks = ce.grade_report(good, scan, helper)
-        self.assertEqual(checks, {'plan_items': True, 'grades': True, 'grade_raise': True, 'footer': True,
-                                  'scan_no_test_data_findings': True, 'optional_not_planned': True,
-                                  'declined_listed': True, 'declined_reasons': True, 'reconsider_notes': True,
-                                  'generated_labels': True})
-        bad = {'plan_items': good.replace('1. **Pre-approve', '1. **Allow'),
-               'grades': good.replace('**Coverage: C**', '**Coverage: B**'),
-               'grade_raise': good.replace('Items 1, 2 would raise it.', 'Two gaps.'),
-               'footer': good.replace(scan['footer'], 'Claudit 4.1.0'),
-               'declined_listed': good.replace('## Declined by the project', '## Declined'),
-               'declined_reasons': good.replace('  Reason: "CI is the gate"', '  Reason: no reason given.'),
-               'reconsider_notes': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Hooks are '
-                                                'worth reconsidering.\n'),
-               # Review round 1 (M1): a negation elsewhere on the line doesn't exempt the note.
-               'reconsider_notes_no_reason': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Reason: '
-                                                          'no reason given. Worth reconsidering: hooks block now.\n'),
-               'reconsider_notes_no_longer': good.replace('## Also worth knowing\n', '## Also worth knowing\n\n- Worth '
-                                                          'reconsidering: this no longer matches the retirement.\n'),
-               'optional_not_planned': good.replace('2. **Add a skill for docs/release.md**',
-                                                    '2. **Add a skill for docs/release.md** and docs/operations/sdlc.md')}
-        for name, text in bad.items():
-            check = 'reconsider_notes' if name.startswith('reconsider_notes') else name
-            with self.subTest(check=name):
+        checks = ce.grade_report(good, scan)
+        self.assertEqual(checks, dict.fromkeys(('items_cited', 'items_from_scan', 'scan_accounted',
+                                                'drops_cite_the_repository', 'respected_listed', 'summary', 'footer',
+                                                'template'), True))
+        bad = {'items_cited': good.replace('2. `CLAUDE.md:7` ', '2. '),
+               'items_from_scan': good.replace('2. `CLAUDE.md:7`', '2. `CLAUDE.md:8`'),
+               'scan_accounted': good.replace('2. `CLAUDE.md:7`', '2. `CLAUDE.md:5`'),
+               'respected_listed': good.replace('- Respected:', '- Kept:'),
+               'summary': good.replace('2 findings.', '3 findings.'),
+               'footer': good.replace(scan['footer'][-1], 'Claudit 4.3.1'),
+               'template': good.replace('## Always loaded', 'Also consider a skill for the docs.\n\n## Always loaded')}
+        for check, text in bad.items():
+            with self.subTest(check=check):
                 self.assertNotEqual(text, good)
-                self.assertFalse(ce.grade_report(text, scan, helper)[check])
-        for text in ('- Why not reconsider the hooks decision?', '- Is it not worth revisiting the hooks decision?'):
-            with self.subTest(refused=text):  # review round 2 (L3)
-                self.assertFalse(ce.grade_report(good.replace('## Also worth knowing\n', '## Also worth knowing\n\n%s\n'
-                                                              % text), scan, helper)['reconsider_notes'])
-        for text in ('- Hooks are not worth reconsidering.', '- No need to revisit the hooks decision.'):
-            with self.subTest(allowed=text):
-                self.assertTrue(ce.grade_report(good.replace('## Also worth knowing\n', '## Also worth knowing\n\n%s\n'
-                                                             % text), scan, helper)['reconsider_notes'])
+                self.assertFalse(ce.grade_report(text, scan)[check])
         report, scan_path = self.base / 'report.md', self.base / 'scan.json'
         report.write_text(good)
         scan_path.write_text(json.dumps(scan))
@@ -655,7 +632,7 @@ class HeadlessTests(GradeTests):
         sha = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
         fake = self.base / 'fake-bin'
         fake.mkdir()
-        (fake / 'claude').write_text(FAKE_HEADLESS)
+        (fake / 'claude').write_text(FAKE_HEADLESS.replace('#!/usr/bin/env python3', '#!' + sys.executable, 1))
         (fake / 'claude').chmod(0o755)
         tmp = self.base / 'tmp'
         tmp.mkdir()
@@ -677,6 +654,9 @@ class HeadlessTests(GradeTests):
             meta = json.loads((out / f'run{number}/meta.json').read_text())
             self.assertEqual(meta['head'], sha)
             self.assertTrue(meta['passed'], meta['checks'])
+            self.assertTrue(meta['checks']['scan_lines_real'])
+            self.assertEqual(meta['cited'], ['CLAUDE.md:5', 'CLAUDE.md:7'])
+            self.assertEqual(meta['cited'], meta['scan_findings'])
             self.assertEqual(shlex.split(meta['command']), [
                 'claude', '-p', '/claudit:claudit --read-only', '--plugin-dir', str(ROOT / 'plugins/claudit'),
                 *ce.HEADLESS_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.5'])
@@ -711,13 +691,6 @@ with open(os.environ['FAKE_ARGS'], 'a') as handle:
                              'parent': sorted(os.listdir('..'))}}) + '\\n')
 if judge:
     print(json.dumps({{'result': os.environ.get('FAKE_JUDGE_REPLY', 'PASS'), 'total_cost_usd': 0.001}}))
-elif '--plugin-dir' in sys.argv:  # claudit-deep: the helper's deep subcommand records its nested call
-    with open(os.environ['CLAUDIT_DEEP_RECORD'], 'a') as handle:
-        handle.write(json.dumps({{'status': 'ran', 'model': os.environ.get('CLAUDIT_DEEP_MODEL'), 'max_budget_usd': 0.5,
-                                 'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2,
-                                 'report': '1. `docs/x.md:4` is history.'}}) + '\\n')
-    print(json.dumps({{'result': '# Claudit: x\\n\\n`CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.12,
-                      'permission_denials': []}}))
 elif sys.argv[2] == '/doctor':
     print(json.dumps({{'result': 'Doctor: `CLAUDE.md` is a symlink to `AGENTS.md`.', 'total_cost_usd': 0.1,
                       'permission_denials': [{{'tool_name': 'Bash'}}]}}))
@@ -767,10 +740,11 @@ class CombinedArmTests(Temp):
         result = json.loads((out / 'result.json').read_text())
         run = result['cases'][0]['arms']['with'][0]
         graders = {g['name']: g['passed'] for g in run['graders']}
-        self.assertTrue(graders['finding-symlink-real-path'])
-        self.assertTrue(graders['finding-parent-noted'])
-        self.assertTrue(graders['no-invented-agents-md-missing'])
-        self.assertFalse(graders['structure-intent'])
+        # Neither built-in review writes Claudit's report, so the scope lines and the shape fail; it lists no
+        # numbered findings, so it invents none.
+        self.assertEqual(graders, {'finding-scope-1': False, 'finding-scope-2': False, 'finding-scope-3': False,
+                                   'no-invented-findings': True, 'no-invented-prose': False,
+                                   'structure-summary': False, 'structure-footer': False})
         self.assertEqual((run['costUsd'], run['judgeCostUsd']), (0.15, 0))
         self.assertEqual([(p['prompt'], p['costUsd'], p['permissionDenials']) for p in run['parts']],
                          [('/doctor', 0.1, 1), ('/doctor prompt-audit .', 0.05, 0)])
@@ -784,63 +758,6 @@ class CombinedArmTests(Temp):
         self.assertEqual(list((self.base / 'tmp').iterdir()), [])
         for path in out.rglob('*.json'):
             self.assertNotIn(str(self.base / 'tmp'), path.read_text(), path)
-
-    def test_llm_graders_use_the_eval_hosts_judge_prompt_and_votes(self):
-        proc, out = self.run_arm('--max-cost-usd', '5', '--case', 'f5-bare', '--judge-model', 'claude-haiku-5-5')
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        judge = [r for r in self.records() if '--system-prompt' in r['argv']]
-        llm = [p for p in sorted((ROOT / 'evals/claudit/cases/f5-bare/graders').glob('*.md'))
-               if 'type: llm' in p.read_text()]
-        self.assertEqual(len(judge), 3 * len(llm))
-        criteria = ce.read_grader(llm[0])['criteria']
-        report = (out / 'reports/f5-bare-run1.md').read_text()
-        self.assertEqual(judge[0]['stdin'], ce.JUDGE_PROMPT.format(criteria=criteria, output=report))
-        self.assertTrue(judge[0]['stdin'].endswith('\n\n\nRespond with exactly one word: PASS or FAIL.'))
-        self.assertEqual(judge[0]['argv'], ['-p', *ce.JUDGE_FLAGS, '--model', 'claude-haiku-5-5', '--max-budget-usd',
-                                            '0.05'])
-        self.assertNotEqual(judge[0]['cwd'], [r for r in self.records() if r['argv'][:2] == ['-p', '/doctor']][0]['cwd'])
-        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
-        for grader in run['graders']:
-            if grader['type'] == 'llm':
-                self.assertEqual(grader['judgeVotes'], [True] * 3)
-                self.assertEqual([r['reply'] for r in grader['judgeReplies']], ['PASS'] * 3)  # every reply is kept
-        self.assertEqual(run['judgeCostUsd'], round(0.001 * len(judge), 6))
-
-    def test_judge_regrades_any_arms_saved_reports_with_the_same_judge(self):
-        folder = self.base / 'default-arm'
-        (folder / 'reports').mkdir(parents=True)
-        (folder / 'reports/f5-bare-run1.md').write_text('# Claudit: x\n')
-        (folder / 'reports/f5-bare-run2.md').write_text('# Claudit: y\n')
-        llm = [ce.read_grader(p)['name'] for p in sorted((ROOT / 'evals/claudit/cases/f5-bare/graders').glob('*.md'))
-               if 'type: llm' in p.read_text()]
-        (folder / 'result.json').write_text(json.dumps({'cases': [{'name': 'f5-bare', 'arms': {'with': [
-            {'graders': [{'name': llm[0], 'passed': False}]}]}}]}))
-        proc = subprocess.run([sys.executable, str(RUNNER), 'judge', '--results', str(folder), '--max-cost-usd', '1'],
-                              capture_output=True, text=True, env=self.fake(), stdin=subprocess.DEVNULL)
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        judged = json.loads((folder / 'judge/f5-bare-run1.json').read_text())
-        self.assertEqual([g['name'] for g in judged], llm)
-        self.assertEqual(judged[0]['judgeReplies'][0]['reply'], 'PASS')
-        self.assertEqual((judged[0]['passed'], judged[0]['recorded']), (True, False))
-        summary = json.loads((folder / 'judge/summary.json').read_text())
-        self.assertEqual([(r['case'], r['grader']) for r in summary['differs_from_recorded']], [('f5-bare', llm[0])])
-        self.assertIn(' --system-prompt ', summary['judge'])
-        self.assertEqual(len([r for r in self.records() if '--system-prompt' in r['argv']]),
-                         3 * len(summary['rows']))
-        self.assertEqual(list((self.base / 'tmp').iterdir()), [])
-        # A ceiling stops before the next report and says the result is partial.
-        proc = subprocess.run([sys.executable, str(RUNNER), 'judge', '--results', str(folder), '--max-cost-usd',
-                               '0.001'], capture_output=True, text=True, env=self.fake(), stdin=subprocess.DEVNULL)
-        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-        self.assertIn('PARTIAL', proc.stderr)
-
-    def test_a_vote_that_says_both_pass_and_fail_fails(self):
-        proc, out = self.run_arm('--max-cost-usd', '5', '--case', 'f5-bare',
-                                 env=self.fake(FAKE_JUDGE_REPLY='PASS? No: FAIL'))
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
-        self.assertEqual({tuple(g['judgeVotes']) for g in run['graders'] if g['type'] == 'llm'}, {(False,) * 3})
-        self.assertEqual(json.loads((out / 'summary.json').read_text())['totals']['findings_hit'], 0)
 
     def test_the_cost_ceiling_stops_new_runs(self):
         proc, out = self.run_arm('--max-cost-usd', '0.1', '--case', 'f9-clean', '--runs', '3')
@@ -858,33 +775,8 @@ class CombinedArmTests(Temp):
         proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'plain', '--model', 'm', '--max-cost-usd',
                                '1', '--max-budget-usd', '1', '--dry-run'], capture_output=True, text=True, env=self.fake())
         self.assertEqual(proc.returncode, 1)
-        self.assertIn('applies only to the doctor-combined and claudit-deep arms', proc.stderr)
+        self.assertIn('applies only to the doctor-combined arm', proc.stderr)
         self.assertFalse(self.calls.exists())
-
-    def test_claudit_deep_runs_headless_on_the_candidate_and_counts_the_nested_call(self):
-        out = self.base / 'deep'
-        proc = subprocess.run([sys.executable, str(RUNNER), 'run', '--arm', 'claudit-deep', '--model', 'claude-sonnet-5-5',
-                               '--max-budget-usd', '0.4', '--max-cost-usd', '5', '--case', 'f17-scope', '--output-dir',
-                               str(out)], capture_output=True, text=True, env=self.fake(), stdin=subprocess.DEVNULL)
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        call = [r for r in self.records() if '--plugin-dir' in r['argv']]
-        self.assertEqual(len(call), 1)
-        self.assertEqual(call[0]['argv'], ['-p', ce.DEEP_INVOKE, '--plugin-dir', str(ROOT / 'plugins/claudit'),
-                                           *ce.HEADLESS_FLAGS, '--model', 'claude-sonnet-5-5', '--max-budget-usd', '0.4'])
-        self.assertTrue(call[0]['cwd'].endswith('/home/cwd'))
-        run = json.loads((out / 'result.json').read_text())['cases'][0]['arms']['with'][0]
-        self.assertEqual(run['costUsd'], 0.42)  # the outer call and the nested prompt-audit
-        self.assertEqual(run['parts'][0]['nested'], [{'status': 'ran', 'model': 'claude-sonnet-5-5', 'max_budget_usd': 0.5,
-                                                      'cost_usd': 0.3, 'seconds': 40.0, 'permission_denials': 2}])
-        self.assertTrue({g['name']: g['passed'] for g in run['graders']}['finding-symlink-real-path'])
-        # The nested audit's own text is kept beside the report (#193 4.3.1).
-        self.assertEqual((out / 'calls/f17-scope-run1-nested-audit.md').read_text(),
-                         '<!-- status: ran -->\n1. `docs/x.md:4` is history.\n')
-        self.assertEqual(json.loads((out / 'calls/f17-scope-run1-nested.jsonl').read_text())['report'],
-                         '1. `docs/x.md:4` is history.')
-        self.assertIn('nested: claudit.py deep runs claude -p "/doctor prompt-audit ." with the doctor-combined flags plus '
-                      'Bash and Skill(claudit:claudit) denied, --model claude-sonnet-5-5 (CLAUDIT_DEEP_MODEL='
-                      'claude-sonnet-5-5) and --max-budget-usd 0.5', (out / 'command.txt').read_text())
 
     def test_refuses_an_instruction_file_above_the_workspace(self):
         env = self.fake()
@@ -939,10 +831,10 @@ class SuiteStructureTests(unittest.TestCase):
                     self.assertNotIn(path.name, ('CLAUDE.md', 'AGENTS.md'), f'live instruction file: {path}')
                     self.assertFalse(path.is_symlink(), path)
                 graders = sorted((case / 'graders').glob('*.md'))
-                self.assertLessEqual(set(ce.STRUCTURE), {grader.stem for grader in graders})
-                if case.name.startswith('f4-'):
-                    self.assertIn('no-invented-defects', {grader.stem for grader in graders})
+                self.assertLessEqual({'no-invented-findings', 'no-invented-prose', 'structure-summary',
+                                      'structure-footer'}, {grader.stem for grader in graders})
                 for grader in graders:
+                    self.assertEqual(ce.read_grader(grader)['type'], 'regex', grader.name)  # script graders only
                     self.assertTrue(grader.stem.startswith(('finding-', 'structure-', 'no-invented-')), grader.name)
                     keys = frontmatter(grader)
                     self.assertIsNotNone(keys, f'{grader.name}: missing frontmatter')

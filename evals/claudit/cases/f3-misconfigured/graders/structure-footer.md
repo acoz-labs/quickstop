@@ -1,8 +1,10 @@
 ---
 type: regex
-pattern: '(?:^|\n)[-*_]{3,}[ \t]*\n(?:[^\n]*\n)*?[^\n]*\bClaudit 4\.3\.1; audited commit \x60?[0-9a-f]{40}\b'
+pattern: '(?=[\s\S]*\n---[ \t]*\n[\s\S]*Not checked: user and managed settings, settings validity, server-side branch protection\.)(?=[\s\S]*\n---[ \t]*\n[\s\S]*Run `/doctor prompt-audit` for contradictions and wording\.)(?=[\s\S]*\n---[ \t]*\n[\s\S]*Claudit 5\.0\.0; (?:audited commit [0-9a-f]{40}|not a git repo))'
 weight: 1
 ---
-The footer gives the Claudit version and the audited commit (issue #174 requirement 6).
+After the footer rule: the not-checked line, the `/doctor prompt-audit` line and "Claudit 5.0.0; audited commit <sha>".
 
-Script-graded (case-sensitive): after a `---` rule, a line has "Claudit 4.3.1; audited commit " then 40 hex characters (optionally backticked). The exact commit isn't compared, because the eval host owns the workspace's history.
+Script-graded and built from the scan of the scaffolded fixture by `tests/claudit_graders.py` (rebuild with
+`python3 tests/claudit_graders.py --write`); the pattern is `footer_pattern` in `bin/claudit-eval`, which also checks
+real-repository reports.

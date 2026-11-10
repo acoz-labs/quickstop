@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f1-agent-run
-description: Agent-run Python repo with bin/ci and a numbered release procedure doc, a two-line CLAUDE.md and no .claude/ config; plants three Coverage holes.
+description: Agent-run Python repo with bin/ci, a must-run rule and no .claude/ config; Claudit 5 lists the missing bin/ci allow rule and Stop hook, and nothing about the release procedure doc.
 tags: [claudit, coverage]
 runs: 1
 context:

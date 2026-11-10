@@ -5,3 +5,5 @@ Setup decisions are in @docs/decisions.md.
 ## Commands
 
 - `bin/check` runs shellcheck over `lib/`.
+
+Always run `bin/check` before you report a change as done.

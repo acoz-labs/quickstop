@@ -1,11 +1,9 @@
-"""Claudit 4.3 scan checks (issue #193): stale facts, human gates, opt-in git hooks, the always-loaded table,
-subagent-only skills, duplication, declarative lists, scope, per-user dismissals and the `deep` subcommand."""
+"""Claudit scan checks from 4.3 kept in 5 (issues #193, #207): stale facts, human gates, the always-loaded table,
+subagent-only skills, verbatim duplication, history lines, scope and per-user dismissals."""
 import json
 import os
 from pathlib import Path
-import stat
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,12 +29,10 @@ class StaleFacts(Project):
                                  'stale-command:CLAUDE.md:npm run build', 'stale-dep:CLAUDE.md:reportlab'])
         self.assertEqual(self.finding(result, 'stale-dep:CLAUDE.md:reportlab')['problem'],
                          '`reportlab` is not a declared dependency in `pyproject.toml`; `CLAUDE.md:6` names it.')
-        # All of one file's stale facts are one change, and Alignment can't be A while one stands.
-        items = [i for i in result['plan']['items'] if i['kind'] == 'stale']
-        self.assertEqual([(i['title'], len(i['finding_ids'])) for i in items], [('Fix the stale facts in CLAUDE.md', 4)])
-        self.assertEqual(result['grades']['alignment']['letter'], 'B')
-        self.assertEqual(result['grades']['alignment']['items'], [items[0]['n']])
-        self.assertEqual(result['grades']['correctness']['letter'], 'C')
+        # One finding per stale fact, each on its own real line.
+        self.assertEqual([(f['id'], f['line']) for f in result['findings'] if f['id'] in stale],
+                         [('stale-command:CLAUDE.md:npm run build', 3), ('stale-command:CLAUDE.md:make docs', 4),
+                          ('stale-command:CLAUDE.md:bin/release', 5), ('stale-dep:CLAUDE.md:reportlab', 6)])
 
     def test_one_sentence_per_missing_path(self):
         self.write('CLAUDE.md', '# x\n- `src/app/carriers/` holds one module per carrier.\n'
@@ -85,7 +81,9 @@ class Gates(Project):
         self.write('CLAUDE.md', self.CLAUDE)
         result = self.scan()
         found = self.finding(result, 'gate-ask')
-        self.assertEqual(found['change'], 'Ask before merge, deploy and release')
+        self.assertEqual((found['path'], found['line']), ('CLAUDE.md', 4))
+        self.assertTrue(found['problem'].startswith('`CLAUDE.md:4` says a person must approve merge, but no ask or '
+                                                    'deny rule covers `gh pr merge`'), found['problem'])
         self.assertIn(json.dumps({'permissions': {'ask': ['Bash(gh pr merge *)', 'Bash(bin/deploy *)',
                                                           'Bash(bin/release *)']}}), found['fix'])
         self.assertIn('Branch protection on `main`', found['fix'])
@@ -100,35 +98,15 @@ class Gates(Project):
         self.write('.claude/settings.json', {'permissions': {'ask': ['Bash(gh pr merge *)'],
                                                              'allow': ['Bash(bin/deploy *)']}})
         found = self.finding(self.scan(), 'gate-ask')
-        self.assertEqual(found['change'], 'Ask before deploy and release')
+        self.assertNotIn('merge', found['problem'])
+        self.assertIn('approve deploy', found['problem'])
+        self.assertIn('approve release', found['problem'])
         self.assertIn("deploy or release system's own approval", found['fix'])
 
     def test_no_person_a_question_or_history_is_no_gate(self):
         self.write('CLAUDE.md', '# x\n- Merge when CI is green.\n- Should a human approve each release?\n'
                    '- Releases no longer need a maintainer sign-off.\n')
         self.assertNotIn('gate-ask', self.ids(self.scan()))
-
-
-class GitHooks(Project):
-    def test_opt_in_hooks_get_a_session_start_hook(self):
-        self.write('CLAUDE.md', '# x\n')
-        self.write('CONTRIBUTING.md', 'Run `git config core.hooksPath .githooks` once after cloning.\n')
-        found = self.finding(self.scan(), 'git-hooks')
-        self.assertIn('"SessionStart"', found['fix'])
-        self.assertIn('git config core.hooksPath .githooks', found['fix'])
-        self.write('.pre-commit-config.yaml', 'repos: []\n')
-        os.unlink(os.path.join(self.root, 'CONTRIBUTING.md'))
-        self.assertIn('command -v pre-commit', self.finding(self.scan(), 'git-hooks')['fix'])
-
-    def test_enabled_or_declined_hooks_are_respected(self):
-        self.write('CLAUDE.md', '# x\n')
-        self.write('.pre-commit-config.yaml', 'repos: []\n')
-        self.write('.claude/settings.json', {'hooks': {'SessionStart': [{'hooks': [
-            {'type': 'command', 'command': 'pre-commit install'}]}]}})
-        self.assertNotIn('git-hooks', self.ids(self.scan()))
-        os.unlink(os.path.join(self.root, '.claude/settings.json'))
-        self.write('CLAUDE.md', '# x\nWe retired pre-commit hooks because CI runs the same checks.\n')
-        self.assertNotIn('git-hooks', self.ids(self.scan()))
 
 
 class Context(Project):
@@ -169,7 +147,7 @@ class Context(Project):
         found = self.finding(self.scan(), 'visible-skill:.claude/skills/schema-rules/SKILL.md')
         self.assertIn('disable-model-invocation: true', found['fix'])
         self.assertIn('name: schema-rules', found['fix'])
-        self.assertEqual(found['change'], 'Hide .claude/skills/schema-rules/SKILL.md from the skill listing')
+        self.assertEqual(found['line'], 3)  # the description line, which is what loads
         # Preloaded with skills:, disable-model-invocation would stop the preload: move the rules instead.
         self.write('.claude/agents/migrator.md', '---\nname: migrator\ndescription: Migrates.\nskills:\n'
                    '  - schema-rules\n---\nMigrate.\n')
@@ -189,7 +167,7 @@ class Context(Project):
 
 
 class Duplicates(Project):
-    def test_three_copies_are_one_change_with_paraphrases(self):
+    def test_three_verbatim_copies_are_one_finding_and_paraphrases_are_not_matched(self):
         self.write('CLAUDE.md', '# x\n\n%s\n' % RULE)
         self.write('docs/contributing.md', '# C\n\n%s\n' % RULE)
         self.write('.claude/agents/migrator.md', '---\nname: migrator\ndescription: M.\n---\n%s\n' % RULE)
@@ -199,10 +177,18 @@ class Duplicates(Project):
         found = self.finding(result, 'duplicate')
         self.assertEqual(result['duplicates'][0]['copies'],
                          ['CLAUDE.md:3', '.claude/agents/migrator.md:5', 'docs/contributing.md:3'])
-        self.assertEqual(result['duplicates'][0]['paraphrases'], ['docs/architecture.md:3'])
+        self.assertNotIn('paraphrases', result['duplicates'][0])
         self.assertEqual(found['problem'], 'One rule is copied word for word into 3 files, `CLAUDE.md:3`, '
-                         '`.claude/agents/migrator.md:5` and `docs/contributing.md:3`: "%s" It is paraphrased in '
-                         '`docs/architecture.md:3`.' % RULE)
+                         '`.claude/agents/migrator.md:5` and `docs/contributing.md:3`: "%s"' % RULE)
+        self.assertEqual((found['path'], found['line']), ('CLAUDE.md', 3))
+
+    def test_copies_only_in_separate_prompts_are_a_template(self):
+        for name in ('a', 'b', 'c'):
+            self.write('.claude/agents/%s.md' % name, '---\nname: %s\ndescription: R.\n---\n%s\n' % (name, RULE))
+        self.write('CLAUDE.md', '# x\n')
+        self.assertNotIn('duplicate', self.ids(self.scan()))
+        self.write('docs/contributing.md', '# C\n\n%s\n' % RULE)  # a team doc copy is drift again
+        self.assertIn('duplicate', self.ids(self.scan()))
 
     def test_two_copies_or_one_symlinked_file_are_not_a_finding(self):
         self.write('AGENTS.md', '# x\n\n%s\n' % RULE)
@@ -213,7 +199,7 @@ class Duplicates(Project):
         self.assertEqual(result['duplicates'][0]['copies'], ['CLAUDE.md:3', 'docs/contributing.md:3'])
 
 
-    def test_script_copies_cite_the_file_line_and_common_words_are_no_paraphrase(self):
+    def test_script_copies_cite_the_file_line(self):
         sentence = 'Pi links local packages, so keep each verified version checkout available.'
         self.write('CLAUDE.md', '# x\n\n%s\n' % sentence)
         self.write('bin/build', '#!/bin/sh\n' + 'x=1\n' * 20 + 'echo "short" "%s"\n' % sentence)
@@ -223,9 +209,10 @@ class Duplicates(Project):
         self.write('docs/more.md', '# M\n\nCommands change settings only when you run them; no package is '
                    'auto-installed.\n')
         result = self.scan()
-        copies = {tuple(d['copies']): d['paraphrases'] for d in result['duplicates']}
+        copies = [tuple(d['copies']) for d in result['duplicates']]
         self.assertIn(('CLAUDE.md:3', 'bin/build:22'), copies)  # the file's line, not the literal's position
-        self.assertEqual(copies[('docs/install.md:3', 'docs/more.md:3')], [])  # 4 shared common words
+        self.assertIn(('docs/install.md:3', 'docs/more.md:3'), copies)
+        self.assertEqual(len(copies), 2)  # bin/check's comment shares words, not the sentence
 
     def test_generated_output_and_its_generator_are_not_copies(self):
         sentence = 'Only accepted targets receive installation commands in the list below.'
@@ -237,16 +224,25 @@ class Duplicates(Project):
         self.write('.gitattributes', 'uv.lock linguist-generated=true\n*.svg linguist-generated\n')
         self.write('uv.lock', 'x\n')
         result = self.scan()
-        self.assertEqual(result['generated'], [{'path': 'docs/catalog.md', 'evidence': 'docs/catalog.md:3'},
-                                               {'path': 'uv.lock', 'evidence': '.gitattributes:1'}])
+        self.assertEqual(cl.Scan(self.root, False, '2.1.312').generated(),
+                         {'docs/catalog.md': 'docs/catalog.md:3', 'uv.lock': '.gitattributes:1'})
         self.assertEqual(result['duplicates'], [])  # the generator and its output are one source
         self.write('docs/other.md', '# O\n\n%s\n' % sentence)  # a real copy outside them still counts
         found = self.scan()['duplicates']
-        self.assertEqual(found[0]['generated'], ['docs/catalog.md'])
+        self.assertIn('docs/other.md:3', found[0]['copies'])
 
 
 class History(Project):
-    def test_history_narrative_is_a_stale_candidate(self):
+    def history(self):
+        """The scan's result and its history lines (path, line, form and the rest) in line order."""
+        scan = cl.Scan(self.root, False, '2.1.312')
+        result = scan.run()
+        return result, sorted(scan.history, key=lambda c: (c['path'], c['line']))
+
+    def stale(self):
+        return self.history()[1]
+
+    def test_history_narrative_is_a_finding_that_keeps_the_current_fact(self):
         self.write('CLAUDE.md', '# x\n\n@docs/repository.md\n\nAlways run `bin/ci` before you finish.\n')
         self.write('docs/repository.md', '# R\n\nRun `bin/ci`.\nThe initial compatibility run also passed on '
                    'Python 3.9.6; release evidence\nuses the pinned runtime.\n\nThe wrapper remains. Push hooks '
@@ -255,17 +251,37 @@ class History(Project):
                    'Hooks are disabled in CI. Old runs may have failed; rerun them.\n')
         self.write('bin/ci', '#!/bin/sh\n')
         self.write('.claude/settings.json', {'permissions': {'allow': ['Bash(bin/ci)']}})
-        result = self.scan()
-        self.assertEqual([(c['path'], c['line'], c['why']) for c in result['stale_candidates']], [
+        result, stale = self.history()
+        self.assertEqual([(c['path'], c['line'], c['why']) for c in stale], [
             ('docs/repository.md', 4, 'past run'), ('docs/repository.md', 8, 'retirement'),
             ('docs/repository.md', 9, 'dated'), ('docs/repository.md', 10, 'past version')])
-        retired = result['stale_candidates'][1]
-        self.assertTrue(retired['not_a_decline'].startswith('Hooks: no decision record says so'))
-        self.assertEqual(result['declined'], [])  # history is never filed under Declined by the project
-        # ... but it still keeps Claudit from recommending hooks, and the baseline says why.
-        self.assertNotIn('stop-hook', self.ids(result))
-        status = {b['id']: (b['status'], b['evidence']) for b in result['baseline']}
-        self.assertEqual(status['enforced'], ('declined', 'not recommended: history line in docs/repository.md:7'))
+        self.assertEqual(stale[1]['not_a_decline'], 'Hooks')
+        history = [f for f in result['findings'] if f['kind'] == 'history']
+        self.assertEqual([(f['id'], f['line']) for f in history], [
+            ('history:docs/repository.md:4', 4), ('history:docs/repository.md:8', 8),
+            ('history:docs/repository.md:9', 9), ('history:docs/repository.md:10', 10)])
+        self.assertIn('It reads like a decision against hooks, but no decision record says so', history[1]['problem'])
+        self.assertIn('"clean-checkout evidence is the gate"', history[1]['fix'])
+        self.assertIn('hooks are retired"', history[1]['fix'])
+        self.assertEqual(history[0]['fix'], 'Keep what holds now ("release evidence uses the pinned runtime"); move '
+                         '"The initial compatibility run also passed on Python 3.9.6" to a changelog or a decision record.')
+        # A history line is never a decision, so it holds nothing back.
+        self.assertIn('stop-hook', self.ids(result))
+        self.assertEqual(result['respected'], [])
+
+    def test_a_status_line_keeps_its_status(self):
+        self.write('CLAUDE.md', '# x\n\nIts first workflow, [Shipshape](workflows/shipshape/README.md), was retired on '
+                   '2026-11-05 and is kept for reference only.\n\n## Known mistakes\n\n- Builder scripts delete '
+                   'exact paths, never globs. A glob delete once killed a running eval.\n')
+        self.write('workflows/shipshape/README.md', '# Shipshape\n')
+        history = [f for f in self.scan()['findings'] if f['kind'] == 'history']
+        self.assertEqual([f['line'] for f in history], [3])  # the lessons list is no history line
+        fix = history[0]['fix']
+        self.assertEqual(fix, 'Keep what holds now, in the present tense: "Its first workflow, Shipshape, is retired", '
+                         'and "is kept for reference only". Move the date (`on 2026-11-05`) to a changelog or a '
+                         'decision record.')
+        self.assertNotIn('delete', fix.lower())
+        self.assertNotIn('cut the sentence', fix.lower())
 
     def test_present_tense_text_is_no_history(self):
         # Review round 1: relative clauses, conditions, dates that name a protocol version, and migration guides.
@@ -282,7 +298,7 @@ class History(Project):
                    )
         self.write('bin/ci', '#!/bin/sh\n')
         self.write('CLAUDE.md', '# x\n\n@docs/guide.md\n')
-        self.assertEqual(self.scan()['stale_candidates'], [])
+        self.assertEqual(self.stale(), [])
 
     REMOVED = '`Server.run_sse` has been removed; use `run_http`.\n'
 
@@ -299,9 +315,9 @@ class History(Project):
         for rel, title in pages.items():
             self.write(rel, '%s\n\n%s' % (title, self.REMOVED))
         self.write('CLAUDE.md', '# x\n\nSee %s.\n' % ', '.join(sorted(pages)))
-        result = self.scan()
+        result, stale = self.history()
         self.assertEqual(len(result['context']['likely_read']), len(pages))
-        self.assertEqual(sorted(c['path'] for c in result['stale_candidates']),
+        self.assertEqual(sorted(c['path'] for c in stale),
                          ['docs/later.md', 'docs/migrations.md', 'docs/policy.md', 'docs/releases.md',
                           'docs/upgrade.md'])
 
@@ -315,7 +331,7 @@ class History(Project):
         self.write('.claude/agents/news.md', "---\nname: news\ndescription: News.\n---\n# What's new\n\n"
                    + self.REMOVED)
         self.write('.claude/commands/upgrading.md', '# Upgrading to v2\n\n' + self.REMOVED)
-        found = sorted(c['path'] for c in self.scan()['stale_candidates'])
+        found = sorted(c['path'] for c in self.stale())
         self.assertEqual(found, ['.claude/agents/news.md', '.claude/commands/upgrading.md',
                                  '.claude/skills/upgrade-deps/SKILL.md', 'AGENTS.md', 'CLAUDE.md',
                                  'docs/migration-guide.md'])
@@ -323,7 +339,7 @@ class History(Project):
     def test_history_still_found_beside_relative_clauses(self):
         self.write('CLAUDE.md', '# x\n\nPush hooks, which we used for years, have been retired.\n'
                    'The hooks that we had were retired.\nThe first release ran on Python 3.8, which is gone now.\n')
-        self.assertEqual([(c['line'], c['why']) for c in self.scan()['stale_candidates']],
+        self.assertEqual([(c['line'], c['why']) for c in self.stale()],
                          [(3, 'retirement'), (4, 'retirement'), (5, 'past run')])
 
     def test_admonition_text_is_cited_by_its_own_line(self):
@@ -336,43 +352,22 @@ class History(Project):
     def test_a_decision_record_replaces_a_history_line(self):
         self.write('CLAUDE.md', '# x\n\nClaude Code hooks were retired.\nDecisions: [docs/decisions.md](docs/decisions.md).\n')
         self.write('docs/decisions.md', '# Decisions\n\n- Claude Code hooks were retired in favour of CI.\n')
-        result = self.scan()
-        self.assertEqual([(d['path'], d['line']) for d in result['declined']], [('docs/decisions.md', 3)])
-        self.assertEqual([(c['path'], c['line']) for c in result['stale_candidates']], [('CLAUDE.md', 3)])
+        scan = cl.Scan(self.root, False, '2.1.312')
+        scan.run()
+        declined = [d for d in scan.declines(scan.instructions()) if not d.get('history')]
+        self.assertEqual([(d['path'], d['line']) for d in declined], [('docs/decisions.md', 3)])
+        self.assertEqual([(c['path'], c['line']) for c in self.stale()], [('CLAUDE.md', 3)])
 
     def test_a_decision_record_still_declines_and_tells_no_history(self):
         self.write('CLAUDE.md', '# x\n\nDecisions are in [docs/decisions.md](docs/decisions.md).\n')
         self.write('docs/decisions.md', '# Decisions\n\n- Claude Code hooks were retired in favour of the review '
                    'checklist.\n')
         self.write('CHANGELOG.md', '# Changes\n\nThe old cache was removed in 2025.\n')
-        result = self.scan()
-        self.assertEqual([(d['feature'], d['path'], d['line']) for d in result['declined']],
+        scan = cl.Scan(self.root, False, '2.1.312')
+        scan.run()
+        self.assertEqual([(d['feature'], d['path'], d['line']) for d in scan.declines(scan.instructions())],
                          [('stop-hook', 'docs/decisions.md', 3)])
-        self.assertEqual(result['stale_candidates'], [])
-
-
-class DeclarativeLists(Project):
-    def test_principles_are_not_a_procedure(self):
-        self.write('CLAUDE.md', '# x\nThe principles in `docs/principles.md` hold for every change.\n')
-        self.write('docs/principles.md', '# Design principles\n\n1. The public API is stable.\n'
-                   '2. Errors are values; the library never panics.\n3. The standard library is the only dependency.\n'
-                   '4. Counting is deterministic.\n5. Reading time is rounded up.\n')
-        result = self.scan()
-        self.assertEqual(result['signals']['procedure_docs'], [])
-        self.assertEqual(result['optional'], [])
-
-    def test_imperative_steps_and_sequence_words_count(self):
-        self.write('CLAUDE.md', '# x\n')
-        self.write('docs/release.md', '# Release\n1. Bump the version.\n2. **Tag** the commit.\n'
-                   '3. The changelog is then published.\n4. Push the tag.\n5. Announce it.\n')
-        self.assertEqual([d['path'] for d in self.scan()['signals']['procedure_docs']], ['docs/release.md'])
-
-    def test_translations_and_reference_pages_are_not_procedures(self):
-        steps = ''.join('%d. Run step %d.\n' % (n, n) for n in range(1, 6))
-        self.write('CLAUDE.md', '# x\n')
-        self.write('i18n/de/pages/whats-new.md', '# Neu\n' + steps)
-        self.write('docs/reference/cli.md', '# CLI\n' + steps)
-        self.assertEqual(self.scan()['signals']['procedure_docs'], [])
+        self.assertEqual(self.stale(), [])
 
 
 class Scope(Project):
@@ -383,10 +378,10 @@ class Scope(Project):
         Path(self.root, 'AGENTS.md').write_text('# Agents\n')
         Path(repo, 'AGENTS.md').write_text('# tide\n')
         os.symlink('AGENTS.md', os.path.join(repo, 'CLAUDE.md'))
-        result = cl.Scan(repo, False, cl.load_catalog(), '2.1.316').run()
+        result = cl.Scan(repo, False, '2.1.316').run()
         self.assertEqual(result['scope']['above'], ['../CLAUDE.md', '../AGENTS.md'])
         self.assertEqual(result['scope']['lines'], [
-            'Outside the repo, not graded: `../CLAUDE.md` and `../AGENTS.md` above the repo; `../CLAUDE.md` loads '
+            'Outside the repo, not checked: `../CLAUDE.md` and `../AGENTS.md` above the repo; `../CLAUDE.md` loads '
             'in every session here.',
             "Because `../CLAUDE.md` above the repo loads, the repo's `AGENTS.md` is not read on its own; here it "
             'still loads because `CLAUDE.md` is a symlink to it.',
@@ -399,101 +394,31 @@ class Scope(Project):
         os.makedirs(repo)
         Path(self.root, 'CLAUDE.md').write_text('# Workspace\n')
         Path(repo, 'AGENTS.md').write_text('# tide\n')
-        lines = cl.Scan(repo, False, cl.load_catalog(), '2.1.316').run()['scope']['lines']
+        lines = cl.Scan(repo, False, '2.1.316').run()['scope']['lines']
         self.assertTrue(lines[1].endswith('; import it with `@AGENTS.md` from a `CLAUDE.md` in the repo.'), lines)
 
 
 class Dismissals(Project):
     def test_per_user_by_default_and_shared_on_request(self):
         self.write('CLAUDE.md', '# x\n')
-        self.write('tsconfig.json', '{}')
+        self.write('go.mod', 'module x\n')
         data = os.path.join(self.root, 'data')
         before = set(os.listdir(self.root))
-        code, out, _ = self.cli('dismiss', '--root', self.root, '--data', data, '--id', 'lsp', '--reason', 'no')
+        code, out, _ = self.cli('dismiss', '--root', self.root, '--data', data, '--id', 'allowlist', '--reason', 'no')
         self.assertEqual(code, 0)
         self.assertTrue(out['path'].startswith('${CLAUDE_PLUGIN_DATA}/dismissed/'))
         self.assertFalse(os.path.exists(os.path.join(self.root, '.claude')))  # nothing written in the project
         self.assertEqual(set(os.listdir(self.root)) - before, {'data'})
-        result = cl.Scan(self.root, False, cl.load_catalog(), '2.1.312', data_dir=data).run()
-        self.assertEqual([(d['id'], d['stored']) for d in result['dismissed']], [('lsp', out['path'])])
-        self.assertEqual(result['footer_lines'], ['Dismissed: 1 (stored in `%s`).' % out['path']])
-        self.assertIn('lsp', self.ids(self.scan()))  # another user (no data folder) still sees it
-        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'lsp', '--reason', 'team')
+        result = cl.Scan(self.root, False, '2.1.312', data_dir=data).run()
+        self.assertEqual([(d['id'], d['stored']) for d in result['dismissed']], [('allowlist', out['path'])])
+        self.assertTrue(result['footer'][-1].endswith('; 1 dismissed (stored in `%s`)' % out['path']))
+        self.assertIn('allowlist', self.ids(self.scan()))  # another user (no data folder) still sees it
+        code, out, _ = self.cli('dismiss', '--shared', '--root', self.root, '--id', 'allowlist', '--reason', 'team')
         self.assertEqual(out['path'], '.claude/claudit-dismissed.json')
-        self.assertNotIn('lsp', self.ids(self.scan()))
+        self.assertNotIn('allowlist', self.ids(self.scan()))
 
     def test_no_data_folder_and_no_shared_is_an_error(self):
         code, out, _ = self.cli('dismiss', '--root', self.root, '--id', 'lsp', '--reason', 'no',
                                 env={'CLAUDE_PLUGIN_DATA': ''})
         self.assertEqual(code, 2)
         self.assertIn('pass --data, or --shared', out['error'])
-
-
-FAKE_CLAUDE = r'''#!/bin/sh
-if [ "$1" = doctor ]; then
-  printf '%s\n' "$DISABLE_AUTOUPDATER" > "$PWD/doctor-env"
-  printf 'Claude Code doctor\n\nInvalid settings\n- %s/.claude/settings.json \342\200\272 hooks.Stop: must be an array\n' "$PWD"
-  printf '  Suggested fix: x\n\nNo installation issues found.\n'
-  exit 0
-fi
-printf '%s\n' "$@" > "$FAKE_ARGS"
-case "$FAKE_MODE" in
-  fail) printf 'Not logged in\n' >&2; exit 1 ;;
-  *) printf '{"result":"1. A stale line","total_cost_usd":0.2,"is_error":false,"permission_denials":[{"t":1}]}' ;;
-esac
-'''
-
-
-class Deep(Project):
-    def run_deep(self, mode='ok', model=None):
-        bindir = os.path.join(self.root, 'fakebin')
-        os.makedirs(bindir)
-        Path(bindir, 'claude').write_text(FAKE_CLAUDE)
-        os.chmod(os.path.join(bindir, 'claude'), stat.S_IRWXU)
-        args, record = os.path.join(self.root, 'args'), os.path.join(self.root, 'record.jsonl')
-        code, out, _ = self.cli('deep', '--root', self.root, '--max-budget-usd', '0.4',
-                                env={'PATH': bindir + ':/usr/bin:/bin', 'FAKE_ARGS': args, 'FAKE_MODE': mode,
-                                     'CLAUDIT_DEEP_RECORD': record, 'CLAUDIT_DEEP_MODEL': model or '',
-                                     'DISABLE_AUTOUPDATER': ''})
-        return code, out, Path(args).read_text().split('\n') if os.path.exists(args) else [], record
-
-    def test_nested_prompt_audit_is_read_only_and_recorded(self):
-        code, out, args, record = self.run_deep()
-        self.assertEqual(code, 0)
-        self.assertEqual(out['prompt_audit']['status'], 'ran')
-        self.assertEqual(out['prompt_audit']['report'], '1. A stale line')
-        self.assertEqual((out['prompt_audit']['cost_usd'], out['prompt_audit']['permission_denials']), (0.2, 1))
-        self.assertEqual(args[:2], ['-p', '/doctor prompt-audit .'])
-        for flag in ('--setting-sources', 'project', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit', 'Bash',
-                     'Skill(claudit:claudit)', '--strict-mcp-config', '--no-session-persistence'):
-            self.assertIn(flag, args)
-        self.assertEqual(args[args.index('--max-budget-usd') + 1], '0.4')
-        self.assertEqual(args[args.index('--model') + 1], 'sonnet')
-        self.assertEqual((out['prompt_audit']['model'], out['prompt_audit']['max_budget_usd']), ('sonnet', 0.4))
-        self.assertEqual(Path(self.root, 'doctor-env').read_text().strip(), '1')  # DISABLE_AUTOUPDATER for doctor
-        self.assertEqual(out['claude_doctor']['line'],
-                         'claude doctor: 1 invalid setting: ./.claude/settings.json › hooks.Stop: must be an array.')
-        recorded = json.loads(Path(record).read_text())
-        self.assertEqual((recorded['cost_usd'], recorded['model'], recorded['max_budget_usd']), (0.2, 'sonnet', 0.4))
-        self.assertEqual(recorded['report'], '1. A stale line')  # the nested audit's raw text is kept
-
-    def test_the_eval_runner_pins_the_nested_model(self):
-        _, out, args, _ = self.run_deep(model='claude-sonnet-5-5')
-        self.assertEqual(args[args.index('--model') + 1], 'claude-sonnet-5-5')
-        self.assertEqual(out['prompt_audit']['model'], 'claude-sonnet-5-5')
-
-    def test_a_failed_nested_run_is_reported_not_raised(self):
-        code, out, _, _ = self.run_deep('fail')
-        self.assertEqual(code, 0)
-        self.assertEqual(out['prompt_audit']['status'], 'could not run: exit 1, Not logged in')
-        self.assertEqual(out['prompt_audit']['report'], '')
-
-    def test_no_claude_on_path(self):
-        code, out, _ = self.cli('deep', '--root', self.root, env={'PATH': '/usr/bin:/bin'})
-        self.assertEqual(code, 0)
-        self.assertTrue(out['prompt_audit']['status'].startswith('could not run'))
-        self.assertEqual(out['claude_doctor']['status'], 'unavailable')
-
-
-if __name__ == '__main__':
-    unittest.main()

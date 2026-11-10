@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f7-fixture-noise
-description: Python CLI that grades saved reports; its eval graders, golden reports and test fixture repo look like procedures and config but are test data. The report must raise none of them.
+description: Python CLI whose eval graders, golden reports and fixture repo look like procedures and config but are test data; the report says Nothing found.
 tags: [claudit, alignment]
 runs: 1
 context:

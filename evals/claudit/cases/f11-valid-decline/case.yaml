@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f11-valid-decline
-description: Shell toolkit whose docs retire hooks for a review checklist and decline code intelligence because the project has no typed code, which still holds; both are listed with their reason and neither gets a Worth reconsidering note.
+description: Shell toolkit whose decision record retires hooks for a review checklist, with a must-run rule for bin/check; the report says Nothing found and lists the decision as respected with its reason.
 tags: [claudit, coverage]
 runs: 1
 context:

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f14-enforcement
-description: Python service whose CLAUDE.md gates merge, deploy and release on a human only in prose, with no ask or deny rule, and requires bin/check before every commit with no hook (issue 192 F10).
+description: Python service whose CLAUDE.md gates merge, deploy and release on a human only in prose and requires bin/check before every commit; the findings are the exact ask rules with branch protection named, and the Stop hook.
 tags: [claudit, issue-192]
 runs: 1
 context:

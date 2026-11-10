@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f8-documented-decline
-description: Advisory Claude Code plugin whose docs retire hooks and decline an eval campaign; neither may be recommended, both are listed under Declined by the project with their source line, and Coverage stays A.
+description: Advisory plugin whose decision record retires hooks for a review checklist while CLAUDE.md has a must-run rule; the report says Nothing found and lists the decision as respected.
 tags: [claudit, coverage]
 runs: 1
 context:

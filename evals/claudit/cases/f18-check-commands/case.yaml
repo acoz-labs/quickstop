@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: f18-check-commands
-description: TypeScript library whose check command is defined only in package.json scripts and CI, with CLAUDE.md saying only to use bun run (issue 192 F14).
+description: TypeScript library whose check commands are only in package.json scripts and CI, with CLAUDE.md saying to use bun run; the finding is the exact bun run allow rules.
 tags: [claudit, issue-192]
 runs: 1
 context:
