@@ -29,11 +29,30 @@ untracked files. Caches are not hermetic: pin dependencies and use a container
 when needed. Containerized checks fail on missing dependencies, never skip
 tests.
 
-Keep evidence private, outside the checkout. The publishing agent inspects and
-redacts logs: public comments carry no host config, credentials, customer data
-or account paths. Publishing strips terminal escape codes, such as colours,
-and the other control characters GitHub would rewrite. Original and published hashes detect edits. GitHub
-authenticates the publisher, not the execution.
+Keep evidence private, outside the checkout. The publishing agent reads the
+logs for host config, credentials and customer data before passing
+`--logs-reviewed`. Publishing strips terminal escape codes, such as colours,
+and the other control characters GitHub would rewrite, then redacts local
+paths, ignoring case:
+
+- the home directory becomes `~`;
+- the system temp directory, `TMPDIR`, `/tmp`, `/var/tmp` and `/var/folders`
+  (and their resolved forms, such as `/private/tmp`) become `{tmp}`;
+- the account name, as a whole word inside any path, becomes `{user}`. A
+  short account name such as `ci` also replaces `ci` in unrelated paths.
+
+A prefix counts only where a path starts and ends, so `/home/alice2` is not
+`/home/alice`, and `~/tmp` or `${HOME}/tmp` is not `/tmp`. A preceding `.`
+still counts as a start, because test runners print progress dots straight
+before paths, so a relative `./tmp` becomes `.{tmp}`. The receipt records each log's hash before redaction
+(`original_sha256`) and of the posted text (`sha256`); review and audit check
+the posted text against `sha256`, so an edit after publishing fails.
+
+Publishing checks everything before its first post. The summary, configured
+commands and acceptance report are posted as written, so a home or temp path in
+them refuses publishing with nothing posted: change that field and publish
+again. An oversized receipt is refused the same way. GitHub authenticates the
+publisher, not the execution.
 
 A later failed receipt revokes success; new code needs new verification. Publish
 failures; never hide one behind an older success.

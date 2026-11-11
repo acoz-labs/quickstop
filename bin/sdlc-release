@@ -251,7 +251,7 @@ def release(root, repo, issue, sha, artifact, actor, output, resume=False):
 
 def finalize(receipt_file, actor, logs_reviewed, summary, close=False):
     if not logs_reviewed or not summary.strip():
-        raise e.Failure("Inspect/sanitize release logs and provide a release summary")
+        raise e.Failure("Read the release logs for secrets and customer data (local paths are redacted automatically) and provide a release summary")
     receipt = json.loads(receipt_file.read_text())
     candidate = receipt["candidate"]
     repo, issue = candidate["repo"], candidate["issue"]
@@ -269,21 +269,15 @@ def finalize(receipt_file, actor, logs_reviewed, summary, close=False):
         latest = verification[-len(required):]
         if [c["command"] for c in latest] != required or any(c["exit_code"] != 0 for c in latest):
             raise e.Failure("Release verification is incomplete or failed")
-    published = dict(receipt, actor=actor, summary=summary, logs=[])
-    for c in receipt["commands"]:
-        name = c["log"]
-        if Path(name).name != name or (receipt_file.parent / name).is_symlink():
-            raise e.Failure("Invalid release log path")
-        text = e.CONTROLS.sub("", (receipt_file.parent / name).read_text(errors="replace"))
-        urls = []
-        for offset in range(0, max(1, len(text)), 10000):
-            body = f"Release log `{name}` for `{candidate['sha']}` / part {offset // 10000 + 1}\n\n" + text[offset:offset + 10000]
-            urls.append(e.api(f"repos/{repo}/issues/{issue}/comments", {"body": body})["html_url"])
-        published["logs"].append({"log": name, "sha256": e.sha256(text.encode()), "urls": urls})
-    body = "<!-- sdlc-release-v1 -->\n```json\n" + json.dumps(published, indent=2) + "\n```"
-    if len(body.encode()) > 60000:
-        raise e.Failure("Release receipt too large")
-    result = e.api(f"repos/{repo}/issues/{issue}/comments", {"body": body})
+    redactor = e.local_redactor()
+    logs = e.prepared_logs(receipt_file.parent, receipt["commands"], redactor)
+    published = dict(receipt, actor=actor, summary=summary, redaction=e.REDACTION,
+                     logs=[{"log": log["name"], "sha256": log["sha256"], "original_sha256": log["original_sha256"]}
+                           for log in logs])
+    result = e.post_logs_and_receipt(
+        repo, issue, "<!-- sdlc-release-v1 -->", published, logs,
+        lambda name, part: f"Release log `{name}` for `{candidate['sha']}` / part {part}\n\n",
+        redactor, "Release receipt too large")
     if close:
         e.run("gh", "issue", "close", str(issue), "--repo", repo, "--reason", "completed")
     print(result["html_url"])

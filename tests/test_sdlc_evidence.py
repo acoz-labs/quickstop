@@ -2,11 +2,13 @@ import contextlib
 import copy
 import importlib.machinery
 import importlib.util
+import base64
 import json
 import os
 import re
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -235,6 +237,13 @@ class PublishRoundTripTests(unittest.TestCase):
         self.folder = Path(self.temp.name)
         self.config = {"validation": ["bin/ci"]}
         self.comments = []
+        self.writes = 0
+        self.repo = "o/r"
+        # Synthetic identity only; never the machine running the tests.
+        self.redactor = e.Redactor({"/home/synthuser"}, {"/var/synthtmp/T", "/tmp"}, {"synthuser"})
+        redactor = patch.object(e, "local_redactor", side_effect=lambda: self.redactor)
+        redactor.start()
+        self.addCleanup(redactor.stop)
 
     @staticmethod
     def caret(body):
@@ -247,35 +256,148 @@ class PublishRoundTripTests(unittest.TestCase):
             return {"login": "Reviewer"}
         if endpoint.endswith("/permission"):
             return {"permission": "maintain"}
-        if endpoint == "repos/o/r/pulls/1":
+        if endpoint == f"repos/{self.repo}/pulls/1":
             return {"state": "open", "draft": False, "head": {"sha": "a" * 40}}
-        if endpoint == "repos/o/r/issues/1/comments" and payload is not None:
+        if endpoint == f"repos/{self.repo}/issues/1/comments" and payload is not None:
+            self.writes += 1
             id = 100 + len(self.comments)
             self.comments.append({"id": id, "user": {"login": "Reviewer"},
                                   "body": self.caret(payload["body"]),
-                                  "html_url": f"https://github.com/o/r/pull/1#issuecomment-{id}"})
+                                  "html_url": f"https://github.com/{self.repo}/pull/1#issuecomment-{id}"})
             return self.comments[-1]
-        if endpoint.startswith("repos/o/r/issues/comments/"):
+        if endpoint.startswith(f"repos/{self.repo}/issues/comments/"):
             return next(c for c in self.comments if str(c["id"]) == endpoint.rsplit("/", 1)[1])
         raise AssertionError(endpoint)
 
-    def publish_and_verify(self, log):
+    def write_receipt(self, log, **fields):
         (self.folder / "command-1.log").write_bytes(log)
-        receipt = {"schema": 1, "id": "run-id", "repo": "o/r", "phase": "validation", "sha": "a" * 40,
+        command = self.config["validation"][0]
+        receipt = {"schema": 1, "id": "run-id", "repo": self.repo, "phase": "validation", "sha": "a" * 40,
                    "config_sha256": e.sha256(e.encoded(self.config)), "success": True,
                    "clean_before": True, "clean_after": True,
-                   "commands": [{"command": "bin/ci", "exit_code": 0, "log": "command-1.log",
-                                 "sha256": e.sha256(log)}]}
+                   "commands": [{"command": command, "exit_code": 0, "log": "command-1.log",
+                                 "sha256": e.sha256(log)}], **fields}
         (self.folder / "receipt.json").write_text(json.dumps(receipt))
-        with patch.object(e, "api", side_effect=self.api), \
-             patch.object(e, "pages", side_effect=lambda endpoint: list(self.comments)), \
-             contextlib.redirect_stdout(None):
-            e.publish(self.folder / "receipt.json", 1, "Reviewer", True, "Logs reviewed")
-            url = e.trusted_receipt("o/r", 1, "a" * 40, self.config, "validation", ["Builder"])
+
+    def github(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.object(e, "api", side_effect=self.api))
+        stack.enter_context(patch.object(e, "pages", side_effect=lambda endpoint: list(self.comments)))
+        stack.enter_context(contextlib.redirect_stdout(None))
+        return stack
+
+    def publish_and_verify(self, log, summary="Logs reviewed"):
+        self.write_receipt(log)
+        with self.github():
+            e.publish(self.folder / "receipt.json", 1, "Reviewer", True, summary)
+            url = e.trusted_receipt(self.repo, 1, "a" * 40, self.config, "validation", ["Builder"])
         published = e.parse_comment(self.comments[-1])
         self.assertEqual(url, self.comments[-1]["html_url"])
         self.assertEqual(published["commands"][0]["sha256"], e.sha256(log), "run hash stays the original bytes")
+        self.assertEqual(published["redaction"], 1)
+        self.published = published
         return published["logs"][0]["sha256"], "".join(c["body"].split("\n\n", 1)[1] for c in self.comments[:-1])
+
+    def refused(self, log, summary="Logs reviewed", **fields):
+        self.write_receipt(log, **fields)
+        with self.github():
+            with self.assertRaises(e.Failure) as caught:
+                e.publish(self.folder / "receipt.json", 1, "Reviewer", True, summary)
+        self.assertEqual(self.writes, 0, "nothing may be posted")
+        return str(caught.exception)
+
+    def test_local_paths_are_redacted_before_posting_and_verify(self):
+        log = (b"cwd /home/synthuser/work/repo\n"
+               b"scratch /var/synthtmp/T/claude-501/-home-synthuser-work/scratchpad/out.txt\n"
+               b"wrote /tmp/x and /srv/synthuser/cache/y\n")
+        published_hash, text = self.publish_and_verify(log)
+        self.assertEqual(text, "cwd ~/work/repo\n"
+                               "scratch {tmp}/claude-501/-home-{user}-work/scratchpad/out.txt\n"
+                               "wrote {tmp}/x and /srv/{user}/cache/y\n")
+        posted = "".join(c["body"] for c in self.comments)
+        for value in ("/home/synthuser", "/var/synthtmp", "/tmp", "synthuser"):
+            self.assertNotIn(value, posted)
+        self.assertEqual(published_hash, e.sha256(text.encode()))
+        self.assertEqual(self.published["logs"][0]["original_sha256"], e.sha256(log))
+
+    def test_edited_log_fails_review_and_audit_after_redacted_publish(self):
+        sdlc_loader = importlib.machinery.SourceFileLoader("sdlc_for_audit", str(Path(__file__).resolve().parents[1] / "bin/sdlc"))
+        sdlc = importlib.util.module_from_spec(importlib.util.spec_from_loader(sdlc_loader.name, sdlc_loader))
+        sdlc_loader.exec_module(sdlc)
+        config = dict(self.config, verification_mode="local")
+        self.config = config
+        self.publish_and_verify(b"cwd /home/synthuser/work\n")
+        pr = {"number": 1, "head": {"sha": "a" * 40}, "user": {"login": "Builder"}}
+        contents = {"content": base64.b64encode(json.dumps(config).encode()).decode()}
+
+        def audit():
+            with self.github(), patch.object(sdlc, "gh", return_value=contents), \
+                 patch.object(sdlc, "evidence_module", return_value=e):
+                sdlc.published_local_evidence("o/r", pr, ["Reviewer"])
+
+        audit()
+        self.comments[0]["body"] = self.comments[0]["body"].replace("~/work", "~/work-edited")
+        with self.assertRaisesRegex(sdlc.Failure, "altered"):
+            audit()
+
+    def test_nothing_to_redact_posts_todays_text_and_same_hash_twice(self):
+        log = b"\x1b[32mOK\x1b[0m 95 tests in /srv/build/home/synthuserx and x/tmp\n"
+        published_hash, text = self.publish_and_verify(log)
+        self.assertEqual(text, "OK 95 tests in /srv/build/home/synthuserx and x/tmp\n")
+        self.assertEqual(self.published["logs"][0]["original_sha256"], published_hash)
+
+    def test_boundaries_and_case(self):
+        log = (b"/home/synthuserx/a /data/tmp/a /tmpdir/a /home/synthuser.bak\n"
+               b"/HOME/SynthUser/a docs/SynthUser/x\n")
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "/home/synthuserx/a /data/tmp/a /tmpdir/a /home/{user}.bak\n"
+                               "~/a docs/{user}/x\n")
+
+    def test_unittest_progress_dots_before_a_temp_path_are_redacted(self):
+        log = (b"..../var/synthtmp/T/tmpab12/accepted/receipt.json\n"
+               b"./tmp/x ../tmp/y .../home/synthuser/z\n")
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "....{tmp}/tmpab12/accepted/receipt.json\n"
+                               ".{tmp}/x ..{tmp}/y ...~/z\n")
+
+    def test_tmp_folder_under_home_or_temp_publishes(self):
+        log = b"/home/synthuser/tmp/build.log /home/synthuser/var/tmp/a /tmp/tmp/x ~/tmp/b ${HOME}/tmp/c\n"
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "~/tmp/build.log ~/var/tmp/a {tmp}/tmp/x ~/tmp/b ${HOME}/tmp/c\n")
+
+    def test_short_account_name_matching_command_and_repository(self):
+        self.redactor = e.Redactor({"/home/ci"}, {"/tmp"}, {"ci"})
+        self.repo = "ci/ci-tools"
+        _, text = self.publish_and_verify(b"ran bin/ci and .github/workflows/CI.yml; ci passed\n",
+                                          summary="bin/ci passed on ci/ci-tools")
+        self.assertEqual(text, "ran bin/{user} and .github/workflows/{user}.yml; ci passed\n")
+        self.assertEqual(self.published["commands"][0]["command"], "bin/ci", "commands must still match the config")
+        self.assertEqual(self.published["summary"], "bin/ci passed on ci/ci-tools")
+        self.assertTrue(self.published["logs"][0]["urls"][0].startswith("https://github.com/ci/ci-tools/"))
+
+    def test_unredactable_fields_with_local_paths_refuse_before_any_write(self):
+        message = self.refused(b"ok\n", summary="Checked /home/synthuser/notes")
+        self.assertIn("'summary'", message)
+        self.assertIn("home", message)
+        self.assertNotIn("synthuser", message)
+        self.config = {"validation": ["bin/ci --cache /tmp/cache"]}
+        self.assertIn("'commands'", self.refused(b"ok\n"))
+
+    def test_redaction_bug_is_caught_by_the_final_scan(self):
+        with patch.object(e.Redactor, "redact", side_effect=lambda text: text):
+            message = self.refused(b"cwd /home/synthuser/work\n")
+        self.assertIn("command-1.log", message)
+
+    def test_cli_exits_nonzero_and_posts_nothing_on_leftover(self):
+        self.write_receipt(b"ok\n")
+        argv = ["sdlc-evidence", "publish", "--receipt", str(self.folder / "receipt.json"), "--subject", "1",
+                "--expected-actor", "Reviewer", "--logs-reviewed", "--summary", "see /tmp/notes"]
+        with self.github(), patch.object(sys, "argv", argv), contextlib.redirect_stderr(None):
+            self.assertEqual(e.main(), 1)
+        self.assertEqual(self.writes, 0)
+
+    def test_oversized_receipt_refuses_before_any_write(self):
+        self.assertIn("too large", self.refused(b"ok\n", summary="x" * 60000))
 
     def test_coloured_log_publishes_without_escapes_and_verifies(self):
         log = (b"\x1b[1;32mOK\x1b[0m tests\n\x1b]8;;https://example.org\x07link\x1b]8;;\x07\n"
@@ -307,6 +429,55 @@ class PublishRoundTripTests(unittest.TestCase):
         _, text = self.publish_and_verify(log)
         self.assertEqual(text, "x" * 12000)
         self.assertEqual(len(self.comments), 3)
+
+
+class LocalIdentityTests(unittest.TestCase):
+    """Which paths and names count as local. Synthetic values only."""
+
+    def redactor(self, home, user, temp="/var/synthtmp/T"):
+        def getuser():
+            if isinstance(user, Exception):
+                raise user
+            return user
+        env = {"HOME": home} if home is not None else {}
+        with patch.dict(os.environ, env, clear=True), patch.object(e.Path, "home", return_value=Path(home or "")), \
+             patch.object(e.getpass, "getuser", side_effect=getuser), \
+             patch.object(e.tempfile, "gettempdir", return_value=temp), \
+             patch.object(e.os.path, "realpath", side_effect=lambda p: "/private" + p if p.startswith("/var/") else p):
+            return e.local_redactor()
+
+    def test_trailing_slash_resolved_temp_and_home_name(self):
+        r = self.redactor("/home/synthuser/", "synthuser")
+        self.assertEqual(r.redact("/home/synthuser/a /private/var/synthtmp/T/b /var/synthtmp/T/c /opt/synthuser/d"),
+                         "~/a {tmp}/b {tmp}/c /opt/{user}/d")
+
+    def test_root_or_empty_home_is_ignored(self):
+        for home in ("/", "", None):
+            with self.subTest(home=home):
+                r = self.redactor(home, "synthuser")
+                self.assertEqual(r.redact("/usr/bin/env /home/x"), "/usr/bin/env /home/x")
+                self.assertEqual(r.redact("/srv/synthuser/a /tmp/b"), "/srv/{user}/a {tmp}/b")
+
+    def test_missing_account_name_keeps_path_rules(self):
+        for user in ("", OSError("no user"), KeyError("uid")):
+            with self.subTest(user=user):
+                r = self.redactor("/", user)
+                self.assertFalse(r.account)
+                self.assertEqual(r.redact("/tmp/a /srv/a"), "{tmp}/a /srv/a")
+
+    def test_home_name_counts_as_account_name(self):
+        r = self.redactor("/home/synthhome", "")
+        self.assertEqual(r.redact("/srv/synthhome/a"), "/srv/{user}/a")
+
+    def test_longest_prefix_wins_inside_home(self):
+        r = e.Redactor({"/home/synthuser"}, {"/home/synthuser/.cache/tmp"}, set())
+        self.assertEqual(r.redact("/home/synthuser/.cache/tmp/x /home/synthuser/y"), "{tmp}/x ~/y")
+
+    def test_account_named_like_a_token_is_not_a_leftover(self):
+        r = e.Redactor(set(), set(), {"user", "tmp"})
+        text = r.redact("/srv/user/a /srv/tmp/b")
+        self.assertEqual(text, "/srv/{user}/a /srv/{user}/b")
+        self.assertEqual(r.leftovers(text), [])
 
 
 class ScenarioReportTests(unittest.TestCase):

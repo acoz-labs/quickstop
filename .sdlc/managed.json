@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "2026.11.05.4",
+  "version": "2026.11.05.5",
   "files": {
     "AGENTS.md": {
       "sha256": "973291b48f11f26891d4b64aabe8fcbe18b4aa74fca744e29b5d33dda6c307eb",
@@ -11,7 +11,7 @@
       "mode": "644"
     },
     "SDLC_VERSION": {
-      "sha256": "de831f93177eaa614c33f363a5e25bbf32dd1ec4d24bc57f119f599d1e1744f8",
+      "sha256": "4f1b28ce4c3a93295ebb0d08491e4b58743ec157455a721a435c29dd3366f905",
       "mode": "644"
     },
     ".github/ISSUE_TEMPLATE/feature.yml": {
@@ -19,15 +19,15 @@
       "mode": "644"
     },
     "bin/sdlc": {
-      "sha256": "829dba351ee3499aadca2d55cc5bef32f9a0834da6593f038dd944be56818695",
+      "sha256": "656a926f1399742b538f349cb41286a78f206f9b766677cbf131793cc28f866b",
       "mode": "755"
     },
     "bin/sdlc-evidence": {
-      "sha256": "28c48132929eb25742ba700cd8c02a2ffa8702a8eb52bd676ad8ffee16789ec7",
+      "sha256": "f609b2904f360952d687496b9800bb02e15e028e8289f110edd2dfdd9016020c",
       "mode": "755"
     },
     "bin/sdlc-release": {
-      "sha256": "ba3c8dff920e257546d88f46544b0b3da9efc322960a2a02459bfa6d46e11cec",
+      "sha256": "deabf0da564691b4d5da9859e61802b17f8e64e55d9eeb450f35d9a933c0cd03",
       "mode": "755"
     },
     "bin/validate-solution-plans": {
@@ -43,11 +43,11 @@
       "mode": "644"
     },
     "tests/test_sdlc_evidence.py": {
-      "sha256": "0794ccb838055c180d4e7c55c52a1acd814d04fc483c2cf8904bebfd0300d97f",
+      "sha256": "14d5e247cc733b31aa990e3f3308febac5f7bfca4a3e1948bca10b79cad940ca",
       "mode": "644"
     },
     "tests/test_sdlc_release.py": {
-      "sha256": "f596fed57064280454ab3a838f2d847ac05b80b9413030d22d1f6de4c1b9fb36",
+      "sha256": "46f6d59bfd2f9a87b41b768f3d010405e315cc9655be3dc9a98a764e2fa819d6",
       "mode": "644"
     },
     "tests/test_sdlc_plans.py": {
@@ -55,15 +55,15 @@
       "mode": "644"
     },
     "docs/operations/sdlc.md": {
-      "sha256": "c95f435b2eba9f33f5ab6aa259c514ec279adbea9260400ec25638d56c78bc7e",
+      "sha256": "f2af55f2d9018e325843fa40eaba8d5f02fd97e5f605b32585df786e804daff1",
       "mode": "644"
     },
     "docs/operations/repo-standard.md": {
-      "sha256": "98277cb085eeb50bdfb8c66fe8e053ca5a952c11724d02b9683753db76a114bc",
+      "sha256": "9d1145b16a770a780490e5e39d8e77476b1e7a2e5be16edfd9a6db3c2c45cd0b",
       "mode": "644"
     },
     "docs/operations/local-verification.md": {
-      "sha256": "30ab15ad99efc106868ad3b8b51b10fe0bd7100bb2f0c5221cad40740f349710",
+      "sha256": "9ea02080dd87ba85276f2ce35056b5073495b1c7e940d38e1076427477b9a339",
       "mode": "644"
     },
     "docs/changes/README.md": {

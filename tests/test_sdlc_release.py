@@ -1,3 +1,4 @@
+import contextlib
 import importlib.machinery
 import importlib.util
 import json
@@ -200,6 +201,55 @@ class PromotionTests(unittest.TestCase):
                  patch.object(r.e, "clean_head", return_value="a" * 40), patch.object(r.e, "config_at", return_value=config):
                 with self.assertRaises(r.e.Failure):
                     r.release(root, "o/r", 1, "a" * 40, "sha256:" + "b" * 64, "Reviewer", Path(folder) / "output")
+
+
+class FinalizeTests(unittest.TestCase):
+    """Release logs get the same redaction and check-before-posting as evidence."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.candidate = {"repo": "o/r", "issue": 1, "sha": "a" * 40, "artifact": "sha256:" + "b" * 64}
+        self.config = {"release_verification": ["bin/verify"]}
+        self.posts = []
+        redactor = r.e.Redactor({"/home/synthuser"}, {"/tmp"}, {"synthuser"})
+        stubs = [patch.object(r, "gate", return_value={"candidate": self.candidate, "config": self.config}),
+                 patch.object(r.e, "local_redactor", return_value=redactor),
+                 patch.object(r.e, "api", side_effect=self.api)]
+        for stub in stubs:
+            stub.start()
+            self.addCleanup(stub.stop)
+
+    def api(self, endpoint, payload):
+        self.posts.append(payload["body"])
+        return {"html_url": f"https://github.com/o/r/issues/1#issuecomment-{len(self.posts)}"}
+
+    def finalize(self, log, summary="Release verified"):
+        (self.folder / "command-1.log").write_bytes(log)
+        receipt = {"candidate": self.candidate, "state": "verified",
+                   "commands": [{"phase": "release_verification", "command": "bin/verify", "exit_code": 0,
+                                 "log": "command-1.log", "sha256": r.e.sha256(log)}]}
+        (self.folder / "release.json").write_text(json.dumps(receipt))
+        with contextlib.redirect_stdout(None):
+            r.finalize(self.folder / "release.json", "Reviewer", True, summary)
+        return json.loads(self.posts[-1].split("\n```json\n", 1)[1].rsplit("\n```", 1)[0])
+
+    def test_release_logs_are_redacted_with_both_hashes(self):
+        log = b"deployed from /home/synthuser/app via /tmp/synthuser-stage/x\n"
+        published = self.finalize(log)
+        text = self.posts[0].split("\n\n", 1)[1]
+        self.assertEqual(text, "deployed from ~/app via {tmp}/{user}-stage/x\n")
+        self.assertEqual(published["redaction"], 1)
+        self.assertEqual(published["logs"][0]["sha256"], r.e.sha256(text.encode()))
+        self.assertEqual(published["logs"][0]["original_sha256"], r.e.sha256(log))
+
+    def test_leftover_or_oversized_receipt_posts_nothing(self):
+        for summary, message in [("see /home/synthuser/notes", "summary"), ("x" * 60000, "too large")]:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(r.e.Failure, message):
+                    self.finalize(b"ok\n", summary)
+                self.assertEqual(self.posts, [])
 
 
 if __name__ == "__main__":
