@@ -27,7 +27,7 @@ CONTROLS = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|(?:\x1b\]|\x9d)[^\x07\x
 # Characters per log comment: conservatively below GitHub's byte limit, including
 # worst-case UTF-8. Never silently truncate evidence.
 CHUNK = 10000
-REDACTION = 1  # Version of the path redaction rules below; recorded in published receipts.
+REDACTION = 2  # Version of the path redaction rules below; recorded in published receipts.
 
 
 class Failure(Exception):
@@ -41,9 +41,14 @@ class Redactor:
     first. A preceding '.' still counts as a start (unittest prints progress
     dots straight before paths), so ./tmp becomes .{tmp}; a preceding ~ or }
     does not, so ~/tmp and {tmp}/tmp are left alone; the account name matches as a whole word inside tokens holding a
-    slash. All matching ignores case. leftovers() uses the same patterns.
+    slash. Claude Code's scratch folder right after a temp prefix, claude-<uid>/<project slug>/<session id>, folds
+    into {tmp}. All matching ignores case. leftovers() uses the same patterns and also refuses any part of that
+    scratch folder left anywhere.
     """
     TOKENS = ("{tmp}", "{user}")
+    # Claude Code's slug is the project path with every other character turned into "-"; the session id is a UUID.
+    SESSION = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+    SCRATCH = r"(?:/claude-\d+(?:/-[a-z0-9-]*(?:/" + SESSION + r")?)?(?![\w.-]))?"
 
     def __init__(self, homes, temps, users):
         self.kinds = {p.lower(): "home" for p in homes}
@@ -51,13 +56,22 @@ class Redactor:
         prefixes = sorted(self.kinds, key=len, reverse=True)
         names = sorted({u.lower() for u in users}, key=len, reverse=True)
         self.prefix = prefixes and re.compile(
-            r"(?<![\w~}-])(?:" + "|".join(map(re.escape, prefixes)) + r")(?![\w.-])", re.I)
+            r"(?<![\w~}-])(?P<path>" + "|".join(map(re.escape, prefixes)) + r")(?![\w.-])(?P<scratch>"
+            + self.SCRATCH + ")", re.I)
         self.account = names and re.compile(
             r"(?<![A-Za-z0-9])(?:" + "|".join(map(re.escape, names)) + r")(?![A-Za-z0-9])", re.I)
+        # Each home as a slug, with any account name in it also as "}" (what {user} becomes in leftovers).
+        slugs = ["-".join(f"(?:{re.escape(c)}|\\}})" if c.lower() in names else re.escape(c)
+                          for c in re.split(r"[^A-Za-z0-9]+", h.strip("/")))
+                 for h in self.kinds if self.kinds[h] == "home"]
+        self.scratch = re.compile("|".join([r"(?<![\w.-])claude-\d+(?=/)", r"(?<=[/}])claude-\d+(?![\w.-])",
+                                            r"\}/?" + self.SESSION + r"(?![\w.-])"]
+                                           + ["-" + s + r"(?![A-Za-z0-9])" for s in slugs]), re.I)
 
     def redact(self, text):
         if self.prefix:
-            text = self.prefix.sub(lambda m: "~" if self.kinds[m[0].lower()] == "home" else "{tmp}", text)
+            text = self.prefix.sub(lambda m: "~" + m["scratch"] if self.kinds[m["path"].lower()] == "home" else "{tmp}",
+                                   text)
         if self.account:
             text = re.sub(r"\S+", lambda m: self.account.sub("{user}", m[0]) if "/" in m[0] else m[0], text)
         return text
@@ -66,7 +80,9 @@ class Redactor:
         # A token stands in for what it replaced; "}" ends no word and starts no path.
         for token in self.TOKENS:
             text = text.replace(token, "}")
-        found = {self.kinds[m[0].lower()] for m in self.prefix.finditer(text)} if self.prefix else set()
+        found = {self.kinds[m["path"].lower()] for m in self.prefix.finditer(text)} if self.prefix else set()
+        if self.scratch.search(text):
+            found.add("Claude scratch")
         if account and self.account and any(self.account.search(t) for t in text.split() if "/" in t):
             found.add("account name")
         return sorted(found)

@@ -37,7 +37,9 @@ paths, ignoring case:
 
 - the home directory becomes `~`;
 - the system temp directory, `TMPDIR`, `/tmp`, `/var/tmp` and `/var/folders`
-  (and their resolved forms, such as `/private/tmp`) become `{tmp}`;
+  (and their resolved forms, such as `/private/tmp`) become `{tmp}`, together
+  with Claude Code's scratch folder straight after one,
+  `claude-<uid>/<project slug>/<session id>`;
 - the account name, as a whole word inside any path, becomes `{user}`. A
   short account name such as `ci` also replaces `ci` in unrelated paths.
 
@@ -51,8 +53,10 @@ the posted text against `sha256`, so an edit after publishing fails.
 Publishing checks everything before its first post. The summary, configured
 commands and acceptance report are posted as written, so a home or temp path in
 them refuses publishing with nothing posted: change that field and publish
-again. An oversized receipt is refused the same way. GitHub authenticates the
-publisher, not the execution.
+again. Any part of a Claude Code scratch folder left anywhere in a log or
+field (a `claude-<uid>` folder, the project slug, or a session id straight
+after `{tmp}`) refuses publishing the same way, as does an oversized receipt.
+GitHub authenticates the publisher, not the execution.
 
 A later failed receipt revokes success; new code needs new verification. Publish
 failures; never hide one behind an older success.
