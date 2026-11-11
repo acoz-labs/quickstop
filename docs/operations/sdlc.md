@@ -1,6 +1,6 @@
 # Software delivery
 
-Standard version: `2026.11.05.4`.
+Standard version: `2026.11.05.5`.
 
 Issues, the Project board and in-repo docs coordinate work; chat and local notes
 do not replace them.
@@ -157,9 +157,10 @@ authorizes an unrelated deployment.
 
 Run `bin/sdlc check` for conformity and `bin/sdlc review` before a code merge.
 Review checks live identity, exact head, reviewer permission and an independent
-receipt for every configured command, with environment, outcomes and sanitized
-logs. Changed config, a stale or failed latest run, or an edited log fails. Use
-branch protection where supported; audits only detect. Record enforcement gaps.
+receipt for every configured command, with environment, outcomes and logs
+that publishing has redacted of local paths. Changed config, a stale or failed
+latest run, or an edited log fails. Use branch protection where supported;
+audits only detect. Record enforcement gaps.
 
 ## Historical work
 
