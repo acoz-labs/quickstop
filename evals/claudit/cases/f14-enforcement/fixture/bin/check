@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Lint and test ledgerline. Exits non-zero on any failure.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-python3 -m compileall -q src tests
-PYTHONPATH=src python3 -m unittest discover -s tests -q

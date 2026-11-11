@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Lint the shell helpers.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-shellcheck lib/*.sh

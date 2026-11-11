@@ -132,8 +132,8 @@ may remove that specific hook after inspecting it; do not replace personal hooks
   Bash reads only the plugin under test plus the run's home and workspace;
   `--case` takes exact names and silently matches nothing for globs.
 - `/usr/bin/git` on macOS is an xcrun shim that fails in the plugin-eval
-  sandbox: copy a real git into the scratch plugin, as `bin/claudit-eval`
-  does for Python.
+  sandbox: copy a real git into the scratch plugin, as
+  `bin/writing-for-humans-eval` does.
 - An eval's summarize step validates against the expected suite (cases,
   grader stems, run counts), or a partial run reads as PASS. Post results on
   the issue; don't commit them.
@@ -203,9 +203,10 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - `.claude-plugin/marketplace.json`: generated native marketplace index.
 - `docs/catalog.md`: generated version table.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.
-- `evals/`: model-run eval suites outside plugin bytes; `bin/claudit-eval` runs Claudit's.
-  `bin/writing-for-humans-eval` runs the Writing for Humans kit's release check, which checks
-  for regressions (install, style selection, the user-only audit contract), not writing quality.
+- `evals/`: model-run eval suites outside plugin bytes. Claudit's suite and runner were removed
+  when Claudit was retired in 4.4.0. `bin/writing-for-humans-eval` runs the Writing for Humans
+  kit's release check, which checks for regressions (install, style selection, the user-only
+  audit contract), not writing quality.
   `bin/writing-for-humans-quality-eval` runs the quality eval: the same writing tasks under the
   default, Concise and Writing for Humans styles, graded for cold-read clarity, pedantry and repetition.
 - `docs/`: development, delivery and maintained investigation findings.

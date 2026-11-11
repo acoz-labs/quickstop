@@ -1,8 +1,0 @@
-[package]
-name = "tidewater"
-version = "0.5.2"
-edition = "2021"
-
-[[bin]]
-name = "refresh"
-path = "src/bin/refresh.rs"

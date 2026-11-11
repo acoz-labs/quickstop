@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(bin/check)",
-      "Bash(bin/migrate new:*)",
-      "Bash(bin/migrate bindings)"
-    ]
-  }
-}
