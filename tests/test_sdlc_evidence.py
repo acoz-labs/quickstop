@@ -18,6 +18,43 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 e = importlib.util.module_from_spec(spec)
 loader.exec_module(e)
 
+# Fixture home paths are joined at runtime so no literal machine path sits in this file
+# and public-content scans need no exclusion for it.
+HOME = "/" + "home"
+
+# Lines from a real bin/ci log, run with its temp folder inside a Claude Code scratchpad. Sanitised
+# only where the log named the machine: the home part of the project slug is built at runtime from
+# the synthetic home, and the session id is a synthetic UUID. The rest is as printed, including
+# unittest progress dots straight before paths.
+CI_SLUG = (HOME + "/synthuser/factory/software-repo-template-39/implementer").replace("/", "-")
+CI_SESSION = "00000000-0000-4000-8000-000000000000"
+CI_SCRATCH = f"claude-501/{CI_SLUG}/{CI_SESSION}"
+CI_LOG = """\
+.................................{"version": "2026.11.05.6", "target": "@/tmp/tmp4z3pgo72/target", "applied": true, "starters": []}
+.validation: command 1/1 exit 2
+.validation: command 1/1 exit 1
+.acceptance: command 1/1 exit 0
+.@/tmp/tmpsr_zplfb/accepted/receipt.json
+validation: command 1/1 exit 0
+.@/tmp/tmp9bzkm0k6/evidence/receipt.json
+validation: command 1/1 exit 0
+............................................................................
+----------------------------------------------------------------------
+Ran 114 tests in 2.760s
+
+OK
+@/tmp/tmp_y2j2uw0/receipt/release.json
+bin/ci completed. Customize this script for project-specific checks.
+"""
+
+
+def ci_log(temp="/private/tmp"):
+    """The log as printed with the given temp folder, as bytes."""
+    return CI_LOG.replace("@", f"{temp}/{CI_SCRATCH}/scratchpad").encode()
+
+
+CI_LOG_REDACTED = CI_LOG.replace("@", "{tmp}/scratchpad")
+
 
 class ExecutionTests(unittest.TestCase):
     def setUp(self):
@@ -240,7 +277,7 @@ class PublishRoundTripTests(unittest.TestCase):
         self.writes = 0
         self.repo = "o/r"
         # Synthetic identity only; never the machine running the tests.
-        self.redactor = e.Redactor({"/home/synthuser"}, {"/var/synthtmp/T", "/tmp"}, {"synthuser"})
+        self.redactor = e.Redactor({f"{HOME}/synthuser"}, {"/var/synthtmp/T", "/tmp"}, {"synthuser"})
         redactor = patch.object(e, "local_redactor", side_effect=lambda: self.redactor)
         redactor.start()
         self.addCleanup(redactor.stop)
@@ -294,7 +331,7 @@ class PublishRoundTripTests(unittest.TestCase):
         published = e.parse_comment(self.comments[-1])
         self.assertEqual(url, self.comments[-1]["html_url"])
         self.assertEqual(published["commands"][0]["sha256"], e.sha256(log), "run hash stays the original bytes")
-        self.assertEqual(published["redaction"], 1)
+        self.assertEqual(published["redaction"], 2)
         self.published = published
         return published["logs"][0]["sha256"], "".join(c["body"].split("\n\n", 1)[1] for c in self.comments[:-1])
 
@@ -307,18 +344,52 @@ class PublishRoundTripTests(unittest.TestCase):
         return str(caught.exception)
 
     def test_local_paths_are_redacted_before_posting_and_verify(self):
-        log = (b"cwd /home/synthuser/work/repo\n"
+        log = (f"cwd {HOME}/synthuser/work/repo\n".encode() +
                b"scratch /var/synthtmp/T/claude-501/-home-synthuser-work/scratchpad/out.txt\n"
                b"wrote /tmp/x and /srv/synthuser/cache/y\n")
         published_hash, text = self.publish_and_verify(log)
         self.assertEqual(text, "cwd ~/work/repo\n"
-                               "scratch {tmp}/claude-501/-home-{user}-work/scratchpad/out.txt\n"
+                               "scratch {tmp}/scratchpad/out.txt\n"
                                "wrote {tmp}/x and /srv/{user}/cache/y\n")
         posted = "".join(c["body"] for c in self.comments)
-        for value in ("/home/synthuser", "/var/synthtmp", "/tmp", "synthuser"):
+        for value in (f"{HOME}/synthuser", "/var/synthtmp", "/tmp", "synthuser"):
             self.assertNotIn(value, posted)
         self.assertEqual(published_hash, e.sha256(text.encode()))
         self.assertEqual(self.published["logs"][0]["original_sha256"], e.sha256(log))
+
+    def test_real_ci_log_scratch_folder_collapses_into_tmp(self):
+        self.redactor = e.Redactor({f"{HOME}/synthuser"}, {"/private/tmp", "/tmp"}, {"synthuser"})
+        log = ci_log()
+        published_hash, text = self.publish_and_verify(log)
+        self.assertEqual(text, CI_LOG_REDACTED)
+        posted = "".join(c["body"] for c in self.comments)
+        for value in ("claude-", CI_SLUG, "-home-", CI_SESSION, "synthuser", "/private"):
+            self.assertNotIn(value, posted)
+        self.assertEqual(published_hash, e.sha256(text.encode()))
+        self.assertEqual(self.published["logs"][0]["original_sha256"], e.sha256(log))
+
+    def test_scratch_folder_after_dots_or_temp_collapses_wherever_it_stops(self):
+        slug, session = CI_SLUG, CI_SESSION
+        log = (f"..../tmp/claude-501/{slug}/{session}/scratchpad/a\n"
+               f"/var/synthtmp/T/claude-501/{slug}/{session} /tmp/claude-501/{slug}/b /tmp/claude-501\n").encode()
+        _, text = self.publish_and_verify(log)
+        self.assertEqual(text, "....{tmp}/scratchpad/a\n{tmp} {tmp}/b {tmp}\n")
+
+    def test_scratch_folder_left_after_a_word_tilde_or_token_refuses(self):
+        scratch = CI_SCRATCH
+        for line in (f"x/tmp/{scratch}/a", f"~/tmp/{scratch}/a", f"{{tmp}}/tmp/{scratch}/a", f"{HOME}/synthuser/{scratch}"):
+            with self.subTest(line=line):
+                self.assertIn("Claude scratch", self.refused(f"{line}\n".encode()))
+
+    def test_any_remainder_of_the_scratch_folder_refuses(self):
+        slug, session = CI_SLUG, CI_SESSION
+        for line in ("/srv/claude-501/x", "{tmp}claude-501/x", f"/srv/{slug}/x", f"/srv{slug}",
+                     f"/tmp/{session}/scratchpad", f"/srv/{slug.replace('synthuser', 'SYNTHUSER')}/x"):
+            with self.subTest(line=line):
+                message = self.refused(f"see {line}\n".encode())
+                self.assertIn("Claude scratch", message)
+                self.assertNotIn("synthuser", message.lower())
+        self.assertIn("Claude scratch", self.refused(b"ok\n", summary=f"Checked {{tmp}}/{session}/a"))
 
     def test_edited_log_fails_review_and_audit_after_redacted_publish(self):
         sdlc_loader = importlib.machinery.SourceFileLoader("sdlc_for_audit", str(Path(__file__).resolve().parents[1] / "bin/sdlc"))
@@ -326,7 +397,7 @@ class PublishRoundTripTests(unittest.TestCase):
         sdlc_loader.exec_module(sdlc)
         config = dict(self.config, verification_mode="local")
         self.config = config
-        self.publish_and_verify(b"cwd /home/synthuser/work\n")
+        self.publish_and_verify(f"cwd {HOME}/synthuser/work\n".encode())
         pr = {"number": 1, "head": {"sha": "a" * 40}, "user": {"login": "Builder"}}
         contents = {"content": base64.b64encode(json.dumps(config).encode()).decode()}
 
@@ -341,32 +412,34 @@ class PublishRoundTripTests(unittest.TestCase):
             audit()
 
     def test_nothing_to_redact_posts_todays_text_and_same_hash_twice(self):
-        log = b"\x1b[32mOK\x1b[0m 95 tests in /srv/build/home/synthuserx and x/tmp\n"
+        log = (f"\x1b[32mOK\x1b[0m 95 tests in /srv/build{HOME}/synthuserx and x/tmp\n"
+               f"claude-501 ran {CI_SESSION} in /srv/claude-501x/-home-synthuserx\n").encode()
         published_hash, text = self.publish_and_verify(log)
-        self.assertEqual(text, "OK 95 tests in /srv/build/home/synthuserx and x/tmp\n")
+        self.assertEqual(text, f"OK 95 tests in /srv/build{HOME}/synthuserx and x/tmp\n"
+                               f"claude-501 ran {CI_SESSION} in /srv/claude-501x/-home-synthuserx\n")
         self.assertEqual(self.published["logs"][0]["original_sha256"], published_hash)
 
     def test_boundaries_and_case(self):
-        log = (b"/home/synthuserx/a /data/tmp/a /tmpdir/a /home/synthuser.bak\n"
+        log = (f"{HOME}/synthuserx/a /data/tmp/a /tmpdir/a {HOME}/synthuser.bak\n".encode() +
                b"/HOME/SynthUser/a docs/SynthUser/x\n")
         _, text = self.publish_and_verify(log)
-        self.assertEqual(text, "/home/synthuserx/a /data/tmp/a /tmpdir/a /home/{user}.bak\n"
+        self.assertEqual(text, f"{HOME}/synthuserx/a /data/tmp/a /tmpdir/a {HOME}/{{user}}.bak\n"
                                "~/a docs/{user}/x\n")
 
     def test_unittest_progress_dots_before_a_temp_path_are_redacted(self):
-        log = (b"..../var/synthtmp/T/tmpab12/accepted/receipt.json\n"
-               b"./tmp/x ../tmp/y .../home/synthuser/z\n")
+        log = (b"..../var/synthtmp/T/tmpab12/accepted/receipt.json\n" +
+               f"./tmp/x ../tmp/y ...{HOME}/synthuser/z\n".encode())
         _, text = self.publish_and_verify(log)
         self.assertEqual(text, "....{tmp}/tmpab12/accepted/receipt.json\n"
                                ".{tmp}/x ..{tmp}/y ...~/z\n")
 
     def test_tmp_folder_under_home_or_temp_publishes(self):
-        log = b"/home/synthuser/tmp/build.log /home/synthuser/var/tmp/a /tmp/tmp/x ~/tmp/b ${HOME}/tmp/c\n"
+        log = f"{HOME}/synthuser/tmp/build.log {HOME}/synthuser/var/tmp/a /tmp/tmp/x ~/tmp/b ${{HOME}}/tmp/c\n".encode()
         _, text = self.publish_and_verify(log)
         self.assertEqual(text, "~/tmp/build.log ~/var/tmp/a {tmp}/tmp/x ~/tmp/b ${HOME}/tmp/c\n")
 
     def test_short_account_name_matching_command_and_repository(self):
-        self.redactor = e.Redactor({"/home/ci"}, {"/tmp"}, {"ci"})
+        self.redactor = e.Redactor({f"{HOME}/ci"}, {"/tmp"}, {"ci"})
         self.repo = "ci/ci-tools"
         _, text = self.publish_and_verify(b"ran bin/ci and .github/workflows/CI.yml; ci passed\n",
                                           summary="bin/ci passed on ci/ci-tools")
@@ -376,7 +449,7 @@ class PublishRoundTripTests(unittest.TestCase):
         self.assertTrue(self.published["logs"][0]["urls"][0].startswith("https://github.com/ci/ci-tools/"))
 
     def test_unredactable_fields_with_local_paths_refuse_before_any_write(self):
-        message = self.refused(b"ok\n", summary="Checked /home/synthuser/notes")
+        message = self.refused(b"ok\n", summary=f"Checked {HOME}/synthuser/notes")
         self.assertIn("'summary'", message)
         self.assertIn("home", message)
         self.assertNotIn("synthuser", message)
@@ -385,7 +458,7 @@ class PublishRoundTripTests(unittest.TestCase):
 
     def test_redaction_bug_is_caught_by_the_final_scan(self):
         with patch.object(e.Redactor, "redact", side_effect=lambda text: text):
-            message = self.refused(b"cwd /home/synthuser/work\n")
+            message = self.refused(f"cwd {HOME}/synthuser/work\n".encode())
         self.assertIn("command-1.log", message)
 
     def test_cli_exits_nonzero_and_posts_nothing_on_leftover(self):
@@ -447,15 +520,15 @@ class LocalIdentityTests(unittest.TestCase):
             return e.local_redactor()
 
     def test_trailing_slash_resolved_temp_and_home_name(self):
-        r = self.redactor("/home/synthuser/", "synthuser")
-        self.assertEqual(r.redact("/home/synthuser/a /private/var/synthtmp/T/b /var/synthtmp/T/c /opt/synthuser/d"),
+        r = self.redactor(f"{HOME}/synthuser/", "synthuser")
+        self.assertEqual(r.redact(f"{HOME}/synthuser/a /private/var/synthtmp/T/b /var/synthtmp/T/c /opt/synthuser/d"),
                          "~/a {tmp}/b {tmp}/c /opt/{user}/d")
 
     def test_root_or_empty_home_is_ignored(self):
         for home in ("/", "", None):
             with self.subTest(home=home):
                 r = self.redactor(home, "synthuser")
-                self.assertEqual(r.redact("/usr/bin/env /home/x"), "/usr/bin/env /home/x")
+                self.assertEqual(r.redact(f"/usr/bin/env {HOME}/x"), f"/usr/bin/env {HOME}/x")
                 self.assertEqual(r.redact("/srv/synthuser/a /tmp/b"), "/srv/{user}/a {tmp}/b")
 
     def test_missing_account_name_keeps_path_rules(self):
@@ -466,12 +539,12 @@ class LocalIdentityTests(unittest.TestCase):
                 self.assertEqual(r.redact("/tmp/a /srv/a"), "{tmp}/a /srv/a")
 
     def test_home_name_counts_as_account_name(self):
-        r = self.redactor("/home/synthhome", "")
+        r = self.redactor(f"{HOME}/synthhome", "")
         self.assertEqual(r.redact("/srv/synthhome/a"), "/srv/{user}/a")
 
     def test_longest_prefix_wins_inside_home(self):
-        r = e.Redactor({"/home/synthuser"}, {"/home/synthuser/.cache/tmp"}, set())
-        self.assertEqual(r.redact("/home/synthuser/.cache/tmp/x /home/synthuser/y"), "{tmp}/x ~/y")
+        r = e.Redactor({f"{HOME}/synthuser"}, {f"{HOME}/synthuser/.cache/tmp"}, set())
+        self.assertEqual(r.redact(f"{HOME}/synthuser/.cache/tmp/x {HOME}/synthuser/y"), "{tmp}/x ~/y")
 
     def test_account_named_like_a_token_is_not_a_leftover(self):
         r = e.Redactor(set(), set(), {"user", "tmp"})
