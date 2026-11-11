@@ -3,7 +3,10 @@
 Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
 Its first workflow, [Shipshape](../workflows/shipshape/README.md), was retired on
 2026-11-05 and is kept for reference only. Claudit and the
-Writing for Humans kit are Claude Code plugins at `plugins/<name>/`; Quickstop supports
+Writing for Humans kit are Claude Code plugins at `plugins/<name>/`. Claudit was
+retired on 2026-11-11: its last release, 4.4.0, runs no audit and tells users to
+run `/doctor`, then `/doctor prompt-audit`, linking
+[why it was retired](https://acoz.dev/blog/retiring-claudit/). Quickstop supports
 no other agent tool. Their advertised versions and publication
 state are recorded in the [generated catalog](catalog.md). `catalog.json`
 declares each plugin's `claude-code` target; native package manifests own versions. Generated

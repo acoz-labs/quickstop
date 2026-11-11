@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "claudit",
-      "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
+      "description": "Retired on 2026-11-11. Run /doctor, then /doctor prompt-audit, instead. This last version runs no audit; it only says so and links the retirement post.",
       "category": "Productivity",
       "targets": {
         "claude-code": {
