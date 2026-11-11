@@ -4,8 +4,8 @@
     {
       "name": "claudit",
       "harness": "claude-code",
-      "commit": "e3b1cd2928155855e8093174263d0b038ee92580",
-      "sha256": "277ba1f77dd48b5fc6fab1eb1e9babefdfc56e32c27254dc77d590cfd8de3825",
+      "commit": "09b54e3d9eec8fa1e5c23ea93dbb28d6143dd920",
+      "sha256": "ffa34340fee6ff6ecb8492283e548d20bfd096688799559dd82f95b756ac7996",
       "target": {
         "format": "claude-plugin",
         "path": "plugins/claudit",
@@ -13,26 +13,24 @@
       },
       "manifest": {
         "name": "claudit",
-        "version": "4.2.0",
-        "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
+        "version": "4.4.0",
+        "description": "Retired on 2026-11-11. Run /doctor, then /doctor prompt-audit, instead. This last version runs no audit; it only says so and links the retirement post.",
         "author": {
           "name": "quickstop",
           "url": "https://github.com/acoz-labs/quickstop"
         },
         "license": "MIT",
         "keywords": [
-          "audit",
           "configuration",
-          "optimization",
           "best-practices",
-          "grading"
+          "retired"
         ]
       },
       "provenance": {
         "kind": "sdlc-accepted",
-        "issue": 184,
-        "artifact": "sha256:abb26de7d1561aeb13e6b0dcadfb778541c9f555cee7b11258942ad5800f0e77",
-        "acceptance": "https://github.com/acoz-labs/quickstop/issues/184#issuecomment-6564094632"
+        "issue": 210,
+        "artifact": "sha256:893a7388278d28262ab83765567da212079c54828b28481a19aa6836296485d6",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/210#issuecomment-6808923999"
       }
     },
     {
