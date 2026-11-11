@@ -7,10 +7,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_sdlc_evidence import CI_LOG_REDACTED, CI_SCRATCH, CI_SESSION, CI_SLUG, ci_log
+
 loader = importlib.machinery.SourceFileLoader("release", str(Path(__file__).resolve().parents[1] / "bin/sdlc-release"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 r = importlib.util.module_from_spec(spec)
 loader.exec_module(r)
+
+# Fixture home paths are joined at runtime so no literal machine path sits in this file
+# and public-content scans need no exclusion for it.
+HOME = "/" + "home"
 
 
 class GateTests(unittest.TestCase):
@@ -213,7 +219,7 @@ class FinalizeTests(unittest.TestCase):
         self.candidate = {"repo": "o/r", "issue": 1, "sha": "a" * 40, "artifact": "sha256:" + "b" * 64}
         self.config = {"release_verification": ["bin/verify"]}
         self.posts = []
-        redactor = r.e.Redactor({"/home/synthuser"}, {"/tmp"}, {"synthuser"})
+        redactor = r.e.Redactor({f"{HOME}/synthuser"}, {"/private/tmp", "/tmp"}, {"synthuser"})
         stubs = [patch.object(r, "gate", return_value={"candidate": self.candidate, "config": self.config}),
                  patch.object(r.e, "local_redactor", return_value=redactor),
                  patch.object(r.e, "api", side_effect=self.api)]
@@ -236,16 +242,37 @@ class FinalizeTests(unittest.TestCase):
         return json.loads(self.posts[-1].split("\n```json\n", 1)[1].rsplit("\n```", 1)[0])
 
     def test_release_logs_are_redacted_with_both_hashes(self):
-        log = b"deployed from /home/synthuser/app via /tmp/synthuser-stage/x\n"
+        log = f"deployed from {HOME}/synthuser/app via /tmp/synthuser-stage/x\n".encode()
         published = self.finalize(log)
         text = self.posts[0].split("\n\n", 1)[1]
         self.assertEqual(text, "deployed from ~/app via {tmp}/{user}-stage/x\n")
-        self.assertEqual(published["redaction"], 1)
+        self.assertEqual(published["redaction"], 2)
         self.assertEqual(published["logs"][0]["sha256"], r.e.sha256(text.encode()))
         self.assertEqual(published["logs"][0]["original_sha256"], r.e.sha256(log))
 
+    def test_real_ci_log_scratch_folder_collapses_into_tmp(self):
+        log = ci_log()
+        published = self.finalize(log)
+        text = self.posts[0].split("\n\n", 1)[1]
+        self.assertEqual(text, CI_LOG_REDACTED)
+        for value in ("claude-", CI_SLUG, CI_SESSION, "synthuser"):
+            self.assertNotIn(value, "".join(self.posts))
+        self.assertEqual(published["logs"][0]["sha256"], r.e.sha256(text.encode()))
+        self.assertEqual(published["logs"][0]["original_sha256"], r.e.sha256(log))
+
+    def test_nothing_to_redact_posts_the_log_unchanged(self):
+        log = b"release verified; claude-501 ran in /srv/app\n"
+        published = self.finalize(log)
+        self.assertEqual(self.posts[0].split("\n\n", 1)[1].encode(), log)
+        self.assertEqual(published["logs"][0]["sha256"], published["logs"][0]["original_sha256"])
+
+    def test_scratch_folder_remainder_posts_nothing(self):
+        with self.assertRaisesRegex(r.e.Failure, "Claude scratch"):
+            self.finalize(f"x/tmp/{CI_SCRATCH}/a\n".encode())
+        self.assertEqual(self.posts, [])
+
     def test_leftover_or_oversized_receipt_posts_nothing(self):
-        for summary, message in [("see /home/synthuser/notes", "summary"), ("x" * 60000, "too large")]:
+        for summary, message in [(f"see {HOME}/synthuser/notes", "summary"), ("x" * 60000, "too large")]:
             with self.subTest(message=message):
                 with self.assertRaisesRegex(r.e.Failure, message):
                     self.finalize(b"ok\n", summary)

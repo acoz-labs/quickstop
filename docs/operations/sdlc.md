@@ -1,6 +1,6 @@
 # Software delivery
 
-Standard version: `2026.11.05.5`.
+Standard version: `2026.11.05.7`.
 
 Issues, the Project board and in-repo docs coordinate work; chat and local notes
 do not replace them.

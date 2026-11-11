@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "2026.11.05.5",
+  "version": "2026.11.05.7",
   "files": {
     "AGENTS.md": {
       "sha256": "973291b48f11f26891d4b64aabe8fcbe18b4aa74fca744e29b5d33dda6c307eb",
@@ -11,7 +11,7 @@
       "mode": "644"
     },
     "SDLC_VERSION": {
-      "sha256": "4f1b28ce4c3a93295ebb0d08491e4b58743ec157455a721a435c29dd3366f905",
+      "sha256": "c7029fb4c9d1df09ca5bb54a59bf0ee9f7e373364b76634fc91b5514a6952b8e",
       "mode": "644"
     },
     ".github/ISSUE_TEMPLATE/feature.yml": {
@@ -19,11 +19,11 @@
       "mode": "644"
     },
     "bin/sdlc": {
-      "sha256": "656a926f1399742b538f349cb41286a78f206f9b766677cbf131793cc28f866b",
+      "sha256": "f58cd96365d939b78ce5fe21657ed766f3937383cfdd1983684c73d3a0ccc40b",
       "mode": "755"
     },
     "bin/sdlc-evidence": {
-      "sha256": "f609b2904f360952d687496b9800bb02e15e028e8289f110edd2dfdd9016020c",
+      "sha256": "933f6b9b9b664ac869eae1abc0a7ddcddb7e2fb760100c6ae28ca2af17d53a5a",
       "mode": "755"
     },
     "bin/sdlc-release": {
@@ -43,11 +43,11 @@
       "mode": "644"
     },
     "tests/test_sdlc_evidence.py": {
-      "sha256": "14d5e247cc733b31aa990e3f3308febac5f7bfca4a3e1948bca10b79cad940ca",
+      "sha256": "a4eea580d3ccc8f6d97946e7e5ce529cd341ff15b0eebec752af5cd308be037e",
       "mode": "644"
     },
     "tests/test_sdlc_release.py": {
-      "sha256": "46f6d59bfd2f9a87b41b768f3d010405e315cc9655be3dc9a98a764e2fa819d6",
+      "sha256": "3733ed80fafda58eb1459f8b10348cfef9261b89cd234f67b559d1744fef1310",
       "mode": "644"
     },
     "tests/test_sdlc_plans.py": {
@@ -55,15 +55,15 @@
       "mode": "644"
     },
     "docs/operations/sdlc.md": {
-      "sha256": "f2af55f2d9018e325843fa40eaba8d5f02fd97e5f605b32585df786e804daff1",
+      "sha256": "d7356b0b147b5db5d0b51dc1e458381e9b23d3327daf56856ed2135cce77585c",
       "mode": "644"
     },
     "docs/operations/repo-standard.md": {
-      "sha256": "9d1145b16a770a780490e5e39d8e77476b1e7a2e5be16edfd9a6db3c2c45cd0b",
+      "sha256": "0847ead7b7ac3f0f46ed46499b1f337ed305b4c4e9a0cd86398a8f4461551ea8",
       "mode": "644"
     },
     "docs/operations/local-verification.md": {
-      "sha256": "9ea02080dd87ba85276f2ce35056b5073495b1c7e940d38e1076427477b9a339",
+      "sha256": "d9d3e7450ed5ecc528926a606c7126eb92d38a94318c29ff590ba96af0770a93",
       "mode": "644"
     },
     "docs/changes/README.md": {
