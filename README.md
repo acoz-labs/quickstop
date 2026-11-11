@@ -18,7 +18,9 @@ Visit the [Quickstop storefront](https://acoz.dev/projects/quickstop/) for a loo
 Quickstop is a Claude Code plugin marketplace.
 [Writing for Humans](plugins/writing-for-humans) provides a selectable
 writing style and two skills for clearer human-facing communication.
-[Claudit](plugins/claudit) audits and improves Claude Code configuration.
+[Claudit](plugins/claudit) was retired on 2026-11-11: run `/doctor`, then
+`/doctor prompt-audit`, instead, and read
+[why Claudit was retired](https://acoz.dev/blog/retiring-claudit/).
 The [plugin catalog](docs/catalog.md) records advertised versions.
 
 Inside Claude Code:
@@ -29,14 +31,13 @@ Inside Claude Code:
 ```
 
 Restart Claude Code, then select `/output-style writing-for-humans:writing-for-humans`.
-For Claudit, use `/plugin install claudit@quickstop`. See each package's README
-for its setup and usage.
+See each package's README for its setup and usage.
 
 For local plugin development:
 
 ```sh
 git clone https://github.com/acoz-labs/quickstop.git
-claude --plugin-dir /path/to/quickstop/plugins/claudit
+claude --plugin-dir /path/to/quickstop/plugins/writing-for-humans
 ```
 
 ## Workflows
