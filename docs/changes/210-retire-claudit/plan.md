@@ -47,9 +47,13 @@ metadata:
 - The repository README's Plugins section and the repository guide's opening
   paragraph (`docs/repository.md`): "Claudit was retired on 2026-11-11", with
   the `/doctor` pointers and the post link, as #206 did for Shipshape.
+- The package README opens with the same `> **Retired.**` note Shipshape's
+  pages open with.
 
-The listing keeps Claudit's keywords, name and category; only the words that
-describe it change.
+The listing keeps Claudit's name and category. Its keywords drop "audit",
+"optimization" and "grading", which describe what it no longer does, and add
+"retired"; "configuration" and "best-practices" stay. Keywords are manifest
+bytes, so this is in the plugin PR.
 
 ## Files that change
 
@@ -66,11 +70,12 @@ Package (`plugins/claudit/`), all bytes, so all covered by the version bump:
   retired; run `/doctor`, then `/doctor prompt-audit`; why, at
   https://acoz.dev/blog/retiring-claudit/; how to uninstall
   (`/plugin uninstall claudit@quickstop`).
-- Package README (`README.md`): replaced by a short page with the same
-  message, the uninstall command, and where the last auditing version lives
+- Package README (`README.md`): replaced by a short page that opens with a
+  `> **Retired.** Claudit was retired on 2026-11-11 …` note, as Shipshape's
+  pages do (PR #206), then gives the same message, the uninstall command, and where the last auditing version lives
   (tag `claudit-v4.2.0`).
-- Manifest (`.claude-plugin/plugin.json`): version 4.4.0 and the retired
-  description above.
+- Manifest (`.claude-plugin/plugin.json`): version 4.4.0, the retired
+  description and the trimmed keywords above.
 - Removed, because they only exist to audit: the auditor agent
   (`agents/auditor.md`), the scan helper (`skills/claudit/scripts/claudit.py`),
   the shipped docs catalog (`skills/claudit/catalog.json`) and the apply
@@ -117,7 +122,11 @@ No file of Writing for Humans, no other plugin's version, and no
 - Catalog (`catalog.json`): Claudit's retired description.
 - Regenerated indexes (`bin/check-marketplace --write`): the native index and
   version table show 4.4.0, the retired description and the new commit pin.
-- The repository README and repository guide notes described above.
+- The repository README and repository guide notes described above. In the
+  README's Plugins section, the sentence "For Claudit, use `/plugin install
+  claudit@quickstop`" is dropped and the local-development example switches
+  from `plugins/claudit` to `plugins/writing-for-humans`, so the README no
+  longer offers to install a retired plugin.
 
 The reviewer confirms the lock by running promote on the pointer head as the
 maintainer account and seeing "Already points at this accepted artifact" with
@@ -138,11 +147,14 @@ no diff.
    run the candidate checks in Proof; mark the PR ready and request review.
 5. After merge: the reviewer retains the archive, runs acceptance, gates and
    tags `claudit-v4.4.0`; I check the peeled commit and tree.
-6. Pointer PR from the latest `main`: lock record via promote's logic,
+6. Gate before publishing: the post URL returns HTTP 200, recorded with the
+   time. The GitHub Release is not created and the pointer PR is not merged
+   until it does (or the factory says so).
+7. Pointer PR from the latest `main`: lock record via promote's logic,
    catalog description, regenerated indexes, README and repository guide
    notes; `bin/ci` and `bin/check-marketplace --base origin/main`.
-7. The reviewer verifies the published release (download digest, install
-   from the published marketplace, smoke) and closes #210.
+8. The reviewer verifies the published release with the published-artifact
+   checks in Proof and closes #210.
 
 The lead closes #207 and #208 after the release verifies; this work doesn't
 touch them.
@@ -160,8 +172,8 @@ touch them.
 - **`/doctor prompt-audit` must exist** in the Claude Code version users run.
   The owner's post names it; acceptance records the Claude Code version and
   runs `/doctor prompt-audit` once to confirm it's recognised.
-- **The post link 404s.** The lead says the post is live now; acceptance
-  fetches the URL and records the status.
+- **The post link 404s.** It returns 200 today; step 6 makes a 200 a gate
+  before the GitHub Release and the pointer merge.
 - **Removing 5,300 lines of tests** could read as weakening the suite. They
   only test the removed helper and graders for its reports; the PR lists them
   and shows the unittest count drops by exactly their test count, with
@@ -192,11 +204,19 @@ inventory checks, and from a throwaway worktree on the normal login with
 1. Install from a local directory marketplace holding the candidate (Claude
    Code refuses `file://` marketplaces): 4.4.0 installs, the inventory shows
    one skill (`claudit`) and no agents.
-2. Run `/claudit:claudit`, `/claudit:claudit --read-only hooks` and a plain
-   "audit my Claude Code setup with Claudit" headless with stream-json
-   output, in a synthetic repository. Each reply contains "retired",
-   `/doctor`, `/doctor prompt-audit` and the post URL. The transcript holds
-   no tool calls. Graders read the whole output, never a truncated excerpt.
+2. Run three prompts headless with stream-json output, in a synthetic
+   repository: `/claudit:claudit`, `/claudit:claudit --read-only hooks` and
+   the plain "audit my Claude Code setup with Claudit". Graders read the
+   whole output, never a truncated excerpt, and pass a run only when:
+   - the final reply contains "retired", `/doctor`, `/doctor prompt-audit`
+     and the post URL;
+   - the init event lists the `claudit` skill and no `auditor` agent;
+   - the two slash-command runs make zero tool calls, and the plain-language
+     run makes exactly one, a Skill call for `claudit`; no run calls Read,
+     Grep, Glob, Bash, WebFetch, Agent, Task or any other tool.
+   Negative control: the plain-language prompt run without the plugin must
+   not produce the post URL, so the grader tells the skill's reply from a
+   guess.
 3. Consumer state: the synthetic repository's files, Git index and working
    tree are unchanged; no `~/.cache/claudit` or `CLAUDIT_CACHE_DIR`
    directory is created; `~/.claude/settings.json` and
@@ -207,17 +227,44 @@ inventory checks, and from a throwaway worktree on the normal login with
    notice; the 4.2.0 cache remaining with `.orphaned_at` is recorded as
    expected.
 
-The independent verifier repeats these on the retained archive's extracted
-package and, after publication, on the published marketplace, per the
-rewritten acceptance procedure. Results are posted on the issue, not
-committed, and carry no machine paths.
+The independent verifier repeats checks 1 to 4 on the retained archive's
+extracted package before the tag.
+
+After publication, the verifier checks the published artifact. These checks
+are also written into the rewritten acceptance procedure:
+
+- The downloaded release asset's SHA-256 matches the accepted digest, and
+  the extracted package digest matches the 4.4.0 record in `releases.json`.
+- A clean install from the published GitHub marketplace
+  (`acoz-labs/quickstop`), under a temporary `HOME` and
+  `CLAUDE_CONFIG_DIR`, shows 4.4.0 at the pointer's commit, one skill
+  (`claudit`) and no agents. That install needs no login.
+- A temporary config dir isn't logged in, so the model turns run on the
+  normal login from a throwaway worktree, with `--plugin-dir` set to the
+  package that the published install wrote (or the extracted downloaded
+  asset), `--setting-sources project,local`, `--strict-mcp-config` and
+  `DISABLE_AUTOUPDATER=1`. The three prompts and grading rules of check 2
+  apply unchanged, with the negative control.
+- The update path of check 4 runs against the published marketplace: install
+  4.2.0 from a local directory marketplace at the 4.2.0 commit, re-point it
+  to `acoz-labs/quickstop`, update, and see 4.4.0 with the notice.
+- The post URL returns HTTP 200, and `/doctor prompt-audit` is recognised by
+  the Claude Code that runs the checks; both are recorded with its version.
+
+Results are posted on the issue, not committed, and carry no machine paths.
 
 ## Rollback
 
 Before the pointer PR merges, nothing is advertised: revert the plugin PR.
-After it merges, restore the 4.2.0 lock record and the previous catalog
-description with a reviewed pointer PR (4.2.0's record stays in history) and
-regenerate the indexes. Users who already updated keep 4.4.0 in their cache
-until they reinstall; the README's uninstall command and a reinstall from the
-restored marketplace recover them. The `claudit-v4.4.0` tag and its release
-asset stay as published; a different later release would need a new number.
+
+After it merges, a fault in 4.4.0 itself (a wrong link, the model auditing
+anyway, a broken skill) is fixed forward with 4.4.1 through the same two-PR
+flow. Restoring 4.2.0 would re-advertise the auditing version the owner
+retired and wouldn't downgrade users already on 4.4.0.
+
+Restoring the 4.2.0 lock record and the previous catalog description, with a
+reviewed pointer PR and regenerated indexes, is kept for a failure of the
+pointer PR itself (a wrong commit pin or a listing that won't load). 4.2.0's
+record stays in history for that. The `claudit-v4.4.0` tag and its release
+asset stay as published; a later release with different bytes takes a new
+number.
