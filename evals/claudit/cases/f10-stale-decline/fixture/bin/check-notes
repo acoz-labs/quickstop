@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Run the notes round-trip check.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-out=$(src/jotter list)
-test -n "$out"

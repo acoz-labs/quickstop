@@ -1,9 +1,0 @@
-[project]
-name = "labelmaker"
-version = "0.9.1"
-description = "Print shipping labels as plain text."
-requires-python = ">=3.11"
-dependencies = []
-
-[project.scripts]
-labelmaker = "labelmaker.cli:main"

@@ -1,17 +1,15 @@
 {
   "name": "claudit",
-  "version": "4.2.0",
-  "description": "Grade your Claude Code setup for correctness, alignment and coverage against what the project is for, and get the few changes that would improve it most, with diffs and doc citations.",
+  "version": "4.4.0",
+  "description": "Retired on 2026-11-11. Run /doctor, then /doctor prompt-audit, instead. This last version runs no audit; it only says so and links the retirement post.",
   "author": {
     "name": "quickstop",
     "url": "https://github.com/acoz-labs/quickstop"
   },
   "license": "MIT",
   "keywords": [
-    "audit",
     "configuration",
-    "optimization",
     "best-practices",
-    "grading"
+    "retired"
   ]
 }

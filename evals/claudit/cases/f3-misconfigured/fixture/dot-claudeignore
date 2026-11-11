@@ -1,5 +1,0 @@
-# Keep Claude away from secrets and build output
-.env
-.env.*
-secrets/
-coverage/

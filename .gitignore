@@ -9,9 +9,6 @@ dist/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Claudit eval run outputs
-evals/claudit/results/
-
 # Writing for Humans eval run outputs
 evals/writing-for-humans/results/
 

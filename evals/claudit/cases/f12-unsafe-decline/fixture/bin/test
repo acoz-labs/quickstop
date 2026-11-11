@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Check tally against a known count.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-test "$(printf "a b c\n" | src/tally.sh /dev/stdin)" = 3

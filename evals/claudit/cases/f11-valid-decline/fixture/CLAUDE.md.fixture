@@ -1,7 +1,0 @@
-# shelf
-
-Setup decisions are in @docs/decisions.md.
-
-## Commands
-
-- `bin/check` runs shellcheck over `lib/`.

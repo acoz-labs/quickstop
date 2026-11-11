@@ -1,5 +1,0 @@
-[project]
-name = "orchard"
-version = "2.4.0"
-description = "Inventory service for farm shops."
-requires-python = ">=3.11"

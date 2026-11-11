@@ -1,6 +1,11 @@
 # Claudit eval baselines
 
-Baselines for the [Claudit eval suite](../../evals/claudit/README.md), recorded
+> **Historical.** Claudit was retired in 4.4.0, and its eval suite, the
+> `bin/claudit-eval` runner and their tests were removed with the audit code.
+> They're kept at [commit `8a0840f`](https://github.com/acoz-labs/quickstop/tree/8a0840fe39144f0bb2618b767b968c0b8ce3000a/evals/claudit),
+> the last one that has them. The numbers below are kept as recorded.
+
+Baselines for the [Claudit eval suite](https://github.com/acoz-labs/quickstop/blob/8a0840fe39144f0bb2618b767b968c0b8ce3000a/evals/claudit/README.md), recorded
 for issue #155 on 2026-10-29. Claudit 4.0 (#156) is gated against these numbers.
 
 ## Conditions
@@ -156,7 +161,7 @@ to f19 because F10 to F13 were taken:
 - Claudit 4.2.0: plugin tree `3972b36948dfecb2a9e3e8610290a318b6422a33`, extracted from tag `claudit-v4.2.0`,
   `--web-fetch`, invoked as `/claudit:claudit --read-only`.
 - `doctor-combined`: `bin/claudit-eval run --arm doctor-combined`, headless and read-only (see the
-  [suite README](../../evals/claudit/README.md#arms)). It runs outside `claude plugin eval`, so its llm graders go to
+  [suite README](https://github.com/acoz-labs/quickstop/blob/8a0840fe39144f0bb2618b767b968c0b8ce3000a/evals/claudit/README.md#arms)). It runs outside `claude plugin eval`, so its llm graders go to
   the same judge prompt through `claude -p`, not through the eval host. Its throwaway folders are never trusted, so
   Claude Code ignores the fixtures' allow rules, and `/doctor` runs with Bash denied: it can't run `claude --version`
   or read `~/.claude*`, and its reply says so. The results give each arm's permission-denial counts. Counted batches

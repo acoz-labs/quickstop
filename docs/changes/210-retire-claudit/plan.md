@@ -245,9 +245,15 @@ are also written into the rewritten acceptance procedure:
   asset), `--setting-sources project,local`, `--strict-mcp-config` and
   `DISABLE_AUTOUPDATER=1`. The three prompts and grading rules of check 2
   apply unchanged, with the negative control.
-- The update path of check 4 runs against the published marketplace: install
-  4.2.0 from a local directory marketplace at the 4.2.0 commit, re-point it
-  to `acoz-labs/quickstop`, update, and see 4.4.0 with the notice.
+- The update path runs against the published marketplace, the way users
+  update. Before the pointer PR merges, while `acoz-labs/quickstop` still
+  serves 4.2.0, the reviewer installs 4.2.0 from it into a kept temporary
+  `HOME` and `CLAUDE_CONFIG_DIR`. After the merge, in that same home, the
+  reviewer records that 4.2.0 is still installed, then runs the marketplace
+  update and the plugin update, and records 4.4.0, the notice and the
+  orphaned 4.2.0 cache. The marketplace is never removed and re-added:
+  removing a marketplace uninstalls its plugins, which would turn the test
+  into a fresh install.
 - The post URL returns HTTP 200, and `/doctor prompt-audit` is recognised by
   the Claude Code that runs the checks; both are recorded with its version.
 
