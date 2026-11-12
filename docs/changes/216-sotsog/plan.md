@@ -162,26 +162,35 @@ Script graders, $0:
 - **Outcome**: the recorded outcome is in the case's expected set. The same
   reader serves both arms, and it reads only where a verdict is stated:
   1. The H1 decision line, when it matches the template (`# <idea>:
-     <outcome> for <repo or workflow>`).
-  2. Otherwise the first decision label: a line whose text starts with
-     Decision, Recommendation, Verdict or Conclusion and that is a heading,
-     starts in bold, or follows the label with a colon or dash ("Decision:
-     adopt"), so body text such as "Decision makers liked it" isn't a label.
-     The verdict text is what follows the label on that line; when that holds
-     no outcome (a bare heading such as `## Recommendation`), it's the first
-     sentence of the next paragraph.
-  3. Only the start of the verdict text counts, after skipping bold or italic
-     markers, punctuation and a lead-in ("we should", "I recommend", "we
-     recommend", "recommend", "my, our or the recommendation is", "the or
-     our decision is", "yes"). There it maps through a fixed table, matched
-     as whole words, longest entry first: "adopt", "adopting", "adopted" →
-     adopt; "adapt", "adapting", "adopt in part", "partially adopt" → adapt;
-     "not now", "not yet", "defer", "deferring", "later" → not now; "no",
+     <outcome> for <repo or workflow>`); otherwise a verdict right after the
+     colon of any other H1 ("# Safe migrations: adopt in part for ...").
+  2. Then each decision label in turn: a line whose text starts with
+     Decision, Recommendation, Verdict, Conclusion, TL;DR, Bottom line,
+     Summary or Short answer and that is a heading, starts in bold, or follows
+     the label with a colon or dash, so body text such as "Decision makers
+     liked it" isn't a label. The verdict text is what follows the label on
+     that line; when that holds no outcome, it's the first sentence of the
+     next paragraph. A label with no verdict doesn't stop the search ("##
+     Decision drivers" before "## Recommendation"); the first verdict found
+     wins.
+  3. Only the start of the verdict text counts, after skipping markers,
+     punctuation and lead-ins: "my, our or the recommendation is (to)", "I
+     or we (would, will) recommend, suggest or propose", "we or I (should,
+     will, would, can, must)", "<up to four words> should" ("Lanternhall
+     should"), "yes", "to". A negated modal after a subject ("we won't",
+     "the team shouldn't") reads as "not". A subject that starts with a
+     negative or a hedge ("nobody", "maybe", "perhaps", "whether") is never
+     skipped, so "maybe we should adopt" stays unread. The fixed table,
+     matched as whole words, longest entry first: "adopt", "adopting",
+     "adopted" → adopt; "adapt", "adapting", "adopt in part", "partially
+     adopt", "adopt partially", "adopt, partially", "adopt with changes" →
+     adapt; "not now", "not yet", "not at this time", "not right now", "hold
+     off", "wait", "defer", "deferring", "postpone", "later" → not now; "no",
      "do not adopt", "don't adopt", "not adopt", "not adopting", "not
-     adopted", "reject", "decline" → no. Words
-     later in the sentence are ignored, so "adopt, with no change to CI" is
-     adopt, and "No: adopting would remove review" is no.
-  4. No label, or a verdict start that matches nothing, is a miss.
+     adopted", "reject", "decline" → no. Words later in the sentence are
+     ignored, so "adopt, with no change to CI" is adopt, and "No: adopting
+     would remove review" is no.
+  4. No label, or no verdict at any label, is a miss.
 
   The unit tests cover each shape (H1, `## Recommendation` with the verdict
   in the next paragraph, `Verdict:` inline, a bold label, a `Conclusion`
@@ -266,10 +275,18 @@ Cost and time per run are reported for both arms, not gated.
   detail, one critique and one competitor cited in a sentence each, exactly
   one open question on no-go cases. Must pass every grader, and bar 4's
   "none above 1".
-- `borderline-fail`: has the shape but misses the substance: topics without
-  points ("there are trade-offs"), a critique cited by name only, a gap named
-  as a topic, a brief that says "implement it" with no steps, two open
-  questions on no-go cases. Each targeted grader must fail.
+- `borderline-fail`: the case's `good` sample with exactly one defect per
+  grader it targets, so it sits just below the bar; every other grader is
+  expected to pass. Case 1: the critique misstated and the competitor only
+  named (depth), a vague trigger and borrowing left unaddressed (open
+  questions). Case 2: the brief never says where the lint runs (cold-read
+  next, and the brief's "naming the file or step"); the key's next point
+  requires that the lint runs in the checks before deploy. Case 3: a true
+  reason that isn't the key's (cold-read why), and two holes within the
+  borrowing point (open questions). Case 4: "who gains" named with
+  substance but the baseline only gestured at (gaps), and two vague triggers
+  (open questions). Case 5: the critique misstated and the competitor only
+  named (depth), and "how to tell it worked" missing (brief).
 - `plain`: shaped like a baseline document, not the template: free headings,
   no comparison table in the template's columns, and the verdict stated a
   different way in each case (`## Recommendation` with the verdict in the
@@ -296,7 +313,7 @@ table.
   commit replaces it and the PR says so; after the first sotsog run, no
   frozen file changes.
 - Proof in the PR and the acceptance doc: `git diff <freeze> <head> --
-  evals/sotsog bin/sotsog-eval` is empty, and every result's `CANDIDATE.txt`
+  evals/sotsog bin/sotsog-eval tests/test_sotsog_eval.py` is empty, and every result's `CANDIDATE.txt`
   records the suite tree, runner blob, candidate head and tree, plugin tree
   and the extraction write-tree, matching the freeze. `summarize` refuses a
   result whose suite tree or runner blob differs from the freeze.
