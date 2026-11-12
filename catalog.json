@@ -27,6 +27,18 @@
           "acceptance": "docs/acceptance/writing-for-humans.md"
         }
       }
+    },
+    {
+      "name": "sotsog",
+      "description": "Research an outside idea, compare it honestly with what your repo or workflow already does, and write a decision document someone who wasn't there can act on: adopt, adapt, not now or no.",
+      "category": "Productivity",
+      "targets": {
+        "claude-code": {
+          "format": "claude-plugin",
+          "path": "plugins/sotsog",
+          "acceptance": "docs/acceptance/sotsog.md"
+        }
+      }
     }
   ]
 }

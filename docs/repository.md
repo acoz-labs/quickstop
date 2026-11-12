@@ -3,9 +3,10 @@
 Quickstop is acoz-labs' marketplace of agent plugins and skills, plus practical,
 read-and-adapt workflows.
 Its first workflow, [Shipshape](../workflows/shipshape/README.md), was retired on
-2026-11-05 and is kept for reference only. Claudit and the
-Writing for Humans kit are plugins at `plugins/<name>/`, installed through Claude
-Code's plugin format. Claudit was
+2026-11-05 and is kept for reference only. Claudit, the
+Writing for Humans kit and sotsog are plugins at `plugins/<name>/`, installed through Claude
+Code's plugin format. sotsog's one skill researches an outside idea and writes an adopt-or-not
+decision document; it's checked against the Agent Skills spec like any other skill. Claudit was
 retired on 2026-11-11: its last release, 4.4.0, runs no audit and tells users to
 run `/doctor`, then `/doctor prompt-audit`, linking
 [why it was retired](https://acoz.dev/blog/retiring-claudit/). Skills follow the
@@ -268,6 +269,9 @@ review or acceptance evidence.
   audit contract), not writing quality.
   `bin/writing-for-humans-quality-eval` runs the quality eval: the same writing tasks under the
   default, Concise and Writing for Humans styles, graded for cold-read clarity, pedantry and repetition.
+  `bin/sotsog-eval` runs sotsog's release gate (`evals/sotsog/`): the same research-and-decide task
+  with and without the plugin, on frozen fixtures, keys and graders, with a CSV spend ledger and a
+  stop line that refuses any call that could pass it.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
 

@@ -107,7 +107,7 @@ class ExemptionTests(unittest.TestCase):
     def test_real_skills_pass_with_the_exemption(self):
         code, out, skipped = module.run(Repo(self).root, SKIP_BOTH)
         self.assertEqual(code, 0, out)
-        self.assertIn('Skills lint: 1 skill(s) clean', out)
+        self.assertIn('Skills lint: 2 skill(s) clean', out)
         self.assertTrue(any(line.startswith('Skills check skips writing-for-humans') for line in out))
 
     def test_removing_the_exemption_fails_both_writing_for_humans_skills(self):
@@ -180,7 +180,7 @@ class SkillsRefTests(unittest.TestCase):
     def test_fetches_once_then_runs_from_the_cache(self):
         code, out, _ = self.run_check()
         self.assertEqual(code, 0, out)
-        self.assertIn(f"skills-ref {self.pin['commit'][:12]}: 1 skill(s) valid", out)
+        self.assertIn(f"skills-ref {self.pin['commit'][:12]}: 2 skill(s) valid", out)
         self.assertTrue(self.cache.is_dir())
         with patch.object(module, 'fetch', side_effect=AssertionError('fetched again')):
             self.assertEqual(self.run_check()[0], 0)
@@ -266,11 +266,12 @@ class ClaudeValidateTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         calls = [line.split('|') for line in self.calls.read_text().splitlines()]
         self.assertEqual([c[0] for c in calls], [f'plugin validate --strict {p}' for p in (
-            self.repo.root, self.repo.root / 'plugins/claudit', self.repo.root / 'plugins/writing-for-humans')])
+            self.repo.root, self.repo.root / 'plugins/claudit', self.repo.root / 'plugins/writing-for-humans',
+            self.repo.root / 'plugins/sotsog')])
         for _, home, config, autoupdater, key in calls:
             self.assertEqual((config, autoupdater, key), (home + '/.claude', '1', 'none'))
             self.assertFalse(Path(home).exists())
-        self.assertIn('claude plugin validate --strict: marketplace and 2 plugin(s) valid', out)
+        self.assertIn('claude plugin validate --strict: marketplace and 3 plugin(s) valid', out)
 
     def test_a_failing_validation_fails_the_check(self):
         claude = self.bin / 'claude'
