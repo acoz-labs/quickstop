@@ -4,7 +4,7 @@ sotsog 0.1.0 ships only if the frozen eval gate in [evals/sotsog](../../evals/so
 
 ## Procedure
 
-1. **Freeze.** Fixtures, answer keys, calibration samples, graders, judge prompts and the runner are frozen before any sotsog run. The proof is an empty `git diff <freeze> <candidate> -- evals/sotsog bin/sotsog-eval`, plus the suite tree and runner blob recorded in every result's `CANDIDATE.txt`.
+1. **Freeze.** Fixtures, answer keys, calibration samples, graders, judge prompts and the runner are frozen before any sotsog run. The proof is an empty `git diff <freeze> <candidate> -- evals/sotsog bin/sotsog-eval tests/test_sotsog_eval.py`, plus the suite tree and runner blob recorded in every result's `CANDIDATE.txt`.
 2. **No overlap.** `tests/test_sotsog_eval.py` greps every file of `plugins/sotsog/` for each case's fixture-specific terms, and fails on any hit.
 3. **Calibration.** `bin/sotsog-eval calibrate --judges` must match every expected verdict, on a clean tree with the frozen suite tree and runner blob, before any arm runs.
 4. **Screen.** sotsog runs once per case, plus one baseline run on case 1, so both arms' costs are measured. Screens never count.
