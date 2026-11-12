@@ -346,19 +346,75 @@ def script_grades(document, case):
             'depth_script': depth_script(document, case)}
 
 
+# Votes. Every judged verdict is decided by votes: a second call always, a third only when the first two
+# disagree. A vote that errors after its retry doesn't count; a verdict without two agreeing votes is None
+# (ungraded under the miss rule). Applied the same way in calibration and the gate, for both arms.
+
+MAX_VOTES = 3
+
+
+def vote_keys(kind, case, script):
+    """The keys each vote of a judge decides: one verdict, or one per item, gap or cited source."""
+    if kind == 'compare':
+        return list(ITEMS)
+    if kind == 'gaps':
+        return list(GAPS)
+    if kind == 'depth':
+        return sorted(f for f, role in script['depth_script']['cited'].items() if role in ('critique', 'competitor'))
+    if kind == 'open-questions':
+        return ['count']
+    return ['verdict']
+
+
+def vote_values(kind, verdict, reader=None):
+    """One judge reply as {key: value}; for the cold read, the comparator's verdicts on one reader's notes."""
+    if kind == 'compare':
+        return {item: verdict[item]['verdict'] for item in ITEMS}
+    if kind == 'gaps':
+        return {gap: verdict[gap]['verdict'] for gap in GAPS}
+    if kind == 'depth':
+        return {s['file']: s['described'] for s in verdict['sources']}
+    if kind == 'open-questions':
+        return {'count': len(verdict['questions'])}
+    return {'verdict': verdict['verdict']}
+
+
+def agreed(values):
+    return next((v for v in values if values.count(v) >= 2), None)
+
+
+def tally(kind, votes, keys):
+    """{key: decided value or None}. Open questions take the median count: two equal counts, or the middle of
+    three. Every other key needs two agreeing votes."""
+    result = {}
+    for key in keys:
+        values = [vote[key] for vote in votes if vote.get(key) is not None]
+        if kind == 'open-questions' and agreed(values) is None and len(values) >= 3:
+            result[key] = sorted(values)[len(values) // 2]
+        else:
+            result[key] = agreed(values)
+    return result
+
+
+def settled(kind, votes, keys):
+    """Whether more calls can't change the result: every key already has two agreeing votes."""
+    return all(agreed([vote[key] for vote in votes if vote.get(key) is not None]) is not None for key in keys)
+
+
 def final_grades(case, script, judged):
-    """Every grader's verdict for one document. A judge that didn't grade leaves its grader as None (ungraded)."""
+    """Every grader's verdict for one document from its tallied votes. A verdict the votes didn't settle is None
+    (ungraded), per item for the cold read and per gap."""
     key = case['key']
     grades = {'structure': script['structure']['passed'], 'outcome': script['outcome']['passed'],
               'outcome_value': script['outcome']['value']}
     compare = judged.get('compare')
-    grades['cold_read'] = ({item: compare[item]['verdict'] == 'PASS' for item in ITEMS} if compare else None)
+    grades['cold_read'] = (None if compare is None else
+                           {item: None if compare.get(item) is None else compare[item] == 'PASS' for item in ITEMS})
     if key['go']:
-        brief = judged.get('brief')
-        grades['brief'] = None if brief is None else brief['verdict'] == 'YES'
+        brief = (judged.get('brief') or {}).get('verdict')
+        grades['brief'] = None if brief is None else brief == 'YES'
     if script['outcome']['value'] in ('no', 'not now'):
-        questions = judged.get('open-questions')
-        grades['open_questions'] = None if questions is None else len(questions['questions'])
+        grades['open_questions'] = (judged.get('open-questions') or {}).get('count')
     if not script['depth_script']['passed']:
         grades['depth'] = False
     else:
@@ -366,12 +422,16 @@ def final_grades(case, script, judged):
         if depth is None:
             grades['depth'] = None
         else:
-            described = {s['file'] for s in depth['sources'] if s['described']}
-            roles = {script['depth_script']['cited'].get(f) for f in described}
-            grades['depth'] = 'critique' in roles and 'competitor' in roles
+            cited = script['depth_script']['cited']
+            states = []
+            for role in ('critique', 'competitor'):
+                values = [depth.get(f) for f, r in cited.items() if r == role]
+                states.append(True if True in values else None if None in values else False)
+            grades['depth'] = False if False in states else None if None in states else True
     if 'gaps' in key:
         gaps = judged.get('gaps')
-        grades['gaps'] = None if gaps is None else {gap: gaps[gap]['verdict'] == 'PASS' for gap in GAPS}
+        grades['gaps'] = (None if gaps is None else
+                          {gap: None if gaps.get(gap) is None else gaps[gap] == 'PASS' for gap in GAPS})
     return grades
 
 

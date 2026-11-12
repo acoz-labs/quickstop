@@ -23,7 +23,7 @@ Weak for short suites.
 | Principle | How they do it | How we do it | Fit |
 |---|---|---|---|
 | Run predicted tests only | per push | full suite every push | conflicts |
-| Nightly full run | yes | full run every push | already have |
+| Nightly full run | yes | not needed: the full suite runs on every push | doesn't apply |
 
 ## Why this decision
 
@@ -35,7 +35,7 @@ Little to gain, a paid tool, and the risk of missing a bug. Sharding (parallel-t
 
 ## What we're not taking, and why
 
-All of it, for now.
+All of it. Nothing is deferred: we'd look again only if CI passed 30 minutes.
 
 ## Sources
 
