@@ -284,9 +284,11 @@ head:
 1. `bin/ci` exits 0, showing skills-ref and `claude plugin validate --strict`
    results and the Writing for Humans exemption line. (Acceptance 1.)
 2. In a throwaway worktree, delete the `writing-for-humans` entry from
-   `skills-check.json` and run `bin/ci`: it exits non-zero with lint findings
-   and skills-ref failures for both Writing for Humans skills. Remove the
-   worktree after. (Acceptance 3.)
+   `skills-check.json` and run `bin/ci`: it exits non-zero. It stops at the
+   unit tests, whose exemption test reads the real `skills-check.json`, before
+   the skills step runs. Running `bin/check-skills` in the same worktree also
+   exits non-zero, with lint findings and skills-ref failures for both Writing
+   for Humans skills. Remove the worktree after. (Acceptance 3.)
 3. `grep -rin "claude code[- ]only\|claude code plugin marketplace"` over the
    repository, excluding `.git`, `docs/archive/`, `docs/changes/` and
    `plugins/writing-for-humans/`, returns nothing, including in the new files.
