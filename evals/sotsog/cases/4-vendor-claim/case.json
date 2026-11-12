@@ -1,0 +1,21 @@
+{
+  "title": "An impressive claim from a source with a stake and no measurements: AI test selection",
+  "idea": "running only the tests an AI predicts a change can affect",
+  "library": {
+    "test-selection-at-brightwater.md": "report",
+    "regression-test-selection-study.md": "report",
+    "the-hidden-cost-of-skipping-tests.md": "critique",
+    "parallel-test-sharding.md": "competitor",
+    "prescient-raises-series-b.md": "noise"
+  },
+  "terms": [
+    "Lanternhall",
+    "Tidewater",
+    "Coastline",
+    "Halvorsen",
+    "Prescient",
+    "Ashdown",
+    "Brightwater",
+    "Oyelaran"
+  ]
+}

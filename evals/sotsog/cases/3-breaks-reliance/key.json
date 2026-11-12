@@ -1,0 +1,20 @@
+{
+  "expected": [
+    "no"
+  ],
+  "go": false,
+  "items": {
+    "decided": {
+      "point": "No: keep required pre-merge review and do not move to pushing straight to main.",
+      "detail": "Faster review turnaround or smaller branches may be noted as worth borrowing."
+    },
+    "why": {
+      "point": "Dropping required, recorded pre-merge review would break the Halvorsen grant's condition that every change is reviewed by a second person with an auditable record, which pays for maintenance.",
+      "detail": "Grant agreement section 4.2; the approving review on each pull request is the record."
+    },
+    "next": {
+      "point": "Nothing changes in the workflow; the question reopens only if the grant's review condition changes or goes away.",
+      "detail": ""
+    }
+  }
+}
