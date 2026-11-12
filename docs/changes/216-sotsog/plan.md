@@ -163,17 +163,22 @@ Script graders, $0:
   reader serves both arms, and it reads only where a verdict is stated:
   1. The H1 decision line, when it matches the template (`# <idea>:
      <outcome> for <repo or workflow>`).
-  2. Otherwise the first decision label: a heading, or a bold or plain line,
-     whose text starts with Decision, Recommendation, Verdict or Conclusion.
+  2. Otherwise the first decision label: a line whose text starts with
+     Decision, Recommendation, Verdict or Conclusion and that is a heading,
+     starts in bold, or follows the label with a colon or dash ("Decision:
+     adopt"), so body text such as "Decision makers liked it" isn't a label.
      The verdict text is what follows the label on that line; when that holds
      no outcome (a bare heading such as `## Recommendation`), it's the first
      sentence of the next paragraph.
   3. Only the start of the verdict text counts, after skipping bold or italic
-     markers, punctuation and a lead-in ("we should", "I recommend",
-     "recommend", "my recommendation is"). There it maps through a fixed
-     table: "adopt" → adopt; "adapt", "adopt in part", "partially adopt" →
-     adapt; "not now", "defer", "later", "not yet" → not now; "no", "do not
-     adopt", "don't adopt", "not adopt", "reject", "decline" → no. Words
+     markers, punctuation and a lead-in ("we should", "I recommend", "we
+     recommend", "recommend", "my, our or the recommendation is", "the or
+     our decision is", "yes"). There it maps through a fixed table, matched
+     as whole words, longest entry first: "adopt", "adopting", "adopted" →
+     adopt; "adapt", "adapting", "adopt in part", "partially adopt" → adapt;
+     "not now", "not yet", "defer", "deferring", "later" → not now; "no",
+     "do not adopt", "don't adopt", "not adopt", "not adopting", "not
+     adopted", "reject", "decline" → no. Words
      later in the sentence are ignored, so "adopt, with no change to CI" is
      adopt, and "No: adopting would remove review" is no.
   4. No label, or a verdict start that matches nothing, is a miss.
@@ -201,10 +206,12 @@ each line names:
 - **Open questions** (the document only): lists the questions a cold reader
   would still need answered before accepting or acting on the decision,
   counting only questions whose answer the document should hold, not
-  curiosity. Scored on runs whose recorded outcome is no or not now.
-- **Depth, judge half** (the document and the role list of the case's
-  library, never the key): for each cited critique and competitor, does the
-  document state what it says, correctly? Depth passes when the script half
+  curiosity. Called and scored only on runs whose recorded outcome is no or
+  not now.
+- **Depth, judge half** (the document and the text and role of each cited
+  critique and competitor, never the key; called only when the script half
+  passes): for each, does the document state what it says, correctly? The
+  judge needs the source text to tell. Depth passes when the script half
   passes and the judge confirms at least one critique and one competitor.
 - **Case 4 gaps** (the document and the two gap items): PASS per gap when
   the document names it with its substance (who gains: the vendor's
@@ -240,7 +247,7 @@ each line names:
 | 1 Structure | 15/15 |
 | 2 Outcome | ≥ 14/15 and more than baseline |
 | 3 Cold read | ≥ 90% of 45 items (≥ 41) and more than baseline; brief yes in ≥ 5/6 go-case runs |
-| 4 Open questions | on its no and not now runs: median 0, none above 1 |
+| 4 Open questions | on its no and not now runs: median 0, none above 1 (no such run at all fails the bar) |
 | 5 Case 4 gaps | both gaps named in 3/3 runs |
 | 6 Case 5 | outcome in {adopt, adapt} in 3/3 runs |
 | 7 Depth | ≥ 14/15 |
@@ -378,7 +385,10 @@ would take projected spend past $14, I stop and report first.
   `case.json`, `key.json`, `research/`, `calibration/`), `graders.py`,
   `judges/*.md`.
 - `bin/sotsog-eval`: runner with `calibrate`, `run`, `grade`, `summarize`;
-  the ledger and stop line; `CANDIDATE.txt`.
+  the ledger and stop line; `CANDIDATE.txt`. A result folder holds one
+  `<case>-<arm>/` folder per case and arm (the gate's at
+  `/Users/alfred/factory/retained/quickstop-216/results/gate/`), each run in
+  `run-<n>/` with its `record.json` and `attempt-<n>/` evidence.
 - `tests/test_sotsog_eval.py`: script graders on all calibration samples,
   outcome-table attacker pass, document detection, miss rule, ledger stop
   line, summary completeness, freeze check, fixture-term overlap.
