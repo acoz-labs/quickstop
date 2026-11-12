@@ -34,7 +34,7 @@ There have been some issues with migrations, and this seems like good practice.
 
 ## Implementation brief
 
-Set up a migration linter and add timeouts as needed.
+Improve how we handle migrations.
 
 ## Sources
 

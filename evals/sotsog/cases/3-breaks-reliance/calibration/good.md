@@ -39,7 +39,7 @@ The gain is faster merges; the user's answers say slow reviews are annoying, not
 
 ## What we're not taking, and why
 
-Pushing to main and review after merge: they break the grant condition. Worth borrowing without changing the workflow: a target time for answering review requests, as Kestrel did.
+Pushing to main and review after merge: they break the grant condition. Nothing is borrowed in this decision. A target time for answering review requests, as Kestrel did, would fit our workflow; a maintainer can propose it as its own change.
 
 ## Sources
 

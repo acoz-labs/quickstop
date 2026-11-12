@@ -39,7 +39,7 @@ Gain: at most a minute or two per run. Cost: a paid tool we have no budget for, 
 
 ## What we're not taking, and why
 
-Test selection and the product: little to gain on a four-minute run and a real risk of missed failures. Nothing to borrow now.
+Test selection and the product: little to gain on a four-minute run and a real risk of missed failures. Running likely failures first is the one part worth keeping in mind, but on a two-minute test run it saves nothing, so nothing changes now.
 
 ## Sources
 
