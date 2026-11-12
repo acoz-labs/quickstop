@@ -102,8 +102,8 @@ Script graders, which cost nothing:
   library file, a `critique` and a `competitor`.
 
 Judges, all Sonnet 5.5. Each runs with no tools, with `--system-prompt`
-replacing Claude Code's, under its own `--max-budget-usd`, and is retried
-once:
+replacing Claude Code's, under its own `--max-budget-usd`, and a failed call is
+retried once:
 
 - **reader:** sees the document only, and writes down what was decided, why,
   and what happens next.
@@ -118,6 +118,14 @@ once:
   what each says.
 - **gaps** (case 4): sees the document and the two gaps, and decides whether
   each is named with its substance.
+
+Every judged verdict is decided by votes: a second call always, a third only
+when the first two disagree. Brief and gaps take the majority, open questions
+the median count, the cold read a majority per item over independent
+reader-then-comparator chains, and depth a majority per source. A vote that
+errors after its retry doesn't count, and a verdict without two agreeing
+votes is ungraded. Every vote, each grader's agreement rate and the calls per
+document are recorded in calibration and in each run.
 
 ## Calibration
 

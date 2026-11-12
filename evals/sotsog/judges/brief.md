@@ -6,7 +6,7 @@ Answer YES when the agent could start the work from the brief alone, because the
 - what is in scope and what is out;
 - the changes to make, in order, each naming the file, command or step it touches;
 - what done looks like (acceptance criteria);
-- how to tell afterwards whether the change worked: what to measure and when, once it's in use. Verifying the change itself, or rolling it back, is not this.
+- how to tell afterwards whether the change worked: what to measure and when, once it's in use. "No migration lock incident in the six months after it ships" is enough: it names what to measure and when, and needn't name an owner or a data source. Verifying the change itself, or rolling it back, is not this.
 
 Choices a capable agent makes routinely from the repository and common practice (exact syntax, flags, library versions, how to write a script the brief describes) don't make a brief incomplete. A step that needs someone outside the team is fine when the brief says who and what they do.
 

@@ -41,7 +41,7 @@ There's nothing to gain: every principle is already in place, and the maintainer
 
 ## What we're not taking, and why
 
-The practice as a whole.
+The practice as a whole. Some parts may be worth borrowing later.
 
 ## Sources
 

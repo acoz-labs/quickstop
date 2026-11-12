@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'bin/sotsog-eval'
@@ -280,13 +281,99 @@ class Depth(unittest.TestCase):
 
     def test_judge_must_confirm_both_roles(self):
         script = g.script_grades(GOOD, self.case)
-        both = {'sources': [{'file': 'fragment-fatigue.md', 'described': True, 'reason': ''},
-                            {'file': 'conventional-commits-changelogs.md', 'described': True, 'reason': ''}]}
-        one = {'sources': [{'file': 'fragment-fatigue.md', 'described': True, 'reason': ''},
-                           {'file': 'conventional-commits-changelogs.md', 'described': False, 'reason': ''}]}
+        both = {'fragment-fatigue.md': True, 'conventional-commits-changelogs.md': True}
+        one = {'fragment-fatigue.md': True, 'conventional-commits-changelogs.md': False}
+        unsettled = {'fragment-fatigue.md': True, 'conventional-commits-changelogs.md': None}
         self.assertTrue(g.final_grades(self.case, script, {'depth': both})['depth'])
         self.assertFalse(g.final_grades(self.case, script, {'depth': one})['depth'])
+        self.assertIsNone(g.final_grades(self.case, script, {'depth': unsettled})['depth'])
         self.assertIsNone(g.final_grades(self.case, script, {})['depth'])
+
+
+class Votes(unittest.TestCase):
+    def test_two_agreeing_votes_settle_and_decide(self):
+        keys = ['verdict']
+        self.assertFalse(g.settled('brief', [{'verdict': 'YES'}], keys))
+        self.assertTrue(g.settled('brief', [{'verdict': 'YES'}, {'verdict': 'YES'}], keys))
+        self.assertFalse(g.settled('brief', [{'verdict': 'YES'}, {'verdict': 'NO'}], keys))
+        self.assertEqual(g.tally('brief', [{'verdict': 'YES'}, {'verdict': 'NO'}, {'verdict': 'NO'}], keys),
+                         {'verdict': 'NO'})
+        self.assertEqual(g.tally('brief', [{'verdict': 'YES'}, {'verdict': 'NO'}], keys), {'verdict': None})
+
+    def test_items_are_decided_separately(self):
+        votes = [{'decided': 'PASS', 'why': 'PASS', 'next': 'FAIL'},
+                 {'decided': 'PASS', 'why': 'FAIL', 'next': 'FAIL'},
+                 {'decided': 'PASS', 'why': 'PASS', 'next': 'PASS'}]
+        self.assertFalse(g.settled('compare', votes[:2], list(g.ITEMS)))
+        self.assertEqual(g.tally('compare', votes, list(g.ITEMS)), {'decided': 'PASS', 'why': 'PASS', 'next': 'FAIL'})
+
+    def test_open_questions_take_the_median(self):
+        keys = ['count']
+        self.assertEqual(g.tally('open-questions', [{'count': 2}, {'count': 2}], keys), {'count': 2})
+        self.assertEqual(g.tally('open-questions', [{'count': 0}, {'count': 3}, {'count': 1}], keys), {'count': 1})
+        self.assertEqual(g.tally('open-questions', [{'count': 0}, {'count': 3}], keys), {'count': None})
+
+    def test_unsettled_verdicts_are_ungraded(self):
+        case = CASES['4-vendor-claim']
+        script = g.script_grades((case['dir'] / 'calibration/good.md').read_text(), case)
+        grades = g.final_grades(case, script, {'compare': {'decided': 'PASS', 'why': None, 'next': 'FAIL'},
+                                               'gaps': {'who_gains': 'PASS', 'baseline': None},
+                                               'open-questions': {'count': None}})
+        self.assertEqual(grades['cold_read'], {'decided': True, 'why': None, 'next': False})
+        self.assertEqual(grades['gaps'], {'who_gains': True, 'baseline': None})
+        self.assertIsNone(grades['open_questions'])
+
+    def run_votes(self, replies, case_name='2-real-gap'):
+        """Run judge_document with canned replies per kind; returns (judged, records, calls made)."""
+        case = CASES[case_name]
+        document = (case['dir'] / 'calibration/good.md').read_text()
+        script = g.script_grades(document, case)
+        made = []
+
+        def fake(kind, prompt, model, ledger, cap, path, who, suite=g.SUITE):
+            made.append(kind)
+            queue = replies[kind]
+            reply = queue.pop(0) if len(queue) > 1 else queue[0]
+            return (reply, None) if reply is not None else (None, 'error')
+        with unittest.mock.patch.object(e, 'run_judge', fake), tempfile.TemporaryDirectory() as tmp:
+            judged, records, _ = e.judge_document(document, case, script, 'm', None, 0.1, Path(tmp), ('', '', ''))
+        return judged, records, made
+
+    def compare(self, d, w, n):
+        return {'decided': {'verdict': d, 'reason': ''}, 'why': {'verdict': w, 'reason': ''},
+                'next': {'verdict': n, 'reason': ''}}
+
+    def test_early_stop_and_third_call_only_on_disagreement(self):
+        notes = {'decided': 'a', 'why': 'b', 'next': 'c'}
+        source = lambda d: {'sources': [{'file': f, 'described': d, 'reason': ''} for f in
+                                        ('rehearsals-are-a-privacy-risk.md', 'online-schema-change-tools.md')]}
+        judged, records, made = self.run_votes({
+            'reader': [notes],
+            'compare': [self.compare('PASS', 'PASS', 'PASS'), self.compare('PASS', 'FAIL', 'PASS'),
+                        self.compare('PASS', 'PASS', 'PASS')],
+            'brief': [{'verdict': 'YES', 'reasons': ''}],
+            'depth': [source(True)],
+        })
+        self.assertEqual(made.count('brief'), 2)
+        self.assertEqual(made.count('depth'), 2)
+        self.assertEqual(made.count('compare'), 3)
+        self.assertEqual(made.count('reader'), 3)
+        self.assertEqual(records['compare']['calls'], 6)
+        self.assertFalse(records['compare']['first_two_agree'])
+        self.assertTrue(records['brief']['first_two_agree'])
+        self.assertEqual(judged['compare'], {'decided': 'PASS', 'why': 'PASS', 'next': 'PASS'})
+
+    def test_errored_votes_dont_count(self):
+        judged, records, made = self.run_votes({
+            'reader': [{'decided': 'a', 'why': 'b', 'next': 'c'}],
+            'compare': [self.compare('PASS', 'PASS', 'PASS')],
+            'brief': [None, {'verdict': 'YES', 'reasons': ''}, {'verdict': 'NO', 'reasons': ''}],
+            'depth': [None],
+        })
+        self.assertEqual(made.count('brief'), 3)
+        self.assertEqual(judged['brief'], {'verdict': None})
+        self.assertNotIn('depth', judged)
+        self.assertEqual(records['depth']['votes'], [])
 
 
 class Judges(unittest.TestCase):
