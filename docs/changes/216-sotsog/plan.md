@@ -304,7 +304,8 @@ Cost and time per run are reported for both arms, not gated.
   reason that isn't the key's (cold-read why), and two holes within the
   borrowing point (open questions). Case 4: "who gains" named with
   substance but the baseline only gestured at (gaps), and two vague triggers
-  (open questions). Case 5: the critique misstated and the competitor only
+  (open questions, and cold-read next, whose key point names the reopen
+  trigger). Case 5: the critique misstated and the competitor only
   named (depth), and "how to tell it worked" missing (brief).
 - `plain`: shaped like a baseline document, not the template: free headings,
   no comparison table in the template's columns, and the verdict stated a
