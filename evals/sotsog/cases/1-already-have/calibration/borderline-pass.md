@@ -33,11 +33,11 @@ Every principle is already in place and the notes have no known problem. The cas
 
 ## Revisit when
 
-- Fragments become box-ticking in review.
+- Fragments like "misc fixes" turn up in a release.
 
 ## What we're not taking, and why
 
-Nothing; we already have it.
+Nothing new to borrow; we already have every part.
 
 ## Sources
 

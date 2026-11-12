@@ -31,7 +31,7 @@ Nothing we rely on is weakened.
 
 ## Why this decision
 
-Gains: the two 2026 incidents (an 11-minute lock from a plain index build, a 6-minute lock from a type change) are exactly what a linter flags. Costs: a few days of setup and a little upkeep, within the six hours a week we have. The case against: a lint can't see slow data changes, and an online schema change tool (Lars Pettersen's alternative) would handle rewrites automatically. But that tool needs extra disk and someone to own it, which we don't have. We adapt rather than adopt because patron data can't leave the production network, so rehearsals use synthetic data.
+Gains: the two 2026 incidents (an 11-minute lock from a plain index build, a 6-minute lock from a type change) are exactly what a linter flags, and nothing checks migrations today, because tests run them on an empty database. Costs: a few days of setup and a little upkeep, within the six hours a week we have. The case against: a lint can't see slow data changes, and an online schema change tool (Lars Pettersen's alternative) would handle rewrites automatically. But that tool needs extra disk and someone to own it, which we don't have. We adapt rather than adopt because patron data can't leave the production network, so rehearsals use synthetic data.
 
 ## Revisit when
 

@@ -49,13 +49,13 @@ Coastline's procurement policy requires signed releases with provenance from 1 M
 **Changes, in order:**
 
 1. Add `.github/workflows/release.yml`, triggered by a `v*` tag, which builds the tarball and wheel the way `bin/release` does today.
-2. In that workflow, sign both files with keyless signing and record the signatures in the public transparency log.
-3. Generate and sign a provenance statement for both files in the same workflow, and attach files, signatures, provenance and `SHA256SUMS` to the release page.
+2. In that workflow, sign both files with Sigstore's `cosign sign-blob` in keyless mode (the job needs the `id-token: write` permission), which records the signatures in Sigstore's public transparency log.
+3. Generate signed build provenance for both files with GitHub's `actions/attest-build-provenance`, generate `SHA256SUMS` in the workflow, and attach the files, signatures, provenance and `SHA256SUMS` to the release page.
 4. Change `bin/release` to only compile `changes/`, commit and tag; the build moves to CI.
-5. Update docs/releases.md with the new steps and the one command to verify a release.
-6. Cut a test release and have Coastline's IT team verify it.
+5. Update docs/releases.md with the new steps and the verify commands: `cosign verify-blob` with the repository's workflow as the certificate identity, and `gh attestation verify` for the provenance.
+6. Cut a test release from a `v0.0.0-test` tag and send it to Coastline's IT team to verify with those commands; delete the test release afterwards.
 
-**Acceptance criteria:** a tagged test release in CI produces signed files and provenance; the documented command verifies them; Coastline confirms its verification passes.
+**Acceptance criteria:** the test tag produces signed files, provenance and `SHA256SUMS` on its release page; both documented commands succeed on them; Coastline's IT team confirms the same.
 
 **How to tell it worked:** Coastline verifies the March 2027 release without a manual exception, and the next three releases ship on schedule.
 

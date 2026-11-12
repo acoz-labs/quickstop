@@ -33,7 +33,7 @@ Nothing we do now would be removed or weakened.
 
 ## Why this decision
 
-There's nothing to gain: every principle is already in place, and the user's answers say the release notes have no known problem. The strongest case for doing something is the critique: fragments can decay into box-ticking. But our two-person review reads every pull request, fragment included, and the check already exempts docs-only and test-only changes, which is the skip rule the critique recommends. Generating notes from commit messages (Mei Tanaka's alternative) would make notes more technical, which the survey found is the common complaint.
+There's nothing to gain: every principle is already in place, and the maintainers know of no problem with the release notes. The strongest case for doing something is the critique: fragments can decay into box-ticking. But our two-person review reads every pull request, fragment included, and the check already exempts docs-only and test-only changes, which is the skip rule the critique recommends. Generating notes from commit messages (Mei Tanaka's alternative) would make notes more technical, which the survey found is the common complaint.
 
 ## Revisit when
 
