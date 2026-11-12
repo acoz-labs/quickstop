@@ -22,17 +22,36 @@ SKEPTICAL_LABELS = {
     'independent support': ('independent support',),
 }
 TABLE_HEADER = ['principle', 'how they do it', 'how we do it', 'fit']
-DECISION_LABELS = ('decision', 'recommendation', 'verdict', 'conclusion')
-LEAD_INS = ('my recommendation is', 'the recommendation is', 'our recommendation is', 'the decision is',
-            'our decision is', 'we recommend', 'i recommend', 'we should', 'recommend', 'yes')
+DECISION_LABELS = ('decision', 'recommendation', 'verdict', 'conclusion', 'tl;dr', 'tldr', 'bottom line',
+                   'summary', 'short answer')
+# Lead-ins skipped before a verdict, tried in order and repeatedly: "My recommendation is to", "I'd recommend",
+# "We'll", "<Name> should". A subject that starts with a negative or a hedge ("nobody should adopt", "maybe we
+# should adopt") is never skipped, so the verdict stays unread.
+SUBJECT = (r"(?!(?:no|nobody|no one|none|neither|never|maybe|perhaps|possibly|probably|might|could|unclear|"
+           r"unsure|if|whether)\b)(?:[\w'.-]+ ){0,3}?")
+LEAD_INS = (
+    r"(?:my|our|the) (?:recommendation|decision|verdict|answer) is(?: to| that we| that)?",
+    r"(?:i|we)(?: would|'d| will|'ll)? (?:recommend|suggest|propose)(?: that we| that| we)?",
+    r"recommend(?:ed)?",
+    r"(?:we|i)(?: should| will|'ll| would|'d| can| must)?",
+    SUBJECT + r"[\w'.-]+ should",
+    r"yes",
+    r"to",
+)
+# A negated modal after a subject ("We won't adopt", "The team shouldn't adopt") reads as "not ...".
+NEGATED = re.compile(SUBJECT + r"(?:[\w'.-]+ )?(?:should not|shouldn't|will not|won't|would not|wouldn't|"
+                     r"do not|don't|does not|doesn't|cannot|can't)\s+")
 # Verdict phrases, matched as whole words at the start of the verdict, longest first, so "not now" is never
 # read as "no" and "adopt in part" never as "adopt".
 VERDICT_PHRASES = {
-    'adopt in part': 'adapt', 'partially adopt': 'adapt', 'adapt': 'adapt',
-    'not now': 'not now', 'not yet': 'not now', 'defer': 'not now', 'later': 'not now',
-    'do not adopt': 'no', "don't adopt": 'no', 'not adopt': 'no', 'not adopting': 'no', 'reject': 'no',
-    'decline': 'no', 'not adopted': 'no', 'no': 'no',
-    'adopt': 'adopt', 'adopting': 'adopt', 'adopted': 'adopt', 'adapting': 'adapt', 'deferring': 'not now',
+    'adopt in part': 'adapt', 'partially adopt': 'adapt', 'adopt partially': 'adapt', 'adopt, partially': 'adapt',
+    'adopt with changes': 'adapt', 'adapt': 'adapt', 'adapting': 'adapt',
+    'not now': 'not now', 'not yet': 'not now', 'not at this time': 'not now', 'not right now': 'not now',
+    'hold off': 'not now', 'wait': 'not now', 'defer': 'not now', 'deferring': 'not now', 'postpone': 'not now',
+    'later': 'not now',
+    'do not adopt': 'no', "don't adopt": 'no', 'not adopt': 'no', 'not adopting': 'no', 'not adopted': 'no',
+    'reject': 'no', 'decline': 'no', 'no': 'no',
+    'adopt': 'adopt', 'adopting': 'adopt', 'adopted': 'adopt',
 }
 DATE = re.compile(r'\b\d{4}-\d{2}-\d{2}\b')
 HEADING = re.compile(r'^(#{1,6})\s+(.*?)\s*#*\s*$')
@@ -90,9 +109,14 @@ def verdict_outcome(text):
     rest = normalize(plain(text))
     while True:
         rest = rest.lstrip(' :.-,;!()[]"\'')
+        negated = NEGATED.match(rest)
+        if negated and not rest.startswith(('do not adopt', "don't adopt")):
+            rest = 'not ' + rest[negated.end():]
+            continue
         for lead in LEAD_INS:
-            if re.match(rf'{re.escape(lead)}\b', rest):
-                rest = rest[len(lead):]
+            match = re.match(rf"(?:{lead})(?![\w'])", rest)
+            if match and match.end():
+                rest = rest[match.end():]
                 break
         else:
             break
@@ -110,7 +134,7 @@ def decision_label(line):
     bold = re.match(r'^\s*(\*\*|__)', body) is not None
     text = normalize(plain(body))
     for label in DECISION_LABELS:
-        if not re.match(rf'{label}\b', text):
+        if not re.match(rf'{re.escape(label)}(?![\w])', text):
             continue
         rest = text[len(label):]
         if is_heading or bold or re.match(r'\s*[:-]', rest):
@@ -125,15 +149,25 @@ def first_sentence(paragraph):
 
 
 def outcome(document):
-    """(outcome or None, where it was read, the text read). Same reader for both arms."""
+    """(outcome or None, where it was read, the text read). Same reader for both arms.
+
+    In order: the template's H1 decision line; a verdict after the colon of any other H1; then each decision
+    label in turn, reading the label's own line and, when that holds no verdict, the first sentence of the next
+    paragraph. The first verdict found wins; a label with no verdict doesn't stop the search."""
     lines = fenced_free(document)
     h1 = next((line for line in lines if re.match(r'^#\s', line)), None)
     if h1 and (m := TEMPLATE_H1.match(plain(h1).strip())):
         return normalize(m.group('outcome')), 'h1', h1.strip()
+    if h1 and ':' in h1 and not decision_label(h1)[0]:
+        found = verdict_outcome(h1.split(':', 1)[1])
+        if found:
+            return found, 'h1 verdict', h1.strip()
+    first_label = ''
     for i, line in enumerate(lines):
         label, rest = decision_label(line)
         if not label:
             continue
+        first_label = first_label or line.strip()
         found = verdict_outcome(rest)
         if found:
             return found, 'label', line.strip()
@@ -144,8 +178,10 @@ def outcome(document):
             paragraph.append(LIST_ITEM.sub('', lines[j]))
             j += 1
         sentence = first_sentence(paragraph)
-        return verdict_outcome(sentence), 'next paragraph', sentence
-    return None, 'none', ''
+        found = verdict_outcome(sentence)
+        if found:
+            return found, 'next paragraph', sentence
+    return None, 'none', first_label
 
 
 # Structure.

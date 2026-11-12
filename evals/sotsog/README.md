@@ -80,13 +80,22 @@ Script graders, which cost nothing:
   shows` with all five skeptical-read labels, `## Implementation brief` on
   adopt or adapt and never otherwise, and `## Sources` with a date in every
   item.
-- **Outcome:** the H1 decision line, or else the first decision label
-  (Decision, Recommendation, Verdict or Conclusion, in a heading, in bold, or
-  followed by a colon or dash). When the label carries no verdict, the
-  outcome is read from the first sentence of the next paragraph. Only the
-  verdict's opening words count. They're matched as whole words, longest
-  entry first, against a fixed table, so "not now" is never read as "no" and
-  "adopt in part" is never read as "adopt".
+- **Outcome:** the H1 decision line, or a verdict right after the colon of
+  any other H1, or else each decision label in turn. A decision label is a
+  line starting with Decision, Recommendation, Verdict, Conclusion, TL;DR,
+  Bottom line, Summary or Short answer that is a heading, starts in bold, or
+  has a colon or dash after the label. The verdict is read from the label's
+  own line, or else from the first sentence of the next paragraph. A label
+  with no verdict doesn't stop the search.
+  - Only the verdict's opening words count, after lead-ins such as "we'll",
+    "I'd recommend" or "<Name> should".
+  - A negated modal ("won't", "shouldn't") reads as "not".
+  - A negative or hedged subject ("nobody", "maybe") keeps the verdict
+    unread.
+  - Phrases are matched as whole words, longest entry first, so "not now" is
+    never read as "no" and "adopt in part" never as "adopt".
+
+  The tests include real verdict lines from the baseline screen.
 - **Depth, script half:** the document cites, by file name or exact title, a
   library file, a `critique` and a `competitor`.
 
@@ -116,7 +125,9 @@ from a run:
 - `good` passes every grader.
 - `bad` fails every grader that applies.
 - `borderline-pass` is thin but complete.
-- `borderline-fail` has the template's shape but lacks the substance.
+- `borderline-fail` is the good sample with exactly one defect for each
+  grader it targets, so it sits just below the bar. Every other grader is
+  expected to pass.
 - `plain` is shaped like a baseline document, with a different verdict shape
   in each case.
 

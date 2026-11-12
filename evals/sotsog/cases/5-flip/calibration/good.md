@@ -18,7 +18,7 @@ Sound, with a caveat: it only protects consumers who verify.
 - **Whose conditions:** a library with about 2 million downloads a month, far more consumers than our two deployers.
 - **Independent support:** the Open Supply Chain Observatory found almost nobody verifies signatures for packages with fewer than about 50 consumers. Ridgeway Energy's notes: three days to set up, a day a quarter to keep working, justified because their security team verifies every deploy. Hannah Osei's critique ("signing theatre") says signing without anyone verifying adds upkeep and protects nobody.
 
-On evidence alone, our answer would be "not now": one outside deployer, and nobody verifying. The user's answers change that.
+On evidence alone, our answer would be "not now": one outside deployer, and nobody verifying. Coastline's new requirement changes that.
 
 ## How it compares with what we do
 

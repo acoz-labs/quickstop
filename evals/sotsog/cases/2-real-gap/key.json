@@ -14,8 +14,8 @@
       "detail": "Independent reports found most migration outages come from statements a static check flags."
     },
     "next": {
-      "point": "The work is handed on: add a migration lint and a lock timeout to the checks (bin/check or CI) so a lock-taking migration fails before it is deployed.",
-      "detail": "With a way to tell whether it worked, such as no more migration-caused lock incidents."
+      "point": "The work is handed on: run a migration lint and a lock-timeout check as part of the checks every change passes before deploy (bin/check or CI), so a lock-taking migration fails before it reaches production.",
+      "detail": "With a way to tell whether it worked, such as no more migration-caused lock incidents. Naming the lint and the timeout without saying where they run does not carry the point."
     }
   }
 }

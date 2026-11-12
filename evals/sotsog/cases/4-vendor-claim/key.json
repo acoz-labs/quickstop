@@ -11,7 +11,7 @@
       "detail": "'No', 'not now' or a small 'adapt' are all right."
     },
     "why": {
-      "point": "There's little to gain on a four-minute CI run, and the big saving rests only on the vendor's own unmeasured claim; independent studies found small savings and missed failures for short suites.",
+      "point": "There's little to gain on a four-minute CI run, and the big saving comes only from the vendor selling the tool; independent studies found small savings and missed failures for short suites.",
       "detail": "A replication study found suites under 10 minutes saved under 2 minutes a run; a team with a two-hour suite measured 41%, not 90%."
     },
     "next": {

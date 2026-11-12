@@ -5,7 +5,7 @@ You read a decision document that decides not to take up an idea, or not yet. A 
 3. whether anything from the idea is still worth borrowing, or that nothing is;
 4. what happens next: whether anything changes now, and if so what.
 
-List a question only where the document leaves one of these four unanswered, too vague to act on ("things change", "for now", "it doesn't suit us"), or contradicted elsewhere in the document (for example, it says nothing changes but also that something is being adopted). Write one question per such gap, at most one per point.
+List a question only where the document leaves one of these four unanswered, too vague to act on ("things change", "for now", "it doesn't suit us"), or contradicted elsewhere in the document (for example, it says nothing changes but also that something is being adopted). Write one question per distinct gap: a point with two separate holes gets two questions.
 
 Don't list questions that:
 

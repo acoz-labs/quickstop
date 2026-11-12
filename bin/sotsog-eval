@@ -319,7 +319,7 @@ def grade(document, case, judges, model=None, ledger=None, cap=None, directory=N
     if judges:
         judged, errors = judge_document(document, case, script, model, ledger, cap, directory, who)
     return {'script': script, 'judged': judged, 'judge_errors': errors,
-            'grades': g.final_grades(case, script, judged) if judges else None}
+            'grades': g.final_grades(case, script, judged)}
 
 
 # Evidence and guards.
@@ -432,8 +432,7 @@ def calibrate(args):
         graded = grade(document, case, args.judges, args.judge_model, ledger, args.judge_max_usd,
                        directory, ('calibration', name, sample))
         expected = load_expected(case)[sample]
-        grades = graded['grades'] or {'structure': graded['script']['structure']['passed'],
-                                      'outcome': graded['script']['outcome']['passed']}
+        grades = graded['grades']
         rows = g.calibration_rows(case, sample, expected, grades, graded['script'], args.judges)
         if directory:
             directory.mkdir(parents=True, exist_ok=True)
