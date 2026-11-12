@@ -3,7 +3,7 @@
 This contract covers installable plugins. Read-and-adapt guides follow the
 [workflow contribution guide](workflows.md) and stay out of native indexes.
 
-Quickstop is a Claude Code plugin marketplace. It separates candidate authoring
+Quickstop is acoz-labs' marketplace of agent plugins and skills. It separates candidate authoring
 from the accepted native distribution index. The `quickstop` identity stays
 stable.
 

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "skills_ref": {
+    "repository": "https://github.com/agentskills/agentskills",
+    "commit": "83021e2be457a9b6679148719c1f6074f0ad975e",
+    "folder": "skills-ref",
+    "tree": "dc2d22177c5491d688ab4efc9833a622b97822ea",
+    "wheels": [
+      {
+        "url": "https://files.pythonhosted.org/packages/98/78/01c019cdb5d6498122777c1a43056ebb3ebfeef2076d9d026bfe15583b2b/click-8.3.1-py3-none-any.whl",
+        "sha256": "981153a64e25f12d547d3426c367a4857371575ee7ad18df2a6183ab0545b2a6"
+      },
+      {
+        "url": "https://files.pythonhosted.org/packages/96/7c/a81ef5ef10978dd073a854e0fa93b5d8021d0594b639cc8f6453c3c78a1d/strictyaml-1.7.3-py3-none-any.whl",
+        "sha256": "fb5c8a4edb43bebb765959e420f9b3978d7f1af88c80606c03fb420888f5d1c7"
+      },
+      {
+        "url": "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+        "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"
+      },
+      {
+        "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
+        "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+      }
+    ]
+  },
+  "claude_code_only": {
+    "writing-for-humans": "Its core is an output style, and its skills use frontmatter fields and plugin variables only Claude Code supports."
+  }
+}

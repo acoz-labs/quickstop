@@ -2,7 +2,7 @@
   "schema": 1,
   "name": "quickstop",
   "display_name": "Acoz Labs",
-  "description": "The acoz-labs marketplace of Claude Code plugins.",
+  "description": "The acoz-labs marketplace of agent plugins and skills.",
   "plugins": [
     {
       "name": "claudit",

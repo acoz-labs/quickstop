@@ -1,8 +1,17 @@
 # Plugin development
 
-Start from an assigned outcome and the shared SDLC. Plugins target Claude Code.
-Follow the [catalog and package contract](marketplace.md) for the native format
-and the `plugins/<name>/` layout.
+Start from an assigned outcome and the shared SDLC. Plugins install through
+Claude Code's plugin format. Follow the [catalog and package contract](marketplace.md)
+for the native format and the `plugins/<name>/` layout.
+
+New skills follow the [Agent Skills spec](https://agentskills.io/specification),
+so they work in any agent tool that reads skills. `bin/ci` fails a skill that
+uses features only Claude Code supports: frontmatter fields outside the spec,
+argument placeholders such as `$ARGUMENTS`, inline shell commands, `CLAUDE_*`
+plugin variables, Claude Code tool names, output styles or hooks. A plugin that
+needs those features on purpose is named, with the reason, under
+`claude_code_only` in `skills-check.json`; never change a package to dodge the
+check.
 
 Choose a lowercase kebab-case plugin name and refuse to overwrite an existing
 package when creating a new one. Keep components at the native package root,

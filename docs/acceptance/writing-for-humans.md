@@ -1,6 +1,6 @@
 # Writing for Humans acceptance
 
-The historical conversion procedure below applies to the Claude Code-only conversion of the original shared kit in issue129. The cross-platform experiment and its v1/v2/v3 research protocols are archived; their failed outcomes remain historical failures. This is a conversion and distribution check, not a claim of general superiority over modern models.
+The historical conversion procedure below applies to the conversion of the original shared kit to Claude Code in issue129. The cross-platform experiment and its v1/v2/v3 research protocols are archived; their failed outcomes remain historical failures. This is a conversion and distribution check, not a claim of general superiority over modern models.
 
 ## Bounded follow-up releases
 

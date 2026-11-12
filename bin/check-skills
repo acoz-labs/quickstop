@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Check plugin skills against the Agent Skills spec.
+
+Three checks, each on every plugin unless skills-check.json exempts it:
+a lint for features only Claude Code supports, the pinned skills-ref
+validator, and `claude plugin validate --strict` (which also runs on exempt
+plugins, because it is Claude Code's own validator).
+"""
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+
+SPEC_FIELDS = ('name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools')
+SKIP_SKILLS_REF = 'QUICKSTOP_SKIP_SKILLS_REF'
+SKIP_CLAUDE_VALIDATE = 'QUICKSTOP_SKIP_CLAUDE_VALIDATE'
+FIXTURES = Path('tests/fixtures/skills')
+
+SINGLE_TOOLS = ('Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Task', 'Agent', 'Skill', 'LS')
+# Tool names that are never English words, so they count anywhere.
+MULTI_TOOLS = ('AskUserQuestion', 'WebFetch', 'WebSearch', 'TodoWrite', 'NotebookEdit', 'MultiEdit',
+               'ExitPlanMode', 'BashOutput', 'KillShell', 'SlashCommand')
+TOOLS = '|'.join(SINGLE_TOOLS + MULTI_TOOLS)
+# Stop and Notification are hook events too, but they are also English words.
+HOOK_EVENTS = ('PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'SessionStart',
+               'SessionEnd', 'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest')
+
+# Each body rule: name, patterns, why only Claude Code supports it, and the portable fix.
+BODY_RULES = (
+    ('argument-substitution',
+     (r'\$\{?ARGUMENTS\b', r'(?<![\w$\\])\$[0-9](?![0-9]|[.,][0-9])'),
+     'Claude Code replaces it with the arguments the skill was invoked with; other agents show it literally',
+     'describe the input in words, such as "the file the user names"'),
+    ('shell-injection',
+     (r'!`[^`\n]+`', r'^\s*(?:```|~~~)!'),
+     'Claude Code runs the command and pastes its output before the agent reads the skill; other agents do not',
+     'tell the agent which command to run and why'),
+    ('plugin-variable',
+     (r'\$\{?CLAUDE_[A-Z0-9_]+\}?',),
+     'only Claude Code sets this variable',
+     'use a path relative to the skill folder, such as references/guide.md'),
+    ('tool-name',
+     (rf'\b(?:{TOOLS})\(', rf'`\s*(?:{TOOLS})\s*`', rf'\b(?:{TOOLS}) tools?\b', rf'\b(?:{"|".join(MULTI_TOOLS)})\b'),
+     'it names a Claude Code tool; other agents name their tools differently',
+     'say the action in plain words, such as "read the file" or "ask the user"'),
+    ('output-style',
+     (r'(?i)\boutput-styles?\b', r'\boutputStyle\b', r'`[^`\n]+`\s+output style\b'),
+     'output styles are a Claude Code feature',
+     'put the guidance in the skill or its references'),
+    ('hook',
+     (rf'\b(?:{"|".join(HOOK_EVENTS)})\b', r'\bhooks\.json\b', r'"hooks"\s*:'),
+     'hooks are a Claude Code feature',
+     'state the rule as an instruction, or keep the hook in a plugin exempted in skills-check.json'),
+)
+COMPILED = tuple((name, tuple(re.compile(p) for p in patterns), why, fix)
+                 for name, patterns, why, fix in BODY_RULES)
+FRONTMATTER_KEY = re.compile(r'^([A-Za-z0-9_][\w-]*)\s*:')
+
+
+class Invalid(ValueError):
+    pass
+
+
+def lint_text(text):
+    """Return (line, rule, message) for each feature only Claude Code supports, one per rule per line."""
+    lines = text.splitlines()
+    findings = []
+    body_start = 0
+    if lines and lines[0].strip() == '---':
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == '---'), None)
+        if end is not None:
+            body_start = end + 1
+            for number in range(1, end):
+                match = FRONTMATTER_KEY.match(lines[number])
+                if match and match.group(1) not in SPEC_FIELDS:
+                    findings.append((number + 1, 'frontmatter-field',
+                                     f"'{match.group(1)}' is not an Agent Skills field; only Claude Code reads it. "
+                                     f"Fix: remove it, or put tool-specific data under metadata"))
+    for number in range(body_start, len(lines)):
+        for name, patterns, why, fix in COMPILED:
+            for pattern in patterns:
+                match = pattern.search(lines[number])
+                if match:
+                    findings.append((number + 1, name, f"'{match.group(0).strip()}': {why}. Fix: {fix}"))
+                    break
+    return findings
+
+
+def read_json(path):
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise Invalid(f'{path.name}: invalid or missing JSON: {exc}') from exc
+    if not isinstance(value, dict):
+        raise Invalid(f'{path.name}: expected a JSON object')
+    return value
+
+
+def load(root):
+    """Return the skills-check config and the catalog's plugin paths by name."""
+    config = read_json(root / 'skills-check.json')
+    if config.get('schema') != 1:
+        raise Invalid('skills-check.json: schema must be 1')
+    pin = config.get('skills_ref')
+    if not isinstance(pin, dict) or not all(isinstance(pin.get(k), str) and pin[k]
+                                            for k in ('repository', 'commit', 'folder', 'tree')):
+        raise Invalid('skills-check.json: skills_ref needs repository, commit, folder and tree')
+    wheels = pin.get('wheels')
+    if not isinstance(wheels, list) or not wheels or not all(
+            isinstance(w, dict) and isinstance(w.get('url'), str) and re.fullmatch(r'[0-9a-f]{64}', str(w.get('sha256')))
+            for w in wheels):
+        raise Invalid('skills-check.json: skills_ref.wheels needs a url and sha256 for each wheel')
+    plugins = {p['name']: root / p['targets']['claude-code']['path'] for p in read_json(root / 'catalog.json')['plugins']}
+    exempt = config.get('claude_code_only')
+    if not isinstance(exempt, dict):
+        raise Invalid('skills-check.json: claude_code_only must be an object')
+    for name, reason in exempt.items():
+        if name not in plugins:
+            raise Invalid(f"skills-check.json: exempt plugin '{name}' is not in catalog.json; remove the stale exemption")
+        if not isinstance(reason, str) or not reason.strip():
+            raise Invalid(f"skills-check.json: exempt plugin '{name}' needs a reason")
+    return config, plugins
+
+
+def skill_dirs(root, exempt_paths):
+    return [d for d in sorted((root / 'plugins').glob('*/skills/*'))
+            if d.is_dir() and d.parent.parent not in exempt_paths]
+
+
+def tree_hash(path):
+    """Git's tree hash of a folder, so the cache can be checked against the pinned tree."""
+    entries = []
+    for child in path.iterdir():
+        if child.is_symlink():
+            mode, digest = b'120000', git_object(b'blob', os.readlink(child).encode())
+        elif child.is_dir():
+            mode, digest = b'40000', tree_hash(child)
+        else:
+            mode = b'100755' if os.access(child, os.X_OK) else b'100644'
+            digest = git_object(b'blob', child.read_bytes())
+        # Git sorts trees as if their names ended in '/'.
+        key = child.name.encode() + (b'/' if mode == b'40000' else b'')
+        entries.append((key, mode + b' ' + child.name.encode() + b'\0' + bytes.fromhex(digest)))
+    return git_object(b'tree', b''.join(entry for _, entry in sorted(entries)))
+
+
+def git_object(kind, data):
+    return hashlib.sha1(kind + b' ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+
+
+def wheel_name(wheel):
+    return wheel['url'].rsplit('/', 1)[-1]
+
+
+def verify(folder, pin):
+    """Raise unless the cached folder matches every pin held in the repository."""
+    source = folder / pin['folder']
+    if not source.is_dir() or tree_hash(source) != pin['tree']:
+        raise Invalid(f"{source} does not match the pinned tree {pin['tree']}")
+    for wheel in pin['wheels']:
+        path = folder / wheel_name(wheel)
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != wheel['sha256']:
+            raise Invalid(f"{path} does not match its pinned sha256 {wheel['sha256']}")
+
+
+def fetch(pin, cache):
+    """Fetch skills-ref and its wheels, verify them against the pins, and move them into the cache."""
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.staging-', dir=cache.parent))
+    try:
+        repo = staging / 'git'
+        git = ['git', '-c', 'core.autocrlf=false', '-C', str(repo)]
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True, capture_output=True)
+        subprocess.run([*git, 'fetch', '-q', '--depth', '1', pin['repository'], pin['commit']],
+                       check=True, capture_output=True, timeout=300)
+        commit = subprocess.run([*git, 'rev-parse', 'FETCH_HEAD^{commit}'], check=True, capture_output=True, text=True).stdout.strip()
+        if commit != pin['commit']:
+            raise Invalid(f"fetched commit {commit} is not the pinned {pin['commit']}")
+        tree = subprocess.run([*git, 'rev-parse', f"{commit}:{pin['folder']}"], check=True, capture_output=True, text=True).stdout.strip()
+        if tree != pin['tree']:
+            raise Invalid(f"{pin['folder']} at {commit} is tree {tree}, not the pinned {pin['tree']}")
+        archive = subprocess.run([*git, 'archive', '--format=tar', commit, pin['folder']], check=True, capture_output=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(staging, filter='data')
+        shutil.rmtree(repo)
+        for wheel in pin['wheels']:
+            with urllib.request.urlopen(wheel['url'], timeout=120) as response:
+                data = response.read()
+            if hashlib.sha256(data).hexdigest() != wheel['sha256']:
+                raise Invalid(f"{wheel['url']} does not match its pinned sha256 {wheel['sha256']}")
+            (staging / wheel_name(wheel)).write_bytes(data)
+        verify(staging, pin)
+        try:
+            staging.rename(cache)
+        except OSError:
+            # Another run finished first; its cache is checked before use like any other.
+            if not cache.is_dir():
+                raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+RUNNER = '''
+import json, sys
+from pathlib import Path
+sys.path[:0] = [sys.argv[1]]
+from skills_ref import validate
+print(json.dumps({d: validate(Path(d)) for d in sys.argv[2:]}))
+'''
+
+
+def skills_ref(pin, dirs):
+    """Run the pinned skills-ref on each folder and return its errors by folder."""
+    cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'quickstop/skills-ref' / pin['commit']
+    if not cache.is_dir():
+        try:
+            fetch(pin, cache)
+        except (OSError, subprocess.SubprocessError, Invalid) as exc:
+            detail = exc.stderr.decode(errors='replace').strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else exc
+            raise Invalid(f'could not fetch skills-ref at {pin["commit"]}: {detail}. '
+                          f'Rerun with a network, or set {SKIP_SKILLS_REF}=1 for offline local work') from exc
+    try:
+        verify(cache, pin)
+    except Invalid as exc:
+        raise Invalid(f'the skills-ref cache changed after it was verified: {exc}. Delete {cache} and rerun') from exc
+    with tempfile.TemporaryDirectory() as run:
+        site = Path(run)
+        shutil.copytree(cache / pin['folder'] / 'src', site, dirs_exist_ok=True)
+        for wheel in pin['wheels']:
+            with zipfile.ZipFile(cache / wheel_name(wheel)) as archive:
+                archive.extractall(site)
+        result = subprocess.run([sys.executable, '-I', '-B', '-c', RUNNER, str(site), *map(str, dirs)],
+                                capture_output=True, text=True)
+    if result.returncode:
+        raise Invalid(f'skills-ref failed to run: {result.stderr.strip()}')
+    return json.loads(result.stdout)
+
+
+def claude_validate(root, plugins):
+    """Run `claude plugin validate --strict` on the marketplace and each plugin; return failures."""
+    claude = shutil.which('claude')
+    if claude is None:
+        raise Invalid(f'claude is not on PATH, so claude plugin validate --strict cannot run. '
+                      f'Install Claude Code, or set {SKIP_CLAUDE_VALIDATE}=1 for local work without it')
+    failures = []
+    with tempfile.TemporaryDirectory() as home:
+        env = {k: v for k, v in os.environ.items() if k not in ('ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN')}
+        env.update(HOME=home, CLAUDE_CONFIG_DIR=str(Path(home) / '.claude'), DISABLE_AUTOUPDATER='1')
+        for path in [root, *plugins.values()]:
+            result = subprocess.run([claude, 'plugin', 'validate', '--strict', str(path)], env=env,
+                                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+            if result.returncode:
+                failures.append(f'{path.relative_to(root) if path != root else "."}:\n{result.stdout}{result.stderr}')
+    return failures
+
+
+def run(root, environ):
+    """Run every check; return (exit code, output lines, skipped lines)."""
+    out, skipped, failed = [], [], False
+    config, plugins = load(root)
+    exempt = config['claude_code_only']
+    exempt_paths = {plugins[name] for name in exempt}
+    dirs = skill_dirs(root, exempt_paths)
+    for name, reason in exempt.items():
+        out.append(f'Skills check skips {name} (skills-check.json): {reason}')
+
+    findings = []
+    for d in dirs:
+        skill = d / 'SKILL.md'
+        if skill.is_file():
+            findings += [f'{skill.relative_to(root)}:{n}: {rule}: {msg}' for n, rule, msg in lint_text(skill.read_text())]
+    out += findings or [f'Skills lint: {len(dirs)} skill(s) clean']
+    failed |= bool(findings)
+
+    def check_skills_ref():
+        portable, claude_only = root / FIXTURES / 'portable-skill', root / FIXTURES / 'claude-only-skill'
+        results = skills_ref(config['skills_ref'], [portable, claude_only, *dirs])
+        if results.pop(str(portable)) or not results.pop(str(claude_only)):
+            raise Invalid('skills-ref did not pass the portable fixture and fail the other one; it cannot be trusted')
+        errors = [f'{Path(d).relative_to(root)}: skills-ref: {e}' for d, errs in results.items() for e in errs]
+        return errors, f'skills-ref {config["skills_ref"]["commit"][:12]}: {len(dirs)} skill(s) valid'
+
+    def check_claude():
+        failures = claude_validate(root, plugins)
+        return failures, f'claude plugin validate --strict: marketplace and {len(plugins)} plugin(s) valid'
+
+    for variable, label, check in ((SKIP_SKILLS_REF, 'skills-ref validation', check_skills_ref),
+                                   (SKIP_CLAUDE_VALIDATE, 'claude plugin validate --strict', check_claude)):
+        if environ.get(variable) == '1':
+            skipped.append(f'SKIPPED: {label} ({variable}=1 is set; this run is not a pass)')
+            continue
+        try:
+            errors, ok = check()
+        except (Invalid, OSError, subprocess.SubprocessError) as exc:
+            errors, ok = [f'{label} failed: {exc}'], None
+        out += errors or [ok]
+        failed |= bool(errors)
+    return int(failed), out, skipped
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent.parent)
+    args = parser.parse_args()
+    try:
+        code, out, skipped = run(args.root.resolve(), os.environ)
+    except (Invalid, OSError, KeyError, TypeError) as exc:
+        print(f'Skills check failed: {exc}', file=sys.stderr)
+        return 1
+    print('\n'.join(out))
+    # Skips come last so a reader of the log can't miss them.
+    if skipped:
+        print('\n'.join(skipped))
+    return code
+
+
+if __name__ == '__main__':
+    if sys.version_info < (3, 11, 4):
+        sys.exit('bin/check-skills needs Python 3.11.4 or later; run it through bin/ci, which finds the pinned Python')
+    sys.exit(main())

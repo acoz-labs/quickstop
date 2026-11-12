@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-# Quickstop targets Claude Code only; docs/marketplace.md says when another tool may be added.
+# Each plugin declares one claude-code target; docs/marketplace.md says when another target may be added.
 FORMATS = {'claude-code': {'claude-plugin': '.claude-plugin/plugin.json'}}
 OUTPUTS = ('.claude-plugin/marketplace.json', 'docs/catalog.md')
 
