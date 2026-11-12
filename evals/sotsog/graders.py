@@ -22,8 +22,11 @@ SKEPTICAL_LABELS = {
     'independent support': ('independent support',),
 }
 TABLE_HEADER = ['principle', 'how they do it', 'how we do it', 'fit']
-DECISION_LABELS = ('decision', 'recommendation', 'verdict', 'conclusion', 'tl;dr', 'tldr', 'bottom line',
-                   'summary', 'short answer')
+# Labels that state a decision are searched across the whole document first; summary-type labels, whose first
+# sentence is often prose that happens to start with an outcome word, only when no decision label gives a verdict.
+PRIMARY_LABELS = ('decision', 'recommendation', 'verdict')
+FALLBACK_LABELS = ('conclusion', 'tl;dr', 'tldr', 'bottom line', 'summary', 'short answer')
+DECISION_LABELS = PRIMARY_LABELS + FALLBACK_LABELS
 # Lead-ins skipped before a verdict, tried in order and repeatedly: "My recommendation is to", "I'd recommend",
 # "We'll", "<Name> should". A subject that starts with a negative or a hedge ("nobody should adopt", "maybe we
 # should adopt") is never skipped, so the verdict stays unread.
@@ -126,14 +129,14 @@ def verdict_outcome(text):
     return None
 
 
-def decision_label(line):
+def decision_label(line, labels=DECISION_LABELS):
     """(label, text after it) when the line labels a decision: a heading, a bold label, or a plain line whose
     label is followed by a colon or dash ("Decision: adopt"). Body text such as "Decision makers..." isn't one."""
     is_heading = HEADING.match(line) is not None
     body = HEADING.sub(r'\2', line) if is_heading else LIST_ITEM.sub('', line)
     bold = re.match(r'^\s*(\*\*|__)', body) is not None
     text = normalize(plain(body))
-    for label in DECISION_LABELS:
+    for label in labels:
         if not re.match(rf'{re.escape(label)}(?![\w])', text):
             continue
         rest = text[len(label):]
@@ -148,26 +151,13 @@ def first_sentence(paragraph):
     return match.group(1) if match else text
 
 
-def outcome(document):
-    """(outcome or None, where it was read, the text read). Same reader for both arms.
-
-    In order: the template's H1 decision line; a verdict after the colon of any other H1; then each decision
-    label in turn, reading the label's own line and, when that holds no verdict, the first sentence of the next
-    paragraph. The first verdict found wins; a label with no verdict doesn't stop the search."""
-    lines = fenced_free(document)
-    h1 = next((line for line in lines if re.match(r'^#\s', line)), None)
-    if h1 and (m := TEMPLATE_H1.match(plain(h1).strip())):
-        return normalize(m.group('outcome')), 'h1', h1.strip()
-    if h1 and ':' in h1 and not decision_label(h1)[0]:
-        found = verdict_outcome(h1.split(':', 1)[1])
-        if found:
-            return found, 'h1 verdict', h1.strip()
-    first_label = ''
+def label_verdict(lines, labels):
+    """(outcome, where, text) from the first label in `labels` that gives a verdict, or None. A label's verdict is
+    on its own line or, failing that, the first sentence of the next paragraph."""
     for i, line in enumerate(lines):
-        label, rest = decision_label(line)
+        label, rest = decision_label(line, labels)
         if not label:
             continue
-        first_label = first_label or line.strip()
         found = verdict_outcome(rest)
         if found:
             return found, 'label', line.strip()
@@ -181,6 +171,30 @@ def outcome(document):
         found = verdict_outcome(sentence)
         if found:
             return found, 'next paragraph', sentence
+    return None
+
+
+def outcome(document):
+    """(outcome or None, where it was read, the text read). Same reader for both arms.
+
+    In order, the first verdict found wins: the template's H1 decision line; any Decision, Recommendation or
+    Verdict label in the document; a verdict right after the colon of any other H1; then any Conclusion,
+    Summary, TL;DR, Bottom line or Short answer label. A label with no verdict doesn't stop the search."""
+    lines = fenced_free(document)
+    h1 = next((line for line in lines if re.match(r'^#\s', line)), None)
+    if h1 and (m := TEMPLATE_H1.match(plain(h1).strip())):
+        return normalize(m.group('outcome')), 'h1', h1.strip()
+    found = label_verdict(lines, PRIMARY_LABELS)
+    if found:
+        return found
+    if h1 and ':' in h1 and not decision_label(h1)[0]:
+        verdict = verdict_outcome(h1.split(':', 1)[1])
+        if verdict:
+            return verdict, 'h1 verdict', h1.strip()
+    found = label_verdict(lines, FALLBACK_LABELS)
+    if found:
+        return found
+    first_label = next((line.strip() for line in lines if decision_label(line)[0]), '')
     return None, 'none', first_label
 
 

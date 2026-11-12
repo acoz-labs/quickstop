@@ -1,6 +1,6 @@
 # AI test selection: not now for Lanternhall
 
-We won't adopt AI test selection or buy Prescient Select now. Nothing changes in CI; we'll look again only if a full CI run grows past about 30 minutes. Our CI takes four minutes, so there's little to save, and the 90% claim comes from the vendor selling the tool.
+We won't adopt AI test selection or buy Prescient Select now. Nothing changes in CI. Our CI takes four minutes, so there's little to save, and the 90% claim comes from the vendor selling the tool.
 
 Date 2026-11-12. Decided by the maintainers. Sources read: Prescient CI's post and five library pages.
 

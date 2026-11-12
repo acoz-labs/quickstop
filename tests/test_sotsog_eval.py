@@ -174,6 +174,17 @@ class Outcome(unittest.TestCase):
                      'Recommendation: whether to adopt is open.'):
             self.assertIsNone(self.read(text), text)
 
+    def test_decision_labels_come_before_summary_labels(self):
+        cases = {
+            '## Summary\n\nNo team we read regretted it.\n\n## Recommendation\n\nAdopt.': 'adopt',
+            '## Summary\n\nAdopting trunk-based development means pushing to main.\n\n## Recommendation\n\nNo.': 'no',
+            '## Conclusion\n\nLater sections explain the cost.\n\n## Recommendation\n\nAdopt.': 'adopt',
+            '# Monorepos: no clear winner\n\n## Recommendation\n\nAdopt.': 'adopt',
+            '## TL;DR\n\nNot now.\n\n## Details\n\nThe suite is fast.': 'not now',
+        }
+        for text, want in cases.items():
+            self.assertEqual(self.read(text), want, text)
+
     def test_a_label_without_a_verdict_doesnt_stop_the_search(self):
         self.assertEqual(self.read('## Summary\n\nThe post describes a linter.\n\n## Decision\n\nAdapt.'), 'adapt')
         self.assertEqual(g.outcome('## Summary\n\nA post.\n')[1:], ('none', '## Summary'))
