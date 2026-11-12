@@ -1,13 +1,17 @@
 # Quickstop repository
 
-Quickstop is a home for agent plugins and practical, read-and-adapt workflows.
+Quickstop is acoz-labs' marketplace of agent plugins and skills, plus practical,
+read-and-adapt workflows.
 Its first workflow, [Shipshape](../workflows/shipshape/README.md), was retired on
 2026-11-05 and is kept for reference only. Claudit and the
-Writing for Humans kit are Claude Code plugins at `plugins/<name>/`. Claudit was
+Writing for Humans kit are plugins at `plugins/<name>/`, installed through Claude
+Code's plugin format. Claudit was
 retired on 2026-11-11: its last release, 4.4.0, runs no audit and tells users to
 run `/doctor`, then `/doctor prompt-audit`, linking
-[why it was retired](https://acoz.dev/blog/retiring-claudit/). Quickstop supports
-no other agent tool. Their advertised versions and publication
+[why it was retired](https://acoz.dev/blog/retiring-claudit/). Skills follow the
+[Agent Skills spec](https://agentskills.io/specification) so they work in any
+agent tool that reads skills; Writing for Humans is exempt by decision, because
+its core is an output style. Their advertised versions and publication
 state are recorded in the [generated catalog](catalog.md). `catalog.json`
 declares each plugin's `claude-code` target; native package manifests own versions. Generated
 indexes and package layouts follow [the marketplace contract](marketplace.md).
@@ -21,8 +25,11 @@ this repository.
 
 ## Commands
 
-Requires Git, Bash and Python **3.11.15**, pinned in `.python-version` (standard
-library only; no downloaded Python dependencies). Install it with mise
+Requires Git, Bash, Claude Code (`claude` on PATH) and Python **3.11.15**, pinned
+in `.python-version`. The repository's own code uses the standard library only.
+`bin/ci` downloads one thing on its first run: the pinned Agent Skills validator
+and its four Python dependencies (see the skills checks below), into a cache
+outside the repository. Install Python with mise
 (`mise install python@3.11.15`) or put it on PATH under a version name, then run
 the bare commands:
 
@@ -50,14 +57,18 @@ the pinned runtime, not the system default.
 Healthy output:
 
 - `bin/ci`: exits 0, prints `Using Python 3.11.15 at <path>`, the
-  `bin/sdlc check` line and unittest's `OK`. A missing pinned Python prints
-  the version it needs and exits 1.
+  `bin/sdlc check` line, unittest's `OK`, then the skills checks:
+  `Skills check skips writing-for-humans ...`, `Skills lint: <n> skill(s) clean`,
+  `skills-ref <commit>: <n> skill(s) valid` and
+  `claude plugin validate --strict: marketplace and <n> plugin(s) valid`.
+  A missing pinned Python prints the version it needs and exits 1. A run whose
+  last lines start with `SKIPPED:` is not a pass (see below).
 - `bin/check-marketplace --base origin/main`: exits 0 and prints
   `Marketplace valid: <n> plugin(s); package versions checked`.
 - `bin/sdlc check`: exits 0 and prints `{"version": "<version>", "conforms": true}`.
 
 `bin/ci` runs managed conformity, optional-plan validation, catalog/adapter
-checks and regression tests. `--base` additionally rejects changed plugin bytes
+checks, regression tests and, last, the skills checks (`bin/check-skills`). `--base` additionally rejects changed plugin bytes
 without a strictly higher stable version. Supply the actual pre-change commit;
 an unavailable base is an error, never a reason to skip validation. All distributed
 files, including README changes, count as bytes. Python bytecode caches (`__pycache__/`,
@@ -66,9 +77,9 @@ files, including README changes, count as bytes. Python bytecode caches (`__pyca
 versions from the native manifests; plugins release independently. Regenerate indexes with
 `bin/check-marketplace --write` after changing catalog or manifest metadata.
 
-Use the host's `claude plugin validate .` and `claude plugin validate
-./plugins/<name>` when available. These supplement local
-checks and do not prove runtime behavior. Acceptance scenarios belong
+`bin/ci` runs `claude plugin validate --strict` on the marketplace and every
+plugin (see the skills checks below). It supplements local checks and does not
+prove runtime behavior. Acceptance scenarios belong
 in [delivery](delivery.md). Inspect current host documentation for unfamiliar
 components instead of treating the lightweight local validator as a complete
 upstream schema implementation.
@@ -77,6 +88,44 @@ upstream schema implementation.
 push hooks and Claude shell-match hooks have been retired; clean-checkout evidence
 is the verification gate. Existing clones with the old installed pre-push hook
 may remove that specific hook after inspecting it; do not replace personal hooks.
+
+### Skills checks
+
+`bin/check-skills`, the last step of `bin/ci`, checks every
+`plugins/*/skills/*/` folder in three ways:
+
+- A lint fails a `SKILL.md` that uses features only Claude Code supports and
+  says, per line, why and how to write it portably. Its rules and the plain
+  English it must let through are in `tests/test_check_skills.py`. A real false
+  positive is fixed in the lint, never by exempting a plugin.
+- The Agent Skills reference validator, skills-ref, pinned in
+  `skills-check.json` to a commit of github.com/agentskills/agentskills and to
+  the sha256 of each dependency wheel. Its README calls it a demonstration, so
+  it is treated as a lint. Before the real skills, it must pass
+  `tests/fixtures/skills/portable-skill` and fail
+  `tests/fixtures/skills/claude-only-skill`, or the run fails.
+- `claude plugin validate --strict` on the marketplace and every plugin, under
+  a temporary `HOME` and `CLAUDE_CONFIG_DIR` with `DISABLE_AUTOUPDATER=1` and
+  no credentials. It needs no login.
+
+Plugins named under `claude_code_only` in `skills-check.json` skip the lint and
+skills-ref, with the reason printed; every other plugin, including a new one,
+is checked. Exempt a plugin there, never by changing its package.
+
+skills-ref is fetched with git and the standard library only: no pip, no
+virtual environment, nothing in the repository. The first run downloads it
+into `${XDG_CACHE_HOME:-~/.cache}/quickstop/skills-ref/<commit>/`; every run
+rechecks the cache against the pins and fails, naming the folder to delete, if
+a file changed. Later runs need no network. To move the pin, change the
+commit, tree and wheel hashes together, taking the wheels from that commit's
+`skills-ref/uv.lock`.
+
+For offline work or a machine without Claude Code, `QUICKSTOP_SKIP_SKILLS_REF=1`
+and `QUICKSTOP_SKIP_CLAUDE_VALIDATE=1` each skip only their own check and print
+a `SKIPPED:` line as the last output of `bin/ci`. `bin/sdlc-evidence` copies
+the caller's environment into its run, so unset both before recording
+evidence: a receipt that shows `SKIPPED:` is not a pass and doesn't count as
+review or acceptance evidence.
 
 ## Conventions
 
@@ -192,6 +241,12 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - Each script with its own spend pause needs the raise when a cap changes.
 - Write docs with an editor tool or a quoted heredoc: an unquoted `$0.052`
   became `/bin/zsh.052`.
+- `python -I` ignores `PYTHONDONTWRITEBYTECODE`; add `-B` when running
+  downloaded code, or it writes `__pycache__` next to it.
+- New repository text doesn't describe Quickstop or a feature as limited to
+  Claude Code with the retired phrasing that issue 214's acceptance grep checks
+  for (its plan's wording rule lists it); say "features only Claude Code
+  supports" instead.
 - `bin/sdlc audit` right after a merge can fail until GitHub links the
   commit to its PR. Retry after a minute.
 - Known limitation: the `writing-audit` frontmatter blocks only plain command
@@ -203,6 +258,7 @@ may remove that specific hook after inspecting it; do not replace personal hooks
 - `catalog.json`: ordered plugin catalog, one `claude-code` target each.
 - `plugins/<name>/`: one self-contained Claude Code package per plugin.
 - `workflows/`: ordinary Markdown guides with a browsable entry index; no native installable packages.
+- `skills-check.json`: the skills-ref pins and the plugins exempt from the skills checks.
 - `.claude-plugin/marketplace.json`: generated native marketplace index.
 - `docs/catalog.md`: generated version table.
 - `bin/`, `tests/`: portable delivery tools and real marketplace regressions.

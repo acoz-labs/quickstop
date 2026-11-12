@@ -37,3 +37,4 @@ bin/sdlc check
 bin/validate-solution-plans
 bin/check-marketplace
 "$pinned" -m unittest discover -s tests -p 'test_*.py'
+bin/check-skills

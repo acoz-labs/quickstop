@@ -8,14 +8,14 @@ Quickstop brings together two kinds of open-source tools from
 
 | On the shelf | What you get | Get started |
 | --- | --- | --- |
-| **Plugins** | Installable capabilities for Claude Code. | [Browse plugins](docs/catalog.md) |
+| **Plugins** | Installable capabilities and skills for your agent. | [Browse plugins](docs/catalog.md) |
 | **Workflows** | Practical guides you and your agent can adapt to your project. | [Read and adapt](workflows/README.md) |
 
 Visit the [Quickstop storefront](https://acoz.dev/projects/quickstop/) for a look around.
 
 ## Plugins
 
-Quickstop is a Claude Code plugin marketplace.
+Quickstop is acoz-labs' marketplace of agent plugins and skills.
 [Writing for Humans](plugins/writing-for-humans) provides a selectable
 writing style and two skills for clearer human-facing communication.
 [Claudit](plugins/claudit) was retired on 2026-11-11: run `/doctor`, then

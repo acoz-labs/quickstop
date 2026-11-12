@@ -4,7 +4,7 @@
     "name": "acoz-labs",
     "url": "https://github.com/acoz-labs"
   },
-  "description": "The acoz-labs marketplace of Claude Code plugins.",
+  "description": "The acoz-labs marketplace of agent plugins and skills.",
   "plugins": [
     {
       "name": "claudit",
