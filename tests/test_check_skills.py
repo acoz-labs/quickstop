@@ -55,7 +55,9 @@ class LintTests(unittest.TestCase):
                 'Use bash to list files.', 'Read (or skim) the file.', 'A git pre-commit hook may reject it.',
                 'React hooks are fine.', 'Match the output style of the report.', 'It costs $10, or $1.50.',
                 'Press Stop.', 'Send a Notification.', 'The reading tool works.', 'Run `git status`.',
-                'Write it as you would say it.', 'Pay in US$ or EUR.', 'Escape it as \\$1 in sed.'):
+                'Write it as you would say it.', 'Pay in US$ or EUR.', 'Escape it as \\$1 in sed.',
+                'Agent tools differ by vendor.', 'Task tools like Jira help.', 'Edit tools such as Vim work.',
+                'Edit(s) are welcome.', 'Read(me) first.', 'See the Grep(1) manual.'):
             self.assertEqual(rules(line), [], line)
 
     def test_disguised_forms_fail(self):
@@ -66,7 +68,7 @@ class LintTests(unittest.TestCase):
             'Branch !`git branch`': 'shell-injection', '```!\ngit status\n```': 'shell-injection',
             'Open $CLAUDE_PLUGIN_ROOT/x': 'plugin-variable', 'See ${CLAUDE_PLUGIN_DATA}/db': 'plugin-variable',
             'Cd ${CLAUDE_PROJECT_DIR}': 'plugin-variable',
-            'Run Bash(git status).': 'tool-name', 'Use ` Read ` here.': 'tool-name', 'Call the Task tool.': 'tool-name',
+            'Run Bash(git status).': 'tool-name', 'Allow Bash(git:*).': 'tool-name', 'Call Task(subagent).': 'tool-name', 'Use ` Read ` here.': 'tool-name', 'Call the Task tool.': 'tool-name',
             'Use the Edit and Write tools.': 'tool-name', 'Then AskUserQuestion.': 'tool-name',
             'Fetch with WebFetch': 'tool-name', 'Track it in TodoWrite.': 'tool-name',
             'See output-styles/x.md': 'output-style', 'Run /output-style.': 'output-style',
@@ -128,7 +130,7 @@ class ExemptionTests(unittest.TestCase):
         # Issue 214's acceptance grep, built in parts so this file doesn't match it.
         retired = re.compile('claude code' + r'[- ]only|' + 'claude code' + ' plugin marketplace', re.IGNORECASE)
         excluded = ('docs/archive/', 'docs/changes/', 'plugins/writing-for-humans/')
-        files = subprocess.run(['git', 'ls-files', '-co', '--exclude-standard'], cwd=REPO, check=True,
+        files = subprocess.run(['git', 'ls-files'], cwd=REPO, check=True,
                                capture_output=True, text=True).stdout.splitlines()
         hits = [name for name in files if not name.startswith(excluded) and (REPO / name).is_file()
                 and retired.search((REPO / name).read_text(errors='ignore'))]
