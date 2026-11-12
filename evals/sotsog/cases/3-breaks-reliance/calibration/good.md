@@ -31,7 +31,7 @@ Adopting it would remove the recorded pre-merge review that the grant audit reli
 
 ## Why this decision
 
-The gain is faster merges; the user's answers say slow reviews are annoying, not urgent. The cost is the grant: section 4.2 requires review before deploy with an auditable record, and the Foundation audits a sample every year. The strongest case for the idea: our part-time reviews sometimes take a day, and Quarry's lead time fell eightfold. But Kestrel Maps got most of that gain while keeping reviews, by answering review requests within two working hours. Pairing (Grace Lindgren's alternative) counts as review only if the auditor accepts its record, which we have no reason to test.
+The gain is faster merges; the maintainers say slow reviews are annoying, not urgent. The cost is the grant: section 4.2 requires review before deploy with an auditable record, and the Foundation audits a sample every year. The strongest case for the idea: our part-time reviews sometimes take a day, and Quarry's lead time fell eightfold. But Kestrel Maps got most of that gain while keeping reviews, by answering review requests within two working hours. Pairing (Grace Lindgren's alternative) counts as review only if the auditor accepts its record, which we have no reason to test.
 
 ## Revisit when
 

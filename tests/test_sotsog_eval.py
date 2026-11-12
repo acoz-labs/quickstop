@@ -128,6 +128,56 @@ class Outcome(unittest.TestCase):
         for text, want in cases.items():
             self.assertEqual(self.read(text), want, text)
 
+    def test_round_1_review_table(self):
+        cases = {
+            '## Recommendation\n\nWe will adopt the lint and lock timeout.': 'adopt',
+            "## Decision\n\nWe'll adapt it: lint only.": 'adapt',
+            "## Recommendation\n\nI'd recommend adapting the idea.": 'adapt',
+            '## Recommendation\n\nLanternhall should adopt a migration lint.': 'adopt',
+            '## Recommendation\n\nNot at this time.': 'not now',
+            '## Recommendation\n\nHold off for now.': 'not now',
+            '## Recommendation\n\nWait until CI passes 30 minutes.': 'not now',
+            '## Decision drivers\n\nCost and risk.\n\n## Recommendation\n\nAdopt.': 'adopt',
+            '## TL;DR\n\nAdopt the lint.': 'adopt',
+            '## Bottom line\n\nNo.': 'no',
+            '## Summary\n\nNot now: CI is fast.': 'not now',
+            '## Short answer\n\nNot now.': 'not now',
+            'Verdict: adopt, partially.': 'adapt',
+            "## Recommendation\n\nWe won't adopt it.": 'no',
+            "## Recommendation\n\nThe team shouldn't adopt this.": 'no',
+            '## Recommendation\n\nMy recommendation is to adopt it.': 'adopt',
+            '## Recommendation\n\nI think we should adopt it.': 'adopt',
+        }
+        for text, want in cases.items():
+            self.assertEqual(self.read(text), want, text)
+
+    def test_real_baseline_verdicts(self):
+        # Verbatim from the five baseline screen documents (results/baseline-screen, head 6393d8c).
+        cases = {
+            '# Release notes in every pull request: already in place, change nothing\n\nDate 2026-11-12.\n\n'
+            '## Decision\n\nDo not adopt anything new. Lanternhall already does what the post describes,': 'no',
+            "# Safe migrations (from Fernhill Transit's post): adopt in part for Lanternhall\n\n"
+            'We adopt a migration linter in CI, a lock timeout on every migration, and the': 'adapt',
+            "# Pre-merge review: keep it, don't adopt Quarry Labs' ship-to-main\n\n"
+            '**Decision: do not adopt.** Keep required pull request reviews on `main`. Attack': 'no',
+            '# AI test selection (Prescient Select): do not adopt for Lanternhall\n\n'
+            'Date 2026-11-12.\n\n## Decision\n\nDo not adopt AI or predictive test selection. Keep running': 'no',
+            '# Signed releases with published build provenance: adopt for Lanternhall\n\n'
+            'We will sign every release artifact and publish build provenance for it,': 'adopt',
+        }
+        for text, want in cases.items():
+            self.assertEqual(self.read(text), want, text[:60])
+
+    def test_hedged_or_negative_subjects_stay_unread(self):
+        for text in ('Recommendation: nobody should adopt this.', 'Recommendation: maybe we should adopt it.',
+                     'Recommendation: perhaps the team should adopt it.', 'Recommendation: we might adopt it.',
+                     'Recommendation: whether to adopt is open.'):
+            self.assertIsNone(self.read(text), text)
+
+    def test_a_label_without_a_verdict_doesnt_stop_the_search(self):
+        self.assertEqual(self.read('## Summary\n\nThe post describes a linter.\n\n## Decision\n\nAdapt.'), 'adapt')
+        self.assertEqual(g.outcome('## Summary\n\nA post.\n')[1:], ('none', '## Summary'))
+
     def test_overlapping_entries_match_whole_words_longest_first(self):
         self.assertEqual(g.verdict_outcome('not now'), 'not now')
         self.assertEqual(g.verdict_outcome('no'), 'no')
