@@ -1,0 +1,22 @@
+{
+  "title": "An idea that would break something the repo relies on: dropping required pre-merge review",
+  "idea": "pushing straight to main with review after merge",
+  "library": {
+    "delivery-metrics-review.md": "report",
+    "trunk-based-at-kestrel.md": "report",
+    "post-merge-review-in-practice.md": "critique",
+    "pair-programming-as-review.md": "competitor",
+    "quarry-labs-hiring.md": "noise"
+  },
+  "terms": [
+    "Lanternhall",
+    "Tidewater",
+    "Coastline",
+    "Halvorsen",
+    "Quarry Labs",
+    "Kestrel",
+    "Marsh",
+    "Bello",
+    "Lindgren"
+  ]
+}

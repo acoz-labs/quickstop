@@ -1,0 +1,17 @@
+{
+  "good": {"structure": true, "outcome": true, "depth_script": true, "depth": true,
+           "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 0},
+           "gaps": {"who_gains": true, "baseline": true}},
+  "bad": {"structure": false, "outcome": false, "depth_script": false, "depth": false,
+          "cold_read": {"decided": false, "why": false, "next": false},
+          "gaps": {"who_gains": false, "baseline": false}},
+  "borderline-pass": {"structure": true, "outcome": true, "depth_script": true, "depth": true,
+                      "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 1},
+                      "gaps": {"who_gains": true, "baseline": true}},
+  "borderline-fail": {"structure": true, "outcome": true, "depth_script": true, "depth": false,
+                      "cold_read": {"why": false, "next": false}, "open_questions": {"min": 2},
+                      "gaps": {"who_gains": false, "baseline": false}},
+  "plain": {"structure": false, "outcome": true, "depth_script": true, "depth": true,
+            "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 1},
+            "gaps": {"who_gains": true, "baseline": true}}
+}

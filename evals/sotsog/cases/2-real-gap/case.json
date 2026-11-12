@@ -1,0 +1,22 @@
+{
+  "title": "An idea that fills a real gap: catching lock-taking migrations before production",
+  "idea": "linting migrations for long locks, lock timeouts and rehearsals on production-size data",
+  "library": {
+    "lockcheck-at-orchard-health.md": "report",
+    "pg-locking-postmortems.md": "report",
+    "rehearsals-are-a-privacy-risk.md": "critique",
+    "online-schema-change-tools.md": "competitor",
+    "bus-timetable-redesign.md": "noise"
+  },
+  "terms": [
+    "Lanternhall",
+    "Tidewater",
+    "Coastline",
+    "Halvorsen",
+    "Fernhill",
+    "Orchard Health",
+    "lockcheck",
+    "Achterberg",
+    "Abernathy"
+  ]
+}

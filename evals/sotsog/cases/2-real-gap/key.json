@@ -1,0 +1,21 @@
+{
+  "expected": [
+    "adopt",
+    "adapt"
+  ],
+  "go": true,
+  "items": {
+    "decided": {
+      "point": "Take it up: at least lint every migration for long-locking operations and give migrations a lock timeout.",
+      "detail": "Rehearsing on a copy of production is dropped or replaced by a production-size synthetic or anonymised dataset, because of patron data; expand-then-contract may also be taken."
+    },
+    "why": {
+      "point": "Two outages this year (May and September 2026) came from migrations that locked tables during opening hours, and nothing checks migrations today, because tests run them on an empty database.",
+      "detail": "Independent reports found most migration outages come from statements a static check flags."
+    },
+    "next": {
+      "point": "The work is handed on: add a migration lint and a lock timeout to the checks (bin/check or CI) so a lock-taking migration fails before it is deployed.",
+      "detail": "With a way to tell whether it worked, such as no more migration-caused lock incidents."
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "A flip: on evidence alone it's not now, but the user's answers add a requirement",
+  "idea": "signing releases and publishing build provenance",
+  "library": {
+    "signing-adoption-report.md": "report",
+    "provenance-at-ridgeway.md": "report",
+    "signing-theatre.md": "critique",
+    "checksums-over-https.md": "competitor",
+    "wrenfold-3-release-notes.md": "noise"
+  },
+  "terms": [
+    "Lanternhall",
+    "Tidewater",
+    "Coastline",
+    "Halvorsen",
+    "Wrenfold",
+    "Ridgeway",
+    "Carvalho",
+    "Osei"
+  ]
+}
