@@ -229,6 +229,23 @@ each line names:
   commercial stake; baseline: nothing measured against). Naming a topic
   ("possible bias", "limited evidence") fails.
 
+**Votes.** Every judged verdict is decided by votes, the same way in
+calibration and the gate and for both arms. A second call is always made; a
+third only when the first two disagree. A vote that errors after its one
+retry doesn't count, and a verdict without two agreeing votes is ungraded
+under the miss rule below.
+- **Brief and each case 4 gap:** majority of the verdicts.
+- **Open questions:** the median count (two equal counts, or the middle of
+  three).
+- **Cold read:** each vote is a whole reader-then-comparator chain; each item
+  takes its majority, and calls continue until every item has two agreeing
+  votes.
+- **Depth:** majority per cited critique and competitor.
+
+Every vote is recorded with each grader's agreement rate (how often the
+first two votes agreed) and the calls per document; the go/no-go projection
+uses the measured judge calls, not an estimate.
+
 **Miss-counting rule.**
 
 - A run that ends with a task error or hits its `--max-budget-usd` cap is a
