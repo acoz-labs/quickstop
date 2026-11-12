@@ -16,9 +16,19 @@ so there is no version bump, tag or pointer PR.
 **Where the checks run.** The GitHub CI job (`.github/workflows/ci.yml`) runs
 `bin/ci` and stays unchanged. Every run of that job so far has been skipped,
 because Actions are opt-in here and the repository variable that enables them
-is unset. So in practice "CI" is `bin/ci` on the reviewer's clean checkout,
-which is the repository's verification gate already. Both paths get the new
-checks through `bin/ci`.
+is unset. "CI" here is the clean-checkout `bin/ci` receipt that
+`bin/sdlc-evidence` records on the exact head of every PR and that
+`bin/sdlc audit` requires before merge. Both paths get the new checks through
+`bin/ci`.
+
+**Wording rule.** No new or reworded text in this change contains the phrases
+the issue's acceptance grep looks for ("Claude Code only", "Claude Code-only",
+"Claude Code plugin marketplace"). New text says "features only Claude Code
+supports" or similar. This covers the exemption reason, the lint's messages,
+code comments, the `docs/plugin-development.md` rule, the `docs/repository.md`
+lessons and the rewording of history in `docs/investigation.md` and
+`docs/acceptance/writing-for-humans.md`. The `claude_code_only` JSON key
+doesn't match the grep, because underscores aren't spaces or hyphens.
 
 **skills-ref pin.** Upstream repository `github.com/agentskills/agentskills`,
 folder `skills-ref`, commit `83021e2be457a9b6679148719c1f6074f0ad975e`
@@ -44,15 +54,25 @@ no virtual environment, nothing installed into the repository:
 2. Download each wheel with `urllib` from its exact PyPI URL (also from
    `uv.lock`), refuse it unless its sha256 matches, and unzip it with
    `zipfile`.
-3. Copy `skills-ref/src` and the unzipped wheels into a staging folder, then
-   rename it into the cache, `${XDG_CACHE_HOME:-~/.cache}/quickstop/skills-ref/<commit>/`.
-   The rename happens only after every check passes, so a half-finished or
-   unverified download never becomes the cache.
-4. Run the validator as `<pinned python> -I -c` with `sys.path` set to the
-   cache folders, calling `skills_ref.cli.main` with `validate <skill dir>`.
-   `-I` keeps the working directory and environment variables off the import
-   path. The repository's pinned Python 3.11.15 meets skills-ref's
-   `requires-python >=3.11`.
+3. Copy the `skills-ref` folder and the four wheel files, still zipped, into a
+   staging folder, then rename it into the cache,
+   `${XDG_CACHE_HOME:-~/.cache}/quickstop/skills-ref/<commit>/`. The rename
+   happens only after every check passes, so a half-finished or unverified
+   download never becomes the cache. If the rename fails because another run
+   created the cache first, that counts as success; the check in step 4 still
+   applies to what is there.
+4. Every time the cache is used, recheck it against the pins in the
+   repository: recompute the git tree hash of the cached `skills-ref` folder
+   and the sha256 of each cached wheel. A mismatch fails the step and names the
+   cache folder to delete; nothing in the cache is trusted only because it was
+   checked once.
+5. Unzip the wheels and copy `skills-ref/src` into a temporary folder for this
+   run, run the validator as `<pinned python> -I -B -c` with `sys.path` set to
+   that folder, calling `skills_ref.cli.main` with `validate <skill dir>`, and
+   delete the folder afterwards. `-I` keeps the working directory and
+   environment variables off the import path, and `-B` stops Python writing
+   bytecode (`-I` ignores `PYTHONDONTWRITEBYTECODE`). The repository's pinned
+   Python 3.11.15 meets skills-ref's `requires-python >=3.11`.
 
 A probe of exactly this method on 2026-11-12 matched all four hashes, passed
 Claudit's skill, and failed both Writing for Humans skills on
@@ -62,12 +82,18 @@ Claudit's skill, and failed both Writing for Humans skills on
 the cache and needs no network. The new skills step runs last in `bin/ci`, so
 every existing check has already run and reported before it. If the cache is
 missing and the fetch fails, the step fails and names the remedy: rerun with a
-network, or set `QUICKSTOP_SKIP_TOOL_CHECKS=1`. That variable skips only the
-two tool-backed checks (skills-ref and `claude plugin validate`), prints a
-`SKIPPED` line for each, and still runs the lint. It is for offline local work;
-review and acceptance evidence never sets it. A silent skip is not an option:
-the repository treats an unavailable check as an error, not a reason to skip
-validation.
+network, or set `QUICKSTOP_SKIP_SKILLS_REF=1`. Each tool-backed check has its
+own variable, so skipping one never drops the other:
+`QUICKSTOP_SKIP_SKILLS_REF=1` skips only skills-ref, and
+`QUICKSTOP_SKIP_CLAUDE_VALIDATE=1` skips only `claude plugin validate`. The lint
+always runs. A skipped check prints a `SKIPPED: <check> (<variable> is set)`
+line, and those lines are the last lines of `bin/ci`'s output, after
+everything else, so nobody reading the log can miss them. The variables are
+for offline local work. `bin/sdlc-evidence` copies the caller's environment
+into its `bin/ci` run, so `docs/repository.md` says that a receipt showing
+`SKIPPED` is not a pass and doesn't count as review or acceptance evidence. A
+silent skip is not an option: the repository treats an unavailable check as an
+error, not a reason to skip validation.
 
 **`claude plugin validate --strict` is in.** On 2026-11-12, Claude Code
 2.1.322 ran it under a fresh temporary `HOME` and `CLAUDE_CONFIG_DIR` with no
@@ -78,7 +104,7 @@ code. `bin/ci` runs it the same way on the marketplace root and every plugin,
 including Writing for Humans (it is Claude Code's own validator, so the
 exemption does not apply), and deletes the temporary directory afterwards.
 It needs the `claude` command on PATH; when it is missing, the step fails and
-names `QUICKSTOP_SKIP_TOOL_CHECKS=1`.
+names `QUICKSTOP_SKIP_CLAUDE_VALIDATE=1`.
 
 **The exemption setting.** A new repository file, `skills-check.json`, holds
 the skills-ref pins and the exemption list:
@@ -88,7 +114,7 @@ the skills-ref pins and the exemption list:
   "schema": 1,
   "skills_ref": { "repository": "...", "commit": "...", "tree": "...", "wheels": [ ... ] },
   "claude_code_only": {
-    "writing-for-humans": "Its core is an output style, and its skills use Claude Code-only frontmatter and plugin variables."
+    "writing-for-humans": "Its core is an output style, and its skills use frontmatter fields and plugin variables only Claude Code supports."
   }
 }
 ```
@@ -105,8 +131,8 @@ under `plugins/` changes.
 The lint reads each `plugins/*/skills/*/SKILL.md` outside exempt plugins. Rule 1
 reads the frontmatter; rules 2 to 7 read the body. Frontmatter values are not
 scanned, because the spec's own `allowed-tools` field legitimately names tools.
-Each finding is one line: path, line number, rule name, what was found, why it
-is Claude Code-only, and how to write it portably. One finding per rule per
+Each finding is one line: path, line number, rule name, what was found, why only
+Claude Code supports it, and how to write it portably. One finding per rule per
 line.
 
 | Rule | Fails on | Portable fix in the message |
@@ -117,7 +143,7 @@ line.
 | `plugin-variable` | `$CLAUDE_…` or `${CLAUDE_…}` (`CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_SKILL_DIR`, `CLAUDE_PROJECT_DIR` and the rest) | Use a path relative to the skill folder, such as `references/x.md` |
 | `tool-name` | A Claude Code tool name used as one: a name followed directly by `(` (`Bash(git *)`), a code span that is exactly a name (`` `Read` ``), a name followed by "tool" or "tools" ("the Edit tool"), or a multi-word name that is never English (`AskUserQuestion`, `WebFetch`, `WebSearch`, `TodoWrite`, `NotebookEdit`, `MultiEdit`, `ExitPlanMode`, `BashOutput`, `KillShell`, `SlashCommand`) anywhere | Say the action in plain words ("read the file", "ask the user") |
 | `output-style` | `output-style`, `output-styles`, `outputStyle`, or a code span followed by "output style" (`` `name` output style``) | Put the guidance in the skill or its references |
-| `hook` | Claude Code hook event names (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PermissionRequest`), `hooks.json`, or a `"hooks"` JSON key | State the rule as an instruction, or ship the hook as a Claude Code-only plugin |
+| `hook` | Claude Code hook event names (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PermissionRequest`), `hooks.json`, or a `"hooks"` JSON key | State the rule as an instruction, or keep the hook in a plugin exempted in `skills-check.json` |
 
 The single-word tool names checked are `Read`, `Write`, `Edit`, `Bash`, `Glob`,
 `Grep`, `Task`, `Agent`, `Skill` and `LS`.
@@ -148,7 +174,7 @@ exemption.
 
 - New checker (`bin/check-skills`, Python standard library): the lint, the
   skills-ref fetch and run, `claude plugin validate --strict` under a temporary
-  home, the exemption handling and the skip variable. Before validating real
+  home, the exemption handling and the two skip variables. Before validating real
   skills, it runs skills-ref on the two fixture skills and requires the clean
   one to pass and the Claude Code-only one to fail, so a broken or no-op
   validator cannot pass CI.
@@ -173,11 +199,17 @@ exemption.
   - `docs/marketplace.md`: the opening sentence. The single `claude-code`
     target rule stays, since the schema is unchanged.
   - `docs/repository.md`: drop "Quickstop supports no other agent tool" and
-    the Claude Code plugins framing; add `bin/check-skills`, the cache, the
-    skip variable and the lessons from this work.
+    the Claude Code plugins framing. Its "standard library only; no
+    downloaded Python dependencies" line changes to say the repository's own
+    code is standard-library only while `bin/ci` downloads skills-ref and its
+    four dependencies, pinned and hash-checked, into a cache outside the
+    repository on first run, and needs `claude` on PATH. Its description of
+    `bin/ci`'s healthy output gains the skills check lines. It also gains
+    `bin/check-skills`, the cache, the two skip variables, the rule that a
+    `SKIPPED` receipt is not a pass, and the lessons from this work.
   - `docs/plugin-development.md`: a short rule that new skills follow the Agent
-    Skills spec and that Claude Code-only features need a `skills-check.json`
-    exemption.
+    Skills spec and that a plugin using features only Claude Code supports
+    needs a `skills-check.json` exemption.
   - `docs/investigation.md` and `docs/acceptance/writing-for-humans.md`:
     reword the "Claude Code only" phrasing while keeping the history they
     record.
@@ -192,8 +224,8 @@ exemption.
 1. This plan, alone, in a draft PR.
 2. Lint, fixtures and the exemption setting, with their tests. `bin/ci` runs
    the lint.
-3. skills-ref fetch, cache and run, with offline tests, then
-   `claude plugin validate --strict`, then the skip variable.
+3. skills-ref fetch, cache, recheck and run, with offline tests, then
+   `claude plugin validate --strict`, then the two skip variables.
 4. Rewording and regenerated indexes.
 5. Repository lessons in `docs/repository.md`, a simplify pass, then the PR
    goes ready for review.
@@ -216,9 +248,11 @@ Each step leaves `bin/ci` passing.
   negative controls in the tests and the fix text in each message contain
   this; a real false positive is fixed in the lint, never by exempting the
   plugin.
-- **The cache is trusted after verification.** It lives in the user's home,
-  with the same trust as their Python install, and is written only after every
-  hash check passes. Deleting the folder forces a fresh, verified fetch.
+- **A corrupted or concurrent cache.** The cache is written only after every
+  hash check passes, a lost rename race counts as success, and every use
+  rechecks the cached files against the pins held in the repository, so a
+  changed file fails the run instead of running. Deleting the folder forces a
+  fresh, verified fetch.
 
 ## Proof
 
@@ -235,11 +269,14 @@ Automated (`tests/test_check_skills.py`, run by `bin/ci`):
   skills; restoring it passes. A stale or reasonless exemption fails.
 - Fetch: a wrong commit, a wrong tree hash or a wrong wheel hash each fails and
   leaves no cache; a good fetch populates the cache, and a second run makes no
-  fetch.
+  fetch. A cache that already exists when the rename runs counts as success.
+  Changing one byte of a cached wheel or source file fails the next run. The
+  validator run leaves no `__pycache__` in the cache.
 - `claude plugin validate` is called with `--strict`, `DISABLE_AUTOUPDATER=1`
   and a temporary `HOME` and `CLAUDE_CONFIG_DIR` that are removed afterwards;
-  a missing `claude` fails unless the skip variable is set, and the skip prints
-  `SKIPPED`.
+  a missing `claude` fails unless `QUICKSTOP_SKIP_CLAUDE_VALIDATE=1` is set.
+  Each skip variable skips only its own check, and its `SKIPPED` line comes
+  after all other output.
 
 On the real artifact, which the reviewer repeats on a clean checkout of the PR
 head:
@@ -252,7 +289,8 @@ head:
    worktree after. (Acceptance 3.)
 3. `grep -rin "claude code[- ]only\|claude code plugin marketplace"` over the
    repository, excluding `.git`, `docs/archive/`, `docs/changes/` and
-   `plugins/writing-for-humans/`, returns nothing. (Acceptance 4.)
+   `plugins/writing-for-humans/`, returns nothing, including in the new files.
+   (Acceptance 4.)
 4. `bin/check-marketplace --base origin/main` passes and reports no package
    changes; `git diff origin/main -- plugins releases.json` is empty; the
    diff adds no secret, account or paid service. (Acceptance 5.)
