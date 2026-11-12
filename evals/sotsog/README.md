@@ -80,13 +80,15 @@ Script graders, which cost nothing:
   shows` with all five skeptical-read labels, `## Implementation brief` on
   adopt or adapt and never otherwise, and `## Sources` with a date in every
   item.
-- **Outcome:** the H1 decision line, or a verdict right after the colon of
-  any other H1, or else each decision label in turn. A decision label is a
-  line starting with Decision, Recommendation, Verdict, Conclusion, TL;DR,
-  Bottom line, Summary or Short answer that is a heading, starts in bold, or
-  has a colon or dash after the label. The verdict is read from the label's
-  own line, or else from the first sentence of the next paragraph. A label
-  with no verdict doesn't stop the search.
+- **Outcome:** read from the first of these that gives a verdict:
+  1. the template's H1 decision line;
+  2. any Decision, Recommendation or Verdict label in the document;
+  3. a verdict right after the colon of any other H1;
+  4. any Conclusion, Summary, TL;DR, Bottom line or Short answer label.
+
+  A label is a line that is a heading, starts in bold, or has a colon or
+  dash after the label word. Its verdict is read from that line or, failing
+  that, from the first sentence of the next paragraph.
   - Only the verdict's opening words count, after lead-ins such as "we'll",
     "I'd recommend" or "<Name> should".
   - A negated modal ("won't", "shouldn't") reads as "not".
