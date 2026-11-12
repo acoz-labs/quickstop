@@ -1,0 +1,19 @@
+{
+  "name": "sotsog",
+  "version": "0.1.0",
+  "description": "Research an outside idea, compare it honestly with what your repo or workflow already does, and write a decision document someone who wasn't there can act on: adopt, adapt, not now or no.",
+  "author": {
+    "name": "quickstop",
+    "url": "https://github.com/acoz-labs/quickstop"
+  },
+  "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/sotsog",
+  "repository": "https://github.com/acoz-labs/quickstop",
+  "license": "MIT",
+  "keywords": [
+    "research",
+    "decision-record",
+    "adoption",
+    "evaluation",
+    "agent-skills"
+  ]
+}
