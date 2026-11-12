@@ -50,7 +50,10 @@ BODY_RULES = (
      'only Claude Code sets this variable',
      'use a path relative to the skill folder, such as references/guide.md'),
     ('tool-name',
-     (rf'\b(?:{TOOLS})\(', rf'`\s*(?:{TOOLS})\s*`', rf'\b(?:{TOOLS}) tools?\b', rf'\b(?:{"|".join(MULTI_TOOLS)})\b'),
+     # A call needs real arguments: "Edit(s)", "Read(me)" and "Grep(1)" are English. The "tool" form needs a
+     # word before the name, so a sentence that opens "Agent tools differ" passes.
+     (rf'\b(?:{TOOLS})\((?!e?s\)|\w{{1,3}}\))', rf'`\s*(?:{TOOLS})\s*`', rf'(?<=\w )(?:{TOOLS}) tools?\b',
+      rf'\b(?:{"|".join(MULTI_TOOLS)})\b'),
      'it names a Claude Code tool; other agents name their tools differently',
      'say the action in plain words, such as "read the file" or "ask the user"'),
     ('output-style',

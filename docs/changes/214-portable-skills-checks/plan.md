@@ -68,7 +68,8 @@ no virtual environment, nothing installed into the repository:
    checked once.
 5. Unzip the wheels and copy `skills-ref/src` into a temporary folder for this
    run, run the validator as `<pinned python> -I -B -c` with `sys.path` set to
-   that folder, calling `skills_ref.cli.main` with `validate <skill dir>`, and
+   that folder, calling `skills_ref.validate` (the function the
+   `skills-ref validate` command runs) once per skill folder in one process, and
    delete the folder afterwards. `-I` keeps the working directory and
    environment variables off the import path, and `-B` stops Python writing
    bytecode (`-I` ignores `PYTHONDONTWRITEBYTECODE`). The repository's pinned
@@ -141,7 +142,7 @@ line.
 | `argument-substitution` | `$ARGUMENTS`, `${ARGUMENTS}`, `$ARGUMENTS[n]`, or `$0`-`$9` not followed by a digit or a decimal part | Describe the input in words ("the file the user names") |
 | `shell-injection` | `` !`command` `` inline, or a fence opened with ```` ```! ```` | Tell the agent which command to run and why |
 | `plugin-variable` | `$CLAUDE_…` or `${CLAUDE_…}` (`CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_SKILL_DIR`, `CLAUDE_PROJECT_DIR` and the rest) | Use a path relative to the skill folder, such as `references/x.md` |
-| `tool-name` | A Claude Code tool name used as one: a name followed directly by `(` (`Bash(git *)`), a code span that is exactly a name (`` `Read` ``), a name followed by "tool" or "tools" ("the Edit tool"), or a multi-word name that is never English (`AskUserQuestion`, `WebFetch`, `WebSearch`, `TodoWrite`, `NotebookEdit`, `MultiEdit`, `ExitPlanMode`, `BashOutput`, `KillShell`, `SlashCommand`) anywhere | Say the action in plain words ("read the file", "ask the user") |
+| `tool-name` | A Claude Code tool name used as one: a name followed directly by `(` and arguments longer than three characters or not a plural ending (`Bash(git *)`, but not "Edit(s)", "Read(me)" or "Grep(1)"), a code span that is exactly a name (`` `Read` ``), a name after another word and followed by "tool" or "tools" ("the Edit tool", but not a sentence opening "Agent tools differ"), or a multi-word name that is never English (`AskUserQuestion`, `WebFetch`, `WebSearch`, `TodoWrite`, `NotebookEdit`, `MultiEdit`, `ExitPlanMode`, `BashOutput`, `KillShell`, `SlashCommand`) anywhere | Say the action in plain words ("read the file", "ask the user") |
 | `output-style` | `output-style`, `output-styles`, `outputStyle`, or a code span followed by "output style" (`` `name` output style``) | Put the guidance in the skill or its references |
 | `hook` | Claude Code hook event names (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`, `SubagentStart`, `SubagentStop`, `PreCompact`, `PermissionRequest`), `hooks.json`, or a `"hooks"` JSON key | State the rule as an instruction, or keep the hook in a plugin exempted in `skills-check.json` |
 
