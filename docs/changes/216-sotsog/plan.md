@@ -162,17 +162,19 @@ Script graders, $0:
 - **Outcome**: the recorded outcome is in the case's expected set. The same
   reader serves both arms, and it reads only where a verdict is stated:
   1. The H1 decision line, when it matches the template (`# <idea>:
-     <outcome> for <repo or workflow>`); otherwise a verdict right after the
-     colon of any other H1 ("# Safe migrations: adopt in part for ...").
-  2. Then each decision label in turn: a line whose text starts with
-     Decision, Recommendation, Verdict, Conclusion, TL;DR, Bottom line,
-     Summary or Short answer and that is a heading, starts in bold, or follows
-     the label with a colon or dash, so body text such as "Decision makers
-     liked it" isn't a label. The verdict text is what follows the label on
-     that line; when that holds no outcome, it's the first sentence of the
-     next paragraph. A label with no verdict doesn't stop the search ("##
-     Decision drivers" before "## Recommendation"); the first verdict found
-     wins.
+     <outcome> for <repo or workflow>`).
+  2. Then decision labels, in two tiers. A label is a line that is a
+     heading, starts in bold, or has a colon or dash after the label word,
+     so body text such as "Decision makers liked it" isn't one. The verdict
+     is on the label's own line or, failing that, in the first sentence of
+     the next paragraph, and a label with no verdict doesn't stop the
+     search. The tiers, in order:
+     - Decision, Recommendation and Verdict labels anywhere in the document;
+     - a verdict right after the colon of any other H1 ("# Safe migrations:
+       adopt in part for ...");
+     - Conclusion, Summary, TL;DR, Bottom line and Short answer labels, whose
+       first sentence is often prose that starts with an outcome word ("No
+       team we read regretted it").
   3. Only the start of the verdict text counts, after skipping markers,
      punctuation and lead-ins: "my, our or the recommendation is (to)", "I
      or we (would, will) recommend, suggest or propose", "we or I (should,
@@ -190,7 +192,7 @@ Script graders, $0:
      adopted", "reject", "decline" → no. Words later in the sentence are
      ignored, so "adopt, with no change to CI" is adopt, and "No: adopting
      would remove review" is no.
-  4. No label, or no verdict at any label, is a miss.
+  4. No verdict at any of these is a miss.
 
   The unit tests cover each shape (H1, `## Recommendation` with the verdict
   in the next paragraph, `Verdict:` inline, a bold label, a `Conclusion`
