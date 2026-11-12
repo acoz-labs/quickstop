@@ -30,11 +30,11 @@ gets no entry, so `bin/check-skills` lints sotsog and runs skills-ref on it.
 (its `claude-code` target, path and acceptance doc) and regenerates
 `docs/catalog.md` with `bin/check-marketplace --write`. The advertised entry
 in `.claude-plugin/marketplace.json` and the `releases.json` pointer come in
-the pointer PR, because promote writes them from an accepted tag. A new
-entry isn't a description change to an existing one; if the reviewer reads
-the repository rule ("`catalog.json` description changes go in the pointer
-PR") as covering it, the entry moves to the pointer PR and nothing else
-changes.
+the pointer PR, because promote writes them from an accepted tag. The plan
+review ruled that a new candidate entry isn't a description change: promote
+reads the catalog at the accepted commit, and `bin/check-marketplace` rejects
+a manifest no declared package owns. The entry's description is written in
+its final form now; any later change to it goes in a pointer PR.
 
 **Spend flag.** The issue asks for `--max-cost-usd` on every run. Claude Code
 2.1.322 has no such flag (`claude --help` lists only `--max-budget-usd`), so
@@ -57,7 +57,7 @@ DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
 claude -p "<prompt.md>" --model claude-sonnet-5-5 --effort high \
   --tools Read,Glob,Grep,Write,Edit,Skill --allowedTools Read Glob Grep Write Edit Skill \
   --add-dir <run>/research --output-format stream-json --verbose \
-  --max-budget-usd 1.25 --setting-sources project,local --strict-mcp-config \
+  --max-budget-usd <per-run cap> --setting-sources project,local --strict-mcp-config \
   --no-session-persistence [--plugin-dir <result dir>/plugin]
 ```
 
@@ -69,11 +69,13 @@ claude -p "<prompt.md>" --model claude-sonnet-5-5 --effort high \
   from its description, as it would for a real user; the summary counts the
   runs where it was loaded, and a run where it wasn't still counts.
 - No Bash, no web tools: the only sources are local files, so both arms have
-  the same access. Model and effort are fixed now: Sonnet 5.5 at high effort
-  (its default, set explicitly). If the first screened run shows the full
-  gate can't fit the cap (see Spend), the fallback is medium effort for both
-  arms, decided before any counted run and reported to the lead; it's not
-  changed after counted results exist.
+  the same access. The model is Sonnet 5.5 for both arms. Effort starts at
+  high (its default, set explicitly) and drops to medium for both arms only
+  under the go/no-go rule in Spend, which always re-screens at the settings
+  the gate will use. Nothing changes after counted results exist.
+- The per-run `--max-budget-usd` is the same for both arms: $1.25 for the
+  screen, then for the gate at least twice the highest run cost the screen
+  measured (see Spend).
 - Each run's `init` record must show the model, no MCP server, and sotsog at
   0.1.0 from the retained copy (sotsog arm) or no sotsog (baseline). A run
   that fails this is invalid and is re-run once; see the miss rule.
@@ -120,7 +122,10 @@ get across and an optional `detail` it needn't, as in the quality eval:
 - **decided**: the outcome and what it covers (for adapt, which principles).
   For a case with two acceptable outcomes, the point is written so that
   either passes.
-- **why**: the main reason, from the fixtures.
+- **why**: the main reason, from the fixtures. In case 5 the point is the
+  deployer's requirement of signed releases with provenance from March 2027,
+  so a document that adopts for other reasons fails it and doesn't show the
+  flip.
 - **next**: what happens next (a go names the work handed on; a no or not now
   names that nothing changes and what would reopen it).
 
@@ -154,17 +159,29 @@ Script graders, $0:
      and none when it's no or not now;
   6. a `## Sources` section whose every list item carries a date
      (`YYYY-MM-DD`).
-- **Outcome**: the recorded outcome is in the case's expected set. For both
-  arms the outcome comes from the H1 decision line when there is one;
-  otherwise from the first line that starts with "Decision" or
-  "Recommendation" (any heading level, bold or plain). That line is mapped
-  with a fixed table: "adopt" → adopt; "adapt", "adopt in part", "partially
-  adopt" → adapt; "not now", "defer", "later", "revisit" → not now; "no",
-  "do not adopt", "don't adopt", "reject", "decline" → no. A line with no
-  match, or with matches for two different outcomes, is a miss; so is a
-  negated form of an outcome word ("not adopt" is no, never adopt). The
-  table is the same for both arms and is in the unit tests, attacker pass
-  included.
+- **Outcome**: the recorded outcome is in the case's expected set. The same
+  reader serves both arms, and it reads only where a verdict is stated:
+  1. The H1 decision line, when it matches the template (`# <idea>:
+     <outcome> for <repo or workflow>`).
+  2. Otherwise the first decision label: a heading, or a bold or plain line,
+     whose text starts with Decision, Recommendation, Verdict or Conclusion.
+     The verdict text is what follows the label on that line; when that holds
+     no outcome (a bare heading such as `## Recommendation`), it's the first
+     sentence of the next paragraph.
+  3. Only the start of the verdict text counts, after skipping bold or italic
+     markers, punctuation and a lead-in ("we should", "I recommend",
+     "recommend", "my recommendation is"). There it maps through a fixed
+     table: "adopt" → adopt; "adapt", "adopt in part", "partially adopt" →
+     adapt; "not now", "defer", "later", "not yet" → not now; "no", "do not
+     adopt", "don't adopt", "not adopt", "reject", "decline" → no. Words
+     later in the sentence are ignored, so "adopt, with no change to CI" is
+     adopt, and "No: adopting would remove review" is no.
+  4. No label, or a verdict start that matches nothing, is a miss.
+
+  The unit tests cover each shape (H1, `## Recommendation` with the verdict
+  in the next paragraph, `Verdict:` inline, a bold label, a `Conclusion`
+  heading) and an attacker pass: a qualifier or negation added to every
+  allowed form, and an outcome word placed after the verdict start.
 - **Depth, script half**: the document cites, by file name or exact title
   line, at least one library file beyond the link, at least one `critique`
   and at least one `competitor`.
@@ -200,14 +217,21 @@ each line names:
   real run: its document (or lack of one) is graded, and every grader it
   fails is a miss.
 - A run that fails the `init` check, or dies on an API or network error
-  before the model's first reply, is invalid. It's re-run once, logged; a
-  second invalid run is a miss on every grader.
+  before the model's first reply, is invalid. It's re-run once, logged.
 - A judge call that errors or hits its cap is "not graded" and is retried
-  once; a judge that still can't grade a run is a miss for the sotsog arm and
-  is reported, never silently dropped.
-- "Above the baseline" means strictly greater, as the issue states: bar 2
-  compares sotsog's outcome count with the baseline's, bar 3 compares the
-  cold-read item percentages.
+  once.
+- What's still invalid or ungraded after its retry counts against sotsog and
+  in the baseline's favour:
+  - for sotsog's own thresholds (every bar's sotsog figure), it's a miss;
+  - for the baseline's figures in the strictly-above comparisons (bars 2 and
+    3), it's a pass, so a broken judge or a baseline run that never started
+    can't hand sotsog a margin it didn't earn.
+
+  The summary reports both counts for each arm: as scored, and how many were
+  invalid or ungraded.
+- "Above the baseline" means strictly greater, as the issue states and the
+  plan review ruled: bar 2 compares sotsog's outcome count with the
+  baseline's, bar 3 compares the cold-read item percentages.
 
 **Pass bars**, exactly as the issue fixes them, computed by `summarize`:
 
@@ -223,7 +247,7 @@ each line names:
 
 Cost and time per run are reported for both arms, not gated.
 
-**Calibration.** Every case gets four hand-written decision documents under
+**Calibration.** Every case gets five hand-written decision documents under
 `calibration/`, written from the prompt, fixtures and key, never from a run:
 
 - `good`: passes every grader (structure, outcome, all three cold-read items,
@@ -239,9 +263,17 @@ Cost and time per run are reported for both arms, not gated.
   points ("there are trade-offs"), a critique cited by name only, a gap named
   as a topic, a brief that says "implement it" with no steps, two open
   questions on no-go cases. Each targeted grader must fail.
+- `plain`: shaped like a baseline document, not the template: free headings,
+  no comparison table in the template's columns, and the verdict stated a
+  different way in each case (`## Recommendation` with the verdict in the
+  next paragraph; `Verdict:` inline; a bold "Decision" label; a `##
+  Conclusion` heading; an H1 that isn't the template's). Each has an expected
+  outcome in its case's set and expected cold-read, brief, open-question,
+  depth and gap verdicts; structure is expected to fail. This calibrates the
+  graders that score the baseline on what the baseline writes.
 
 The expected verdict for every (case, sample, grader) is in
-`calibration/expected.json`. Script graders run on all 20 samples in every
+`calibration/expected.json`. Script graders run on all 25 samples in every
 `bin/ci` through `tests/test_sotsog_eval.py`. The judge calibration is one
 paid run (`calibrate --judges`) on the frozen tree; every row must match
 before any arm runs. A counted run refuses to start without a passing
@@ -264,11 +296,13 @@ table.
 - No overlap: a unit test greps every file under `plugins/sotsog/` for each
   case's listed fixture terms and fails on any hit.
 
-**Runs and order.** Screen sotsog at 1 run per case, case 1 first and alone
-(it also proves the plumbing), then cases 2 to 5. The counted gate (3 runs
-per case per arm, 30 runs) starts only on a tree the reviewer has cleared,
-and only if the screen shows every bar could still pass. Screen runs are
-never counted. Three runs at a time.
+**Runs and order.** The screen is sotsog at 1 run per case plus 1 baseline
+run on case 1, so both arms' costs are measured. Case 1 runs first and alone
+in both arms (it also proves the plumbing), then sotsog on cases 2 to 5. The
+counted gate (3 runs per case per arm, 30 runs) starts only on a tree the
+reviewer has cleared, only if the screen shows every bar could still pass,
+and only under the go/no-go rule in Spend. Screen runs are never counted.
+Three runs at a time, dropping to one near the stop line (see Spend).
 
 ### Spend
 
@@ -281,29 +315,59 @@ never counted. Three runs at a time.
   before each paid invocation starts.
 - The runner reads `cumulative_usd` before every call and won't start one
   when the cumulative total plus the caps of calls in flight plus this call's
-  cap would pass the stop line. The stop line is $14 until the lead says go,
-  then $20, set by a runner flag; $20 is a hard ceiling no flag lifts. Before
-  each invocation the runner also prints its projected cost; if that
-  projection would cross $14, I stop and report before starting, so the
-  pause never splits an invocation.
-- Projection (estimates until measured; the quality eval's Sonnet judge
-  calls cost about $0.013 each, and an agentic research run is assumed at
-  roughly ten times that eval's $0.05 reply):
+  cap would pass the stop line. The stop line is $14, fixed by the requester;
+  only a go relayed from case-sotsog through the lead raises it, to $20, and
+  $20 is a hard ceiling no flag lifts. It runs three calls at a time while
+  the room under the stop line covers three caps, and one at a time after
+  that.
 
-| Stage | Calls | Estimate |
+**Projection.** Estimates until measured. Judge calls are taken at $0.015
+each (the quality eval measured about $0.013), about 4.4 per document. Task
+runs use the plan review's expectation for 20 to 30 turns at high effort:
+$0.50 to $0.80 per sotsog run and $0.30 to $0.50 per baseline run, so the
+midpoints below.
+
+| Stage | What | Estimate |
 |---|---|---|
-| Judge calibration, once, plus one retry | 20 documents × ~4.4 judges | $2.60 |
-| Screen, 5 sotsog runs plus judges | 5 tasks | $2.10 |
-| Gate, baseline (15 runs at ~$0.20) plus judges | 15 tasks | $4.00 |
-| Gate, sotsog (15 runs at ~$0.35) plus judges | 15 tasks | $6.25 |
-| **Total** | | **$14.95** |
-| With 25% margin | | **$18.70** |
+| Judge calibration | 25 documents, ~110 judge calls | $1.65 |
+| Re-calibration after a refreeze, if one is needed | the same | $1.65 |
+| Screen | 5 sotsog runs, 1 baseline run, judges | $4.05 |
+| One re-screen (a skill change, or medium effort) | the same | $4.05 |
+| Gate at high effort | 15 baseline runs at $0.40, 15 sotsog at $0.65, judges | $17.75 |
 
-  After the first screened run, the projection is redone from measured cost.
-  If the full gate with 25% margin no longer fits under $20, I report to the
-  lead before any further paid run, with the effort fallback as the
-  recommendation. The pause at $14 is expected to fall before the gate; I
-  ask for the go with the measured projection then.
+At these estimates the high-effort gate doesn't fit after the screen: about
+$5.70 spent leaves $14.30, and $17.75 × 1.25 is $22.20. The rule below
+decides on measured numbers, not on this table.
+
+**Go/no-go rule, applied after every screen and re-screen.** Let *spent* be
+`cumulative_usd` from the ledger (every screen and re-screen counts), and
+*G* the measured gate cost at the screened settings: 15 × the baseline
+run's cost + 15 × the mean sotsog run cost + 30 × the mean judge cost per
+document.
+
+1. **Fit under the cap.** If spent + 1.25 × G ≤ $20, the gate is possible at
+   these settings. If not, and the screen was at high effort, switch both
+   arms to medium and re-screen (all five sotsog cases and the baseline on
+   case 1), so the screen always measures the settings the gate will use;
+   then apply this rule again. If it doesn't fit at medium either, stop and
+   report to the lead: no gate starts that can't finish, because a gate cut
+   off by the ceiling is incomplete, which means no release.
+2. **The $14 pause.** If spent + 1.25 × G would take total spend past $14,
+   I stop before starting the counted gate and report the measured numbers
+   (spent, per-run means and highest run per arm, G, the settings) to the
+   lead. Only a go from case-sotsog, relayed by the lead, lets the gate run
+   past $14; with that go the stop line is $20 for the whole gate, so it never
+   pauses partway. If the projection stays at or under $14, the gate runs
+   with the stop line at $14, as the brief says, and if it reaches $14
+   anyway it stops and I report.
+3. **Per-run cap.** The gate's `--max-budget-usd` per task run is twice the
+   highest run cost the screen measured at the gate's settings, rounded up
+   to the next $0.05, the same for both arms. The projection uses means; the
+   runner reserves caps, so if it refuses a gate run near the stop line, the
+   gate is incomplete and I report it rather than raise anything.
+
+The same rule covers the screen itself: if starting a screen or re-screen
+would take projected spend past $14, I stop and report first.
 
 ## Files that change
 
@@ -335,13 +399,18 @@ never counted. Three runs at a time.
    refreeze if a row misses; no sotsog file exists yet.
 4. The plugin and catalog entry; `bin/ci` passes with sotsog linted and
    validated, no exemption; the overlap test passes.
-5. Screen: case 1, then cases 2 to 5, one run each (lead told first).
-   Redo the projection. If a bar looks out of reach, change the skill (never
-   the suite) and screen the new tree.
+5. Screen (lead told first): case 1 in both arms, then sotsog on cases 2
+   to 5. Apply the go/no-go rule to the measured costs, re-screening at
+   medium effort if it says so. If a bar looks out of reach, change the skill
+   (never the suite) and re-screen the new tree; every re-screen counts
+   against the rule.
 6. Simplify, docs, open the PR for review, report to the lead with the head
    and tree.
-7. After the reviewer clears the tree, ask for the go past $14 with the
-   projection, then run the gate: baseline and sotsog, 15 runs each.
+7. After the reviewer clears the tree, apply the go/no-go rule. If the
+   gate's projection passes $14, stop and report the measured numbers; run
+   the gate (baseline and sotsog, 15 runs each) only on a go from case-sotsog
+   relayed by the lead, with the stop line at $20. Otherwise run it with the
+   stop line at $14.
 8. `summarize`, the acceptance doc, the bar table on the issue and to the
    lead. If any bar fails: no release, and the table is reported as is.
 
@@ -354,16 +423,20 @@ never counted. Three runs at a time.
   outcome (both 15/15) and fail bar 2 with nothing wrong in sotsog. The
   issue's wording stands; the plan doesn't reinterpret it.
 - **Template-shaped graders.** Structure follows the issue's template, so the
-  baseline will fail it; it's gated for sotsog only. Outcome uses one mapping
-  for both arms, so the comparison is fair, but a baseline document with an
-  unusual decision phrase scores a miss; the summary lists every unmapped
-  line so the reviewer can see them.
+  baseline will fail it; it's gated for sotsog only. The outcome reader
+  handles the common non-template shapes and is calibrated on a
+  baseline-shaped document per case before any run. A baseline verdict in a
+  shape it doesn't know still scores a miss, and grading can't change after
+  results, so this is a known limit of bar 2's comparison.
 - **Judge noise.** Calibration includes borderline samples per grader, the
   judges see the least they need, and the comparator never sees the
   document.
-- **Cost.** Agentic research runs are the unknown. The first screened run
-  measures them; the stop line, per-call caps and the report-before-crossing
-  rule keep spend under $20.
+- **Cost.** At the costs the plan review expects, the high-effort gate
+  doesn't fit and even the medium one may not. The screen measures both
+  arms, the go/no-go rule picks the settings or stops before a gate that
+  can't finish, and the stop line and per-call caps keep spend under $14
+  without a go and under $20 with one. A likely result is a report to the
+  lead with measured numbers and no gate.
 - **Headless runs.** The skill asks questions and expects the user to decide;
   the prompt gives the answers and the go-ahead up front, the same for both
   arms. A sotsog run that stops to ask instead of writing the file fails, as
