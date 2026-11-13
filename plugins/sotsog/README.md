@@ -8,7 +8,7 @@ It's one skill that follows the [Agent Skills specification](https://agentskills
 
 - **Research beyond your link:** where the idea came from, independent teams using it, evidence, critiques and failures, and other answers to the same problem.
 - **A written skeptical read:** who gains if you adopt it, what it was measured against, what's missing, whose conditions it was proven under, and whether anyone without a stake agrees.
-- **An honest comparison:** each principle of the idea rated against your actual files as already have, partly, gap, conflicts or doesn't apply.
+- **An honest comparison:** your own side questioned as hard as the source (does it work, or does it only exist on paper?), and each principle of the idea rated against your actual files as already have, on paper only, partly, gap, conflicts or doesn't apply.
 - **Findings and at most five questions,** each with a recommended answer.
 - **A decision document** in your repo's decisions folder. On a go, it includes an implementation brief an agent with no other context could start from. On a no, it says why, what would change the answer, and anything still worth borrowing.
 
@@ -27,6 +27,7 @@ In another agent tool, copy `skills/sotsog/` into the folder that tool reads ski
 
 ## Limits
 
+- sotsog is a workflow: its results depend on the model and agent tool running it.
 - Research is only as wide as the agent's access. Without web access, it asks you to paste or point to sources and says the research is limited to them.
 - Fetched pages are treated as data; instructions inside them are ignored and reported.
 - The decision document never copies secrets or private data from your repo, but review it before sharing it.

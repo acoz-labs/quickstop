@@ -54,8 +54,15 @@ Follow [references/comparison.md](references/comparison.md).
 
 1. Read the actual files: the repo's docs, contributing guide, scripts, CI configuration, decisions and anything else the idea touches. When the workflow lives outside the repo, use the files the user names or their description.
 2. For each principle, cite where and how the user handles it today (file and what it does). Mark anything taken from the user's description rather than seen.
-3. Rate each principle with exactly one of these: **already have**, **partly**, **gap** (we don't, and it would help), **conflicts** (it would break something we rely on), **doesn't apply**.
-4. List anything the user does now that the idea would remove or weaken. A conflict with something they rely on (a promise to a customer, a funder's condition, a legal or audit requirement) weighs more than any gain.
+3. Question our side as hard as the source:
+   - **Does it work, or does it only exist?** A config file, or a doc saying we do it, isn't enough. Look for evidence that it works: tests, logs, results, past incidents.
+   - **Docs against reality.** Where the docs describe a process, check that the code or logs match.
+   - **Measured against what:** do we know ours works, or do we assume it?
+   - **Known weak spots:** recent failures, workarounds and complaints in the repo's history and issues.
+   - **Whose conditions:** was ours built for an older scale or setup that no longer holds?
+   - **The user's own claims:** note which parts you couldn't check. When the user says something works, ask briefly how they know.
+4. Rate each principle with exactly one of these: **already have** (we do it, with evidence that it works), **on paper only** (written down or configured, but no evidence that it works), **partly**, **gap** (we don't, and it would help), **conflicts** (it would break something we rely on), **doesn't apply**.
+5. List anything the user does now that the idea would remove or weaken. A conflict with something they rely on (a promise to a customer, a funder's condition, a legal or audit requirement) weighs more than any gain.
 
 ## 3. Show the findings
 
@@ -96,7 +103,7 @@ One Markdown file, using the template in [references/decision-doc.md](references
 - **Every outcome:** under "What we're not taking, and why", give each principle rated **partly** or **gap** that isn't taken, and each item worth borrowing, exactly one status: **taken now** (with who does it and the first step), **held** for a named trigger, or **dropped**. Never leave one for someone to decide later: if a detail such as a number is open, propose it, or hold the item for a trigger. The comparison table, "Revisit when" and that section must agree.
 - **What happens next** (the opening's second sentence) must agree with the rest of the document. If it asks anyone to do anything, even on a no, name each action there with its owner. Say nothing changes only when nothing does. A risk or problem found along the way that's unrelated to the idea is still reported in full: keep it apart from the decision, say it's separate, and give it its own owner and next step.
 - Never copy secrets, credentials or private data from the repo into the document.
-- In the sources section, give each source's link or file path and the date you read it.
+- In the sources section, give each source its own list item with its link or file path and the date you read it; one shared date for the whole list isn't enough.
 
 **Where it goes:**
 
