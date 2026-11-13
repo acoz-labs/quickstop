@@ -7,7 +7,9 @@ Refs https://github.com/acoz-labs/quickstop/issues/216
 Quickstop gains a new plugin, sotsog 0.1.0, whose one skill researches an
 outside idea, compares it with the user's repo or workflow and writes a
 decision document; it ships only if a frozen, paid eval gate passes all seven
-of the issue's bars within $20 of model spend. This PR is the plugin PR. The
+of the issue's bars within $25 of model spend (the cap was $20 until the
+[contract amendment](https://github.com/acoz-labs/quickstop/issues/216#issuecomment-6860924813)
+of 2026-11-13). This PR is the plugin PR. The
 pointer PR (`releases.json`, regenerated marketplace index) and the acoz.dev
 Quickstop page follow after acceptance and the tag, as the repository's
 release takes two PRs.
@@ -359,9 +361,11 @@ Three runs at a time, dropping to one near the stop line (see Spend).
   before each paid invocation starts.
 - The runner reads `cumulative_usd` before every call and won't start one
   when the cumulative total plus the caps of calls in flight plus this call's
-  cap would pass the stop line. The stop line is $14, fixed by the requester;
-  only a go relayed from case-sotsog through the lead raises it, to $20, and
-  $20 is a hard ceiling no flag lifts. It runs three calls at a time while
+  cap would pass the stop line. The stop line is $21, fixed by the requester
+  (it was $14 before the amendment); only a go relayed from case-sotsog
+  through the lead raises it, to $25, and $25 is a hard ceiling no flag
+  lifts. The runner enforces $14 and $20 until its constants move in the
+  same refreeze as bar 2's amended rule. It runs three calls at a time while
   the room under the stop line covers three caps, and one at a time after
   that.
 
@@ -389,21 +393,21 @@ decides on measured numbers, not on this table.
 run's cost + 15 × the mean sotsog run cost + 30 × the mean judge cost per
 document.
 
-1. **Fit under the cap.** If spent + 1.25 × G ≤ $20, the gate is possible at
+1. **Fit under the cap.** If spent + 1.25 × G ≤ $25, the gate is possible at
    these settings. If not, and the screen was at high effort, switch both
    arms to medium and re-screen (all five sotsog cases and the baseline on
    case 1), so the screen always measures the settings the gate will use;
    then apply this rule again. If it doesn't fit at medium either, stop and
    report to the lead: no gate starts that can't finish, because a gate cut
    off by the ceiling is incomplete, which means no release.
-2. **The $14 pause.** If spent + 1.25 × G would take total spend past $14,
+2. **The $21 pause.** If spent + 1.25 × G would take total spend past $21,
    I stop before starting the counted gate and report the measured numbers
    (spent, per-run means and highest run per arm, G, the settings) to the
    lead. Only a go from case-sotsog, relayed by the lead, lets the gate run
-   past $14; with that go the stop line is $20 for the whole gate, so it never
-   pauses partway. If the projection stays at or under $14, the gate runs
-   with the stop line at $14, as the brief says, and if it reaches $14
-   anyway it stops and I report.
+   past $21; with that go the stop line is $25 for the whole gate, so it never
+   pauses partway. If the projection stays at or under $21, the gate runs
+   with the stop line at $21, and if it reaches $21 anyway it stops and I
+   report.
 3. **Per-run cap.** The gate's `--max-budget-usd` per task run is twice the
    highest run cost the screen measured at the gate's settings, rounded up
    to the next $0.05, the same for both arms. The projection uses means; the
@@ -411,7 +415,7 @@ document.
    gate is incomplete and I report it rather than raise anything.
 
 The same rule covers the screen itself: if starting a screen or re-screen
-would take projected spend past $14, I stop and report first.
+would take projected spend past $21, I stop and report first.
 
 ## Files that change
 
@@ -454,10 +458,10 @@ would take projected spend past $14, I stop and report first.
 6. Simplify, docs, open the PR for review, report to the lead with the head
    and tree.
 7. After the reviewer clears the tree, apply the go/no-go rule. If the
-   gate's projection passes $14, stop and report the measured numbers; run
+   gate's projection passes $21, stop and report the measured numbers; run
    the gate (baseline and sotsog, 15 runs each) only on a go from case-sotsog
-   relayed by the lead, with the stop line at $20. Otherwise run it with the
-   stop line at $14.
+   relayed by the lead, with the stop line at $25. Otherwise run it with the
+   stop line at $21.
 8. `summarize`, the acceptance doc, the bar table on the issue and to the
    lead. If any bar fails: no release, and the table is reported as is.
 
@@ -481,8 +485,8 @@ would take projected spend past $14, I stop and report first.
 - **Cost.** At the costs the plan review expects, the high-effort gate
   doesn't fit and even the medium one may not. The screen measures both
   arms, the go/no-go rule picks the settings or stops before a gate that
-  can't finish, and the stop line and per-call caps keep spend under $14
-  without a go and under $20 with one. A likely result is a report to the
+  can't finish, and the stop line and per-call caps keep spend under $21
+  without a go and under $25 with one. A likely result is a report to the
   lead with measured numbers and no gate.
 - **Headless runs.** The skill asks questions and expects the user to decide;
   the prompt gives the answers and the go-ahead up front, the same for both
