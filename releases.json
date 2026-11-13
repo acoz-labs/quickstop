@@ -34,6 +34,42 @@
       }
     },
     {
+      "name": "sotsog",
+      "harness": "claude-code",
+      "commit": "0240a4e863e006cc3361e5b4f85f18e064d9dcf7",
+      "sha256": "738a3f477f4edcab209a91fc2b60eca007a4b26f1671438bdae8fd76172054d6",
+      "target": {
+        "format": "claude-plugin",
+        "path": "plugins/sotsog",
+        "acceptance": "docs/acceptance/sotsog.md"
+      },
+      "manifest": {
+        "name": "sotsog",
+        "version": "0.1.0",
+        "description": "Research an outside idea, compare it honestly with what your repo or workflow already does, and write a decision document someone who wasn't there can act on: adopt, adapt, not now or no.",
+        "author": {
+          "name": "quickstop",
+          "url": "https://github.com/acoz-labs/quickstop"
+        },
+        "homepage": "https://github.com/acoz-labs/quickstop/tree/main/plugins/sotsog",
+        "repository": "https://github.com/acoz-labs/quickstop",
+        "license": "MIT",
+        "keywords": [
+          "research",
+          "decision-record",
+          "adoption",
+          "evaluation",
+          "agent-skills"
+        ]
+      },
+      "provenance": {
+        "kind": "sdlc-accepted",
+        "issue": 216,
+        "artifact": "sha256:5cc24b2559db68a5373b6bf7e2dc5d56bd939b9d0bee3378ae5bd492e0c6a3f1",
+        "acceptance": "https://github.com/acoz-labs/quickstop/issues/216#issuecomment-6861971495"
+      }
+    },
+    {
       "name": "writing-for-humans",
       "harness": "claude-code",
       "commit": "84c6a3c5c2e07e7c6f063fe6f9fb30eff6394cf4",
