@@ -5,7 +5,7 @@ Use these headings exactly, in this order. Leave out "Implementation brief" on n
 ```markdown
 # <Idea>: <adopt | adapt | not now | no> for <repo or workflow>
 
-<Sentence 1: the decision.> <Sentence 2: what happens next, or that nothing does.> <Sentence 3: what changes or what's at stake.>
+<Sentence 1: the decision.> <Sentence 2: what happens next, naming every action the document asks for and its owner, or that nothing does.> <Sentence 3: what changes or what's at stake.>
 
 Date, who decided, sources read.
 
@@ -28,7 +28,7 @@ Concrete triggers. On a go, includes when to roll back.
 (go only) Goal (one sentence); in scope / out of scope; changes in order, each naming the file or step; acceptance criteria; how to tell it worked (what to measure, when); how to verify and roll back; open risks.
 
 ## What we're not taking, and why
-(required on no and not now; on adapt, the principles left out) Each principle rated partly or gap that isn't taken: taken now, held for a named trigger, or dropped. Anything worth borrowing, from the idea's side practices or other sources, and whether it's taken now.
+(required on no and not now; on adapt, the principles left out) Each principle rated partly or gap that isn't taken, and anything worth borrowing (the idea's side practices or other sources), with one status: taken now (who, and the first step), held for a named trigger, or dropped. Nothing left for someone to decide later.
 
 ## Sources
 One list item per source: link or file path and the date read (YYYY-MM-DD); who wrote it and what they gain; shown versus claimed; the conditions it was proven under.
