@@ -53,4 +53,4 @@ Every paid `claude` call carried `--max-budget-usd` and `DISABLE_AUTOUPDATER=1`.
 
 ## Sanity run
 
-Not run yet.
+Run on 2026-11-13: plugin tree `2c4b9b20`, fixture case `1-already-have` from the archive tag, `claude-sonnet-5-5` at high effort, no judges, $0.2292. The outcome was no, and the structure checks passed. The decision document and the notes for the reviewer's read-through are in [the PR comment](https://github.com/acoz-labs/quickstop/pull/217#issuecomment-6861701625). Model spend after it was $11.44. The reviewer's verdict is recorded in the review.
