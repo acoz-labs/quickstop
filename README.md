@@ -18,6 +18,9 @@ Visit the [Quickstop storefront](https://acoz.dev/projects/quickstop/) for a loo
 Quickstop is acoz-labs' marketplace of agent plugins and skills.
 [Writing for Humans](plugins/writing-for-humans) provides a selectable
 writing style and two skills for clearer human-facing communication.
+[sotsog](plugins/sotsog) researches an outside idea, compares it honestly with
+what your repo or workflow already does, and writes a decision document: adopt,
+adapt, not now or no.
 [Claudit](plugins/claudit) was retired on 2026-11-11: run `/doctor`, then
 `/doctor prompt-audit`, instead, and read
 [why Claudit was retired](https://acoz.dev/blog/retiring-claudit/).
