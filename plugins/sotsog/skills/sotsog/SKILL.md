@@ -84,7 +84,7 @@ If the user has already given answers, or says they can't answer follow-ups, don
    - **not now**: right idea, wrong time (name the blocker);
    - **no**: it doesn't fit, or its costs outweigh its gains.
 
-   When a principle that defines the idea is rated **conflicts** and isn't taken, the outcome is **no**, or **not now** when the blocker could lift. Compatible side practices, and anything borrowed from other sources, don't make it adapt: list them as worth borrowing in the decision document, each with a status (see phase 6).
+   When none of the idea's own defining principles is taken (for instance, because they conflict), the outcome is **no**, or **not now** when the blocker could lift. A conflict on one defining principle doesn't force no when another is taken. Compatible side practices, and anything borrowed from other sources, don't make it adapt: list them as worth borrowing in the decision document, each with a status (see phase 6).
 3. The user decides. If they've asked you to write the decision down without waiting (or can't reply), record your recommendation as the decision and say it was made on their stated answers.
 
 ## 6. Write the decision document
@@ -94,7 +94,7 @@ One Markdown file, using the template in [references/decision-doc.md](references
 - **Go (adopt or adapt):** include the implementation brief: complete enough that an agent with no other context could start the work, including how to tell afterwards whether it worked.
 - **No or not now:** leave no question a cold reader would ask. Say why not, what would change the answer, whether anything is still worth borrowing (or that nothing is), and whether anything changes now.
 - **Every outcome:** under "What we're not taking, and why", give each principle rated **partly** or **gap** that isn't taken, and each item worth borrowing, exactly one status: **taken now** (with who does it and the first step), **held** for a named trigger, or **dropped**. Never leave one for someone to decide later: if a detail such as a number is open, propose it, or hold the item for a trigger. The comparison table, "Revisit when" and that section must agree.
-- **What happens next** (the opening's second sentence) must agree with the rest of the document. If it asks anyone to do anything, even on a no, name each action there with its owner. Say nothing changes only when nothing does.
+- **What happens next** (the opening's second sentence) must agree with the rest of the document. If it asks anyone to do anything, even on a no, name each action there with its owner. Say nothing changes only when nothing does. A risk or problem found along the way that's unrelated to the idea is still reported in full: keep it apart from the decision, say it's separate, and give it its own owner and next step.
 - Never copy secrets, credentials or private data from the repo into the document.
 - In the sources section, give each source's link or file path and the date you read it.
 
