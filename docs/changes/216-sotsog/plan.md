@@ -6,13 +6,47 @@ Refs https://github.com/acoz-labs/quickstop/issues/216
 
 Quickstop gains a new plugin, sotsog 0.1.0, whose one skill researches an
 outside idea, compares it with the user's repo or workflow and writes a
-decision document; it ships only if a frozen, paid eval gate passes all seven
-of the issue's bars within $25 of model spend (the cap was $20 until the
-[contract amendment](https://github.com/acoz-labs/quickstop/issues/216#issuecomment-6860924813)
-of 2026-11-13). This PR is the plugin PR. The
+decision document. It ships when `bin/ci` passes with sotsog checked like any
+other skill and a reviewer finds one sanity run sound, within $25 of model
+spend. This PR is the plugin PR. The
 pointer PR (`releases.json`, regenerated marketplace index) and the acoz.dev
 Quickstop page follow after acceptance and the tag, as the repository's
 release takes two PRs.
+
+## Change of course: amendment 2
+
+[Contract amendment 2](https://github.com/acoz-labs/quickstop/issues/216#issuecomment-6861575600)
+(2026-11-13) replaced the comparative eval gate. sotsog is a workflow, and its
+results vary by agent tool and model, so one model's scores against a plain
+prompt don't certify it. The screens also showed the comparison couldn't
+separate the arms: the baseline scored 5/5 outcomes and 14/15 cold-read items.
+
+- The suite, runner, fixtures, keys, calibration samples and their tests are
+  out of this PR. They're kept on the tag `archive/sotsog-eval-2026-11-13`
+  (commit 123d62f), and the screen results and spend are in
+  `docs/acceptance/sotsog.md`.
+- The release gate is `bin/ci` green, with no `SKIPPED:` line and no
+  exemption, plus one sanity run: the final skill on one archived fixture
+  case, run from a scratch checkout of the tag with the final plugin
+  (`--plugin`), with no judges, a $0.70 per-run cap and a $1 invocation cap.
+  The reviewer reads the document; there's no scored bar.
+- Skill change: phase 2 questions our own side as hard as the source:
+  - whether it works or only exists, with a new Fit value, **on paper only**;
+  - the docs against reality;
+  - what ours is measured against;
+  - known weak spots;
+  - whose conditions it was built for;
+  - the user's own claims.
+
+  The comparison reference, the decision template and the README follow it.
+  The plugin README says sotsog is a workflow whose results depend on the
+  model and tool running it.
+- Spend: $11.21 before the sanity run. Pause and report past $15; the cap
+  stays $25.
+
+The sections below are the original plan, kept for the record. Where they
+describe the eval gate, the pass bars or the spend stop lines, this section
+replaces them.
 
 ## Decisions
 

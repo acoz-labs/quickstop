@@ -170,6 +170,15 @@ review or acceptance evidence.
   contributor writes the pointer files with promote's logic, and the
   reviewer confirms by running promote on the head ("Already points at this
   accepted artifact", no diff).
+- Gate a workflow skill (one whose results depend on the agent tool and
+  model) on `bin/ci` and a read-through of one sanity run, not on a scored
+  comparison with a plain prompt. sotsog's screens showed a plain-prompt
+  baseline near the ceiling (5/5 outcomes, 14/15 cold-read items), so no
+  "strictly above the baseline" bar could pass. Before designing any
+  comparative bar, screen the baseline with the judges.
+- Keep an eval runner's spend limits as arguments or config outside the
+  frozen files: sotsog's hard-coded $20 ceiling meant a cap change forced a
+  refreeze and a paid recalibration.
 - Paid eval gates: define grader metrics and the miss-counting rule before
   the first paid run; make structural checks (paths, commands) script
   graders, because model judges misgrade them; run the $0 script-only scan
@@ -269,9 +278,8 @@ review or acceptance evidence.
   audit contract), not writing quality.
   `bin/writing-for-humans-quality-eval` runs the quality eval: the same writing tasks under the
   default, Concise and Writing for Humans styles, graded for cold-read clarity, pedantry and repetition.
-  `bin/sotsog-eval` runs sotsog's release gate (`evals/sotsog/`): the same research-and-decide task
-  with and without the plugin, on frozen fixtures, keys and graders, with a CSV spend ledger and a
-  stop line that refuses any call that could pass it.
+  sotsog's comparative eval (suite, runner, fixtures, keys, calibration) was retired before release
+  and is kept on the tag `archive/sotsog-eval-2026-11-13`.
 - `docs/`: development, delivery and maintained investigation findings.
 - `.sdlc/`: managed standard identity and repository-specific artifact profile.
 
