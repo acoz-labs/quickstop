@@ -18,6 +18,8 @@ Merit verdict and why. The skeptical read, each by its label: **Who gains**, **M
 ## How it compares with what we do
 | Principle | How they do it | How we do it | Fit |
 
+For each already have, the evidence that it works (a test, log, result or incident) and where it is. What couldn't be checked, and the user's claims taken on trust.
+
 ## Why this decision
 Gains, costs, risks; the strongest case against (skeptic pass); the user's answers that shaped it.
 
@@ -34,7 +36,7 @@ Concrete triggers. On a go, includes when to roll back.
 One list item per source: link or file path and the date read (YYYY-MM-DD); who wrote it and what they gain; shown versus claimed; the conditions it was proven under.
 ```
 
-The outcome in the title is one of the four words, in lower case. The fit column uses only: already have, partly, gap, conflicts, doesn't apply.
+The outcome in the title is one of the four words, in lower case. The fit column uses only: already have, on paper only, partly, gap, conflicts, doesn't apply.
 
 ## A go example
 
