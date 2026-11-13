@@ -8,7 +8,7 @@ sotsog 0.1.0 ships only if the frozen eval gate in [evals/sotsog](../../evals/so
 2. **No overlap.** `tests/test_sotsog_eval.py` greps every file of `plugins/sotsog/` for each case's fixture-specific terms, and fails on any hit.
 3. **Calibration.** `bin/sotsog-eval calibrate --judges` must match every expected verdict, on a clean tree with the frozen suite tree and runner blob, before any arm runs.
 4. **Screen.** sotsog runs once per case, plus one baseline run on case 1, so both arms' costs are measured. Screens never count.
-5. **Go or no-go on spend.** This rule is in `docs/changes/216-sotsog/plan.md`. The gate starts only if its measured projection fits under the $20 cap with 25% margin. A projection past $14 needs a go from the requester first.
+5. **Go or no-go on spend.** This rule is in `docs/changes/216-sotsog/plan.md`. The gate starts only if its measured projection fits under the $25 cap with 25% margin. A projection past $21 needs a go from the requester first (both raised from $20 and $14 by the [contract amendment](https://github.com/acoz-labs/quickstop/issues/216#issuecomment-6860924813)).
 6. **Gate.** Both arms run 3 times per case, on a tree the reviewer has cleared, with the same model, effort, tools and per-run cap. `summarize` computes the bars.
 
 Every paid `claude` call carries `--max-budget-usd`. The issue asks for `--max-cost-usd`, but Claude Code 2.1.322 has no such flag. In this repository, `--max-cost-usd` is the runner's ceiling for one whole invocation. Every call sets `DISABLE_AUTOUPDATER=1`.
