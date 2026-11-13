@@ -104,6 +104,7 @@ One Markdown file, using the template in [references/decision-doc.md](references
 - **What happens next** (the opening's second sentence) must agree with the rest of the document. If it asks anyone to do anything, even on a no, name each action there with its owner. Say nothing changes only when nothing does. A risk or problem found along the way that's unrelated to the idea is still reported in full: keep it apart from the decision, say it's separate, and give it its own owner and next step.
 - Never copy secrets, credentials or private data from the repo into the document.
 - In the sources section, give each source its own list item with its link or file path and the date you read it; one shared date for the whole list isn't enough.
+- Cite files in the repo by their path in the repo. For a source outside the repo, give its URL, or its title if it has none; never an absolute path on the user's machine.
 
 **Where it goes:**
 
