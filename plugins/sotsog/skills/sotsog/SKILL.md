@@ -80,9 +80,11 @@ If the user has already given answers, or says they can't answer follow-ups, don
 1. **Skeptic pass.** Argue the strongest case for the opposite of your lean. It cuts both ways: against the new idea, or against keeping things as they are.
 2. Recommend exactly one outcome, with your confidence:
    - **adopt**: take the idea as described;
-   - **adapt**: take some principles (name them) and leave the rest;
+   - **adapt**: take at least one of the idea's own defining principles, in a changed form (name the principles taken) and leave the rest;
    - **not now**: right idea, wrong time (name the blocker);
    - **no**: it doesn't fit, or its costs outweigh its gains.
+
+   When a principle that defines the idea is rated **conflicts** and isn't taken, the outcome is **no**, or **not now** when the blocker could lift. Compatible side practices, and anything borrowed from other sources, don't make it adapt: list them as worth borrowing in the decision document, saying whether they're taken now.
 3. The user decides. If they've asked you to write the decision down without waiting (or can't reply), record your recommendation as the decision and say it was made on their stated answers.
 
 ## 6. Write the decision document
@@ -91,6 +93,7 @@ One Markdown file, using the template in [references/decision-doc.md](references
 
 - **Go (adopt or adapt):** include the implementation brief: complete enough that an agent with no other context could start the work, including how to tell afterwards whether it worked.
 - **No or not now:** leave no question a cold reader would ask. Say why not, what would change the answer, whether anything is still worth borrowing (or that nothing is), and whether anything changes now.
+- **Every outcome:** settle each principle rated **partly** or **gap** that isn't taken, under "What we're not taking, and why": taken now, held for a named trigger, or dropped. The comparison table, "Revisit when" and that section must agree.
 - Never copy secrets, credentials or private data from the repo into the document.
 - In the sources section, give each source's link or file path and the date you read it.
 

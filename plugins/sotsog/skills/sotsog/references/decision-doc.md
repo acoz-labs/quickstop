@@ -28,7 +28,7 @@ Concrete triggers. On a go, includes when to roll back.
 (go only) Goal (one sentence); in scope / out of scope; changes in order, each naming the file or step; acceptance criteria; how to tell it worked (what to measure, when); how to verify and roll back; open risks.
 
 ## What we're not taking, and why
-(required on no and not now; on adapt, the principles left out)
+(required on no and not now; on adapt, the principles left out) Each principle rated partly or gap that isn't taken: taken now, held for a named trigger, or dropped. Anything worth borrowing, from the idea's side practices or other sources, and whether it's taken now.
 
 ## Sources
 One list item per source: link or file path and the date read (YYYY-MM-DD); who wrote it and what they gain; shown versus claimed; the conditions it was proven under.
@@ -126,7 +126,7 @@ Gain: two fewer pull requests twice a year. Cost: weeks of build work and a new 
 - The team grows past ten engineers.
 
 ## What we're not taking, and why
-All of it. Nothing is worth borrowing now: pinning the shared library by version already gives us its main safety benefit.
+All of it. One change updating a library and its users (partly today) is held for the first trigger above. Nothing is worth borrowing now: pinning the shared library by version already gives us its main safety benefit.
 
 ## Sources
 - The original talk, https://example.com/monorepo-talk, read 2026-09-13. Speaker's company sells the build tool; claims only.
