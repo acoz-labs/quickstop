@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "2026.11.05.7",
+  "version": "2026.11.05.8",
   "files": {
     "AGENTS.md": {
       "sha256": "973291b48f11f26891d4b64aabe8fcbe18b4aa74fca744e29b5d33dda6c307eb",
@@ -11,7 +11,7 @@
       "mode": "644"
     },
     "SDLC_VERSION": {
-      "sha256": "c7029fb4c9d1df09ca5bb54a59bf0ee9f7e373364b76634fc91b5514a6952b8e",
+      "sha256": "13fe9657b5850fb1c25e1d4f4fd7d96a255d1d3462e1c24b137b788eb4df3947",
       "mode": "644"
     },
     ".github/ISSUE_TEMPLATE/feature.yml": {
@@ -19,7 +19,7 @@
       "mode": "644"
     },
     "bin/sdlc": {
-      "sha256": "f58cd96365d939b78ce5fe21657ed766f3937383cfdd1983684c73d3a0ccc40b",
+      "sha256": "efcadf2dca6e7388a6ce1fc525fd5c6e12093ccd975ed42e9befa17212a1f262",
       "mode": "755"
     },
     "bin/sdlc-evidence": {
@@ -55,11 +55,11 @@
       "mode": "644"
     },
     "docs/operations/sdlc.md": {
-      "sha256": "d7356b0b147b5db5d0b51dc1e458381e9b23d3327daf56856ed2135cce77585c",
+      "sha256": "d22508b43ddb18a663c611fe04ccc0a51a682e6f05110b8ef7c0e1434f1afe32",
       "mode": "644"
     },
     "docs/operations/repo-standard.md": {
-      "sha256": "0847ead7b7ac3f0f46ed46499b1f337ed305b4c4e9a0cd86398a8f4461551ea8",
+      "sha256": "9b68fef726b92dfd0dbd5f73e915c6873e60edc97c85de8cd723c4d913444a07",
       "mode": "644"
     },
     "docs/operations/local-verification.md": {

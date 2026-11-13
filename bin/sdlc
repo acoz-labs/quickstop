@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
-VERSION = "2026.11.05.7"
+VERSION = "2026.11.05.8"
 MANIFEST = ".sdlc/managed.json"
 CONFIG = ".sdlc/config.json"
 MANAGED = [

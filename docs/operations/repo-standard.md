@@ -1,6 +1,6 @@
 # Managed repository standard
 
-SDLC template version: `2026.11.05.7`.
+SDLC template version: `2026.11.05.8`.
 
 The template owns the files in `.sdlc/managed.json`; `bin/sdlc check` verifies
 their hashes. That includes the `SDLC_VERSION` marker. `apply` takes over an
@@ -15,7 +15,10 @@ credentials, machine paths and personal setup are never template content.
 `docs/repository.md`, `REVIEW.md` and `.claude/settings.json`. `apply` adds one
 only where nothing exists and never overwrites. They are outside the manifest,
 so each repo edits its own. After a cascade, `bin/check-starters --root PATH
---ref origin/main` checks each target keeps their required parts.
+--ref origin/main` checks each target keeps their required parts and both
+shared `REVIEW.md` sections line for line. Create the `escape` label that
+`REVIEW.md` names in each new repository; GitHub doesn't copy labels from a
+template.
 
 ## Updating and cascading
 
