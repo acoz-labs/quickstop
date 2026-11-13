@@ -39,6 +39,24 @@
         "communication",
         "documentation"
       ]
+    },
+    {
+      "name": "sotsog",
+      "version": "0.1.0",
+      "description": "Research an outside idea, compare it honestly with what your repo or workflow already does, and write a decision document someone who wasn't there can act on: adopt, adapt, not now or no.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/acoz-labs/quickstop.git",
+        "path": "plugins/sotsog",
+        "sha": "0240a4e863e006cc3361e5b4f85f18e064d9dcf7"
+      },
+      "keywords": [
+        "research",
+        "decision-record",
+        "adoption",
+        "evaluation",
+        "agent-skills"
+      ]
     }
   ]
 }
