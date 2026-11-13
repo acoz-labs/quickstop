@@ -1,7 +1,0 @@
-{
-  "good": {"structure": true, "outcome": true, "depth_script": true, "depth": true, "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 0}},
-  "bad": {"structure": false, "outcome": false, "depth_script": false, "depth": false, "cold_read": {"decided": false, "why": false, "next": false}},
-  "borderline-pass": {"structure": true, "outcome": true, "depth_script": true, "depth": true, "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 1}},
-  "borderline-fail": {"structure": true, "outcome": true, "depth_script": true, "depth": false, "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"min": 2}},
-  "plain": {"structure": false, "outcome": true, "depth_script": true, "depth": true, "cold_read": {"decided": true, "why": true, "next": true}, "open_questions": {"max": 1}}
-}
